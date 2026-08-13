@@ -1,0 +1,17 @@
+--- a/src/platforms/rcore_drm.c
++++ b/src/platforms/rcore_drm.c
+@@ -1105,6 +1105,14 @@ static int InitEGL(void)
+ 
+     EGLBoolean result = eglMakeCurrent(platform.device, platform.surface, platform.surface, platform.context);
+ 
++    // DRM page-flip events provide the only display pacing. The EGL default
++    // swap interval is 1 on this stack; leaving it enabled waits once in
++    // eglSwapBuffers and then again for the DRM page flip.
++    if ((result != EGL_FALSE) && (eglSwapInterval(platform.device, 0) == EGL_FALSE))
++    {
++        TRACELOG(LOG_WARNING, "DISPLAY: Failed to disable EGL swap interval: 0x%04x", eglGetError());
++    }
++
+     // Check surface and context activation
+     if (result != EGL_FALSE)
+     {

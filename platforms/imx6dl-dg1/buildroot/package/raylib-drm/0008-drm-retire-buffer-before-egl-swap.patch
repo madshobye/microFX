@@ -1,0 +1,119 @@
+--- a/src/platforms/rcore_drm.c
++++ b/src/platforms/rcore_drm.c
+@@ -563,6 +563,46 @@ void SwapScreenBuffer(void)
+ void SwapScreenBuffer(void)
+ {
+     static unsigned int swapCount = 0;
++    static int flipPending = 0;
++    static int flipWaiting = 0;
++    static struct gbm_bo *retiredBO = NULL;
++    static uint32_t retiredFB = 0;
++    int result = 0;
++    drmEventContext event = { 0 };
++    event.version = DRM_EVENT_CONTEXT_VERSION;
++    event.page_flip_handler = PageFlipHandler;
++
++    // Complete the preceding flip and release its retired buffer before EGL
++    // tries to acquire another render buffer. Waiting later can exhaust the
++    // GBM buffer pool and cause eglSwapBuffers to block for an extra vblank.
++    double tWaitStart = SwapClockMs();
++    if (flipPending)
++    {
++        while (flipWaiting)
++        {
++            result = drmHandleEvent(platform.fd, &event);
++            if (result != 0)
++            {
++                TRACELOG(LOG_ERROR, "DISPLAY: drmHandleEvent() failed with result: %d", result);
++                flipWaiting = 0;
++                break;
++            }
++        }
++        flipPending = 0;
++    }
++    if (retiredFB)
++    {
++        result = drmModeRmFB(platform.fd, retiredFB);
++        if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeRmFB() failed with result: %d", result);
++        retiredFB = 0;
++    }
++    if (retiredBO)
++    {
++        gbm_surface_release_buffer(platform.gbmSurface, retiredBO);
++        retiredBO = NULL;
++    }
++    double tWaitEnd = SwapClockMs();
++
+     double t0 = SwapClockMs();
+     eglSwapBuffers(platform.device, platform.surface);
+     double t1 = SwapClockMs();
+@@ -574,15 +611,9 @@ void SwapScreenBuffer(void)
+ 
+     uint32_t fb = 0;
+-    int result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, 16, 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
++    result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, 16, 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
+     if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeAddFB() failed with result: %d", result);
+     double t3 = SwapClockMs();
+-    double tWaitStart = t3;
+-    double tWaitEnd = t3;
+     double tFlipSubmit = t3;
+-    static int flipPending = 0;
+-    static int flipWaiting = 0;
+-    static struct gbm_bo *retiredBO = NULL;
+-    static uint32_t retiredFB = 0;
+ 
+     if (!platform.prevFB)
+     {
+@@ -596,44 +627,6 @@ void SwapScreenBuffer(void)
+     }
+     else
+     {
+-        drmEventContext event = { 0 };
+-        event.version = DRM_EVENT_CONTEXT_VERSION;
+-        event.page_flip_handler = PageFlipHandler;
+-
+-        // Let rendering proceed while the previous page flip is pending. Only
+-        // drain its event immediately before submitting the newly rendered frame.
+-        tWaitStart = SwapClockMs();
+-        if (flipPending)
+-        {
+-            while (flipWaiting)
+-            {
+-                result = drmHandleEvent(platform.fd, &event);
+-                if (result != 0)
+-                {
+-                    TRACELOG(LOG_ERROR, "DISPLAY: drmHandleEvent() failed with result: %d", result);
+-                    flipWaiting = 0;
+-                    break;
+-                }
+-            }
+-            flipPending = 0;
+-        }
+-        tWaitEnd = SwapClockMs();
+-
+-        // The prior completion means the buffer preceding the current scanout
+-        // can now be retired safely.
+-        if (retiredFB)
+-        {
+-            result = drmModeRmFB(platform.fd, retiredFB);
+-            if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeRmFB() failed with result: %d", result);
+-            retiredFB = 0;
+-        }
+-        if (retiredBO)
+-        {
+-            gbm_surface_release_buffer(platform.gbmSurface, retiredBO);
+-            retiredBO = NULL;
+-        }
+-
+         flipWaiting = 1;
+         result = drmModePageFlip(platform.fd, platform.crtc->crtc_id, fb,
+             DRM_MODE_PAGE_FLIP_EVENT, &flipWaiting);
+@@ -663,7 +656,7 @@ void SwapScreenBuffer(void)
+         fprintf(stderr, "DRM_TIMING egl=%.2f lock=%.2f addfb=%.2f "
+             "wait_previous=%.2f flip_submit=%.2f post_submit=%.2f total=%.2f\n",
+             t1 - t0, t2 - t1, t3 - t2, tWaitEnd - tWaitStart,
+-            tFlipSubmit - tWaitEnd, t4 - tFlipSubmit, t5 - t0);
++            tFlipSubmit - t3, t4 - tFlipSubmit, (t5 - t0) + (tWaitEnd - tWaitStart));
+         fflush(stderr);
+     }
+ }

@@ -31,6 +31,7 @@ limactl shell "$VM_NAME" -- sh -lc "
   # and BusyBox so an image cannot silently retain older runtime components.
   make -C \"\$BR\" O=\"\$OUT\" \
     busybox-dirclean \
+    raylib-drm-dirclean \
     libpeer-microfx-dirclean \
     microfx-demo-dirclean \
     microfx-provision-dirclean \

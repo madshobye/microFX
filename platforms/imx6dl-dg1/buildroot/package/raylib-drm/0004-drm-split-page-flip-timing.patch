@@ -1,0 +1,32 @@
+--- a/src/platforms/rcore_drm.c
++++ b/src/platforms/rcore_drm.c
+@@ -579,6 +579,7 @@ void SwapScreenBuffer(void)
+     int result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, 16, 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
+     if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeAddFB() failed with result: %d", result);
+     double t3 = SwapClockMs();
++    double tFlipSubmit = t3;
+ 
+     if (!platform.prevFB)
+     {
+@@ -600,6 +601,7 @@ void SwapScreenBuffer(void)
+ 
+         result = drmModePageFlip(platform.fd, platform.crtc->crtc_id, fb,
+             DRM_MODE_PAGE_FLIP_EVENT, &waiting);
++        tFlipSubmit = SwapClockMs();
+         if (result == 0)
+         {
+             while (waiting)
+@@ -634,8 +636,11 @@ void SwapScreenBuffer(void)
+     swapCount++;
+     if ((swapCount % 120) == 0)
+     {
+-        TRACELOG(LOG_INFO, "DRM_TIMING egl=%.2f lock=%.2f addfb=%.2f flip=%.2f cleanup=%.2f total=%.2f",
+-            t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4, t5 - t0);
++        fprintf(stderr, "DRM_TIMING egl=%.2f lock=%.2f addfb=%.2f "
++            "flip_submit=%.2f flip_wait=%.2f cleanup=%.2f total=%.2f\n",
++            t1 - t0, t2 - t1, t3 - t2, tFlipSubmit - t3,
++            t4 - tFlipSubmit, t5 - t4, t5 - t0);
++        fflush(stderr);
+     }
+ }
+ 

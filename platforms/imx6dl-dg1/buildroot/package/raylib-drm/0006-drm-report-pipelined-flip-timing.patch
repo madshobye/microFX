@@ -1,0 +1,21 @@
+--- a/src/platforms/rcore_drm.c
++++ b/src/platforms/rcore_drm.c
+@@ -652,14 +652,15 @@ void SwapScreenBuffer(void)
+         platform.prevBO = bo;
+     }
+     double t4 = SwapClockMs();
++    double t5 = t4;
+ 
+     swapCount++;
+     if ((swapCount % 120) == 0)
+     {
+         fprintf(stderr, "DRM_TIMING egl=%.2f lock=%.2f addfb=%.2f "
+-            "flip_submit=%.2f flip_wait=%.2f cleanup=%.2f total=%.2f\n",
+-            t1 - t0, t2 - t1, t3 - t2, tFlipSubmit - t3,
+-            t4 - tFlipSubmit, t5 - t4, t5 - t0);
++            "wait_previous=%.2f flip_submit=%.2f post_submit=%.2f total=%.2f\n",
++            t1 - t0, t2 - t1, t3 - t2, tWaitEnd - tWaitStart,
++            tFlipSubmit - tWaitEnd, t4 - tFlipSubmit, t5 - t0);
+         fflush(stderr);
+     }
+ }
