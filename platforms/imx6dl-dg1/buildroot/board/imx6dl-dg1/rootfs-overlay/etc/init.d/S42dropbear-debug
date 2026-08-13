@@ -6,19 +6,22 @@ CANVAS_SSH=${CANVAS_SSH:-0}
 CANVAS_DEBUG=${CANVAS_DEBUG:-0}
 CANVAS_PERSIST_LOGS=${CANVAS_PERSIST_LOGS:-0}
 pidfile=/run/dropbear-debug.pid
-hostkey=/data/ssh/dropbear_ed25519_host_key
-if [ "$CANVAS_PERSIST_LOGS" = "1" ]; then
-  log=/data/state/dropbear.log
-else
-  log=/tmp/dropbear.log
+hostkey=/run/dropbear_ed25519_host_key
+log=/tmp/dropbear.log
+if grep -q ' /data ' /proc/mounts; then
+  hostkey=/data/ssh/dropbear_ed25519_host_key
+  [ "$CANVAS_PERSIST_LOGS" != "1" ] || log=/data/state/dropbear.log
 fi
 
 case "$1" in
   start)
     [ "$CANVAS_SSH" = "1" ] || exit 0
-    grep -q ' /data ' /proc/mounts || { echo "Cannot start debug SSH: /data is not mounted"; exit 1; }
-    mkdir -p /data/ssh
-    [ "$CANVAS_PERSIST_LOGS" != "1" ] || mkdir -p /data/state
+    if grep -q ' /data ' /proc/mounts; then
+      mkdir -p /data/ssh
+      [ "$CANVAS_PERSIST_LOGS" != "1" ] || mkdir -p /data/state
+    else
+      echo "Starting debug SSH with a temporary RAM host key"
+    fi
     if [ ! -s "$hostkey" ]; then
       umask 077
       /usr/bin/dropbearkey -t ed25519 -f "$hostkey"

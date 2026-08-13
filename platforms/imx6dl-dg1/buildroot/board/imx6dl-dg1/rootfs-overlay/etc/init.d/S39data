@@ -2,6 +2,14 @@
 
 case "$1" in
   start)
+    mkdir -p /data
+    attempts=0
+    while ! grep -q ' /data ' /proc/mounts && [ "$attempts" -lt 10 ]; do
+      mount /data 2>/tmp/microfx-data-mount.log || true
+      grep -q ' /data ' /proc/mounts && break
+      attempts=$((attempts + 1))
+      sleep 1
+    done
     if ! grep -q ' /data ' /proc/mounts; then
       echo "Persistent data partition is not mounted"
       exit 1

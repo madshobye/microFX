@@ -9,7 +9,7 @@ editor.session.setUseSoftTabs(true);
 editor.session.setTabSize(2);
 editor.setOptions({ showPrintMargin: false, wrap: true });
 
-const state = { peer: null, connection: null, pending: new Map(), assets: [] };
+const state = { peer: null, connection: null, connectTimer: null, pending: new Map(), assets: [], negotiation: 0 };
 const controls = ["#retrieve", "#save", "#run", "#asset-input"];
 const peerIdInput = $("#peer-id");
 peerIdInput.value = localStorage.getItem(`${product.slug}.peerId`) || `${product.slug}-demo`;
@@ -22,6 +22,78 @@ function setStatus(text, kind = "idle") {
 function message(text) { $("#message").textContent = text; }
 function enabled(value) { controls.forEach((id) => { $(id).disabled = !value; }); }
 function requestId() { return crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`; }
+
+function errorText(error, fallback = "PeerJS connection failed") {
+  return error?.message || error?.type || String(error || fallback) || fallback;
+}
+
+function shouldDropCandidate(candidate) {
+  if (!candidate) return false;
+  const protocol = candidate.match(/\s(udp|tcp)\s/i)?.[1]?.toLowerCase() || "";
+  return protocol === "tcp";
+}
+
+function sdpShape(sdp) {
+  const sections = String(sdp || "").split(/(?=^m=)/m).filter((part) => /^m=/m.test(part));
+  return sections.map((section) => {
+    const media = section.match(/^m=([^\r\n]+)/m)?.[1] || "?";
+    const mid = section.match(/^a=mid:([^\r\n]+)/m)?.[1] || "<none>";
+    return `m=${media} mid=${mid}`;
+  }).join(", ");
+}
+
+function candidateShape(candidate) {
+  const fields = String(candidate || "").trim().split(/\s+/);
+  const typeAt = fields.indexOf("typ");
+  return fields.length >= 8
+    ? `protocol=${fields[2]} endpoint=${fields[4]}:${fields[5]} type=${typeAt >= 0 ? fields[typeAt + 1] : "?"}`
+    : "malformed";
+}
+
+function installCandidateFilter(peer) {
+  const socket = peer?.socket;
+  if (!socket || typeof socket.send !== "function" || socket._microfxCandidateFilter) return;
+  const sendSignal = socket.send.bind(socket);
+  socket._microfxCandidateFilter = true;
+  socket.send = (signal) => {
+    const candidate = signal?.payload?.candidate?.candidate || "";
+    if (signal?.type === "OFFER") console.info(`NEGOTIATION ${state.negotiation} BROWSER offer-shape`, sdpShape(signal?.payload?.sdp?.sdp));
+    if (signal?.type === "CANDIDATE") {
+      const dropped = shouldDropCandidate(candidate);
+      console.info(`NEGOTIATION ${state.negotiation} BROWSER candidate-out`, candidateShape(candidate), dropped ? "dropped=tcp" : "");
+      if (dropped) return;
+    }
+    return sendSignal(signal);
+  };
+}
+
+function stripTcpCandidates(sdp) {
+  return String(sdp || "")
+    .split(/\r?\n/)
+    .filter((line) => !/^a=candidate:/i.test(line) || !/\stcp\s/i.test(line))
+    .join("\r\n");
+}
+
+function installAnswerFilter(connection) {
+  if (!connection || typeof connection.handleMessage !== "function" || connection._microfxAnswerFilter) return;
+  const handleMessage = connection.handleMessage.bind(connection);
+  connection._microfxAnswerFilter = true;
+  connection.handleMessage = (signal) => {
+    if (signal?.type === "ANSWER" && signal.payload?.sdp?.sdp) {
+      signal = {
+        ...signal,
+        payload: {
+          ...signal.payload,
+          sdp: { ...signal.payload.sdp, sdp: stripTcpCandidates(signal.payload.sdp.sdp) }
+        }
+      };
+      console.info(`NEGOTIATION ${state.negotiation} BROWSER answer-shape`, sdpShape(signal.payload.sdp.sdp));
+    } else if (signal?.type === "CANDIDATE") {
+      console.info(`NEGOTIATION ${state.negotiation} BROWSER candidate-in`, candidateShape(signal?.payload?.candidate?.candidate));
+    }
+    return handleMessage(signal);
+  };
+}
 
 async function decodeMessage(value) {
   if (typeof value === "string") return value;
@@ -53,6 +125,8 @@ function onResponse(response) {
 }
 
 function closeCurrent() {
+  clearTimeout(state.connectTimer);
+  state.connectTimer = null;
   state.connection?.close();
   state.peer?.destroy();
   state.connection = null;
@@ -62,21 +136,38 @@ function closeCurrent() {
 
 async function connect() {
   closeCurrent();
+  state.negotiation += 1;
+  console.info(`NEGOTIATION ${state.negotiation} BROWSER begin`);
   const remoteId = peerIdInput.value.trim();
   if (!remoteId) return;
   localStorage.setItem(`${product.slug}.peerId`, remoteId);
   setStatus("connecting");
   message(`Opening ${remoteId}`);
+  state.connectTimer = setTimeout(() => {
+    if (state.connection?.open) return;
+    setStatus("error", "error");
+    message(`Timed out opening WebRTC connection to ${remoteId}`);
+    closeCurrent();
+  }, 20000);
   const localId = `${product.slug}-web-${Math.floor(Math.random() * 1e9)}`;
   const peer = state.peer = new Peer(localId, {
-    host: "0.peerjs.com", port: 443, path: "/", key: "peerjs", secure: true, debug: 0
+    host: "0.peerjs.com", port: 443, path: "/", key: "peerjs", secure: true, debug: 1
   });
-  peer.on("error", (error) => { setStatus("error", "error"); message(error.message); });
+  peer.on("error", (error) => {
+    clearTimeout(state.connectTimer);
+    state.connectTimer = null;
+    setStatus("error", "error");
+    message(errorText(error));
+  });
   peer.on("open", () => {
+    installCandidateFilter(peer);
     const connection = state.connection = peer.connect(remoteId, {
       serialization: "raw", reliable: true, label: `${product.slug}-editor`
     });
+    installAnswerFilter(connection);
     connection.on("open", async () => {
+      clearTimeout(state.connectTimer);
+      state.connectTimer = null;
       setStatus("online", "online");
       enabled(true);
       message(`Connected to ${remoteId}`);
@@ -87,7 +178,12 @@ async function connect() {
       catch (error) { message(`Invalid device response: ${error.message}`); }
     });
     connection.on("close", () => { setStatus("offline"); enabled(false); message("Connection closed"); });
-    connection.on("error", (error) => { setStatus("error", "error"); message(error.message); });
+    connection.on("error", (error) => {
+      clearTimeout(state.connectTimer);
+      state.connectTimer = null;
+      setStatus("error", "error");
+      message(errorText(error, "WebRTC data channel failed"));
+    });
   });
 }
 

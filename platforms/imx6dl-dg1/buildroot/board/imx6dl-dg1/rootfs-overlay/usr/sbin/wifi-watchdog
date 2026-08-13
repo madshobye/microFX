@@ -1,0 +1,30 @@
+#!/bin/sh
+
+# Recover the client connection without persistent writes. Three consecutive
+# failures avoid disrupting a healthy association during a brief AP roam.
+log=/tmp/microfx-wifi-watchdog.log
+interface=wlan1
+failures=0
+
+echo "Wi-Fi watchdog started" >"$log"
+sleep 45
+
+while :; do
+  state=$(wpa_cli -i "$interface" status 2>/dev/null | sed -n 's/^wpa_state=//p')
+  address=$(ip -4 address show dev "$interface" 2>/dev/null | sed -n 's/.*inet \([^ ]*\).*/\1/p' | head -n 1)
+
+  if [ "$state" = "COMPLETED" ] && [ -n "$address" ]; then
+    failures=0
+  else
+    failures=$((failures + 1))
+    echo "$(date) unhealthy state=${state:-missing} address=${address:-missing} failures=$failures" >>"$log"
+  fi
+
+  if [ "$failures" -ge 3 ]; then
+    echo "$(date) restarting client connection" >>"$log"
+    /usr/sbin/wifi-connect
+    failures=0
+    sleep 30
+  fi
+  sleep 10
+done

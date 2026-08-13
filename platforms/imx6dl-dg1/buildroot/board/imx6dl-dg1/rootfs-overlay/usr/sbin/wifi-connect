@@ -18,6 +18,14 @@ exec >>"$log" 2>&1
 [ "$CANVAS_DEBUG" = "1" ] && set -x
 date
 
+lock=/run/wifi-connect.lock
+if ! mkdir "$lock" 2>/dev/null; then
+  echo "Wi-Fi connection attempt already active"
+  exit 0
+fi
+trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+trap 'exit 0' INT TERM
+
 tries=0
 while [ ! -d /sys/class/net/wlan1 ] && [ "$tries" -lt 20 ]; do
   tries=$((tries + 1)); sleep 1
@@ -30,6 +38,13 @@ iw reg set DK || true
 ip link set "$interface" up
 wpa_pid="/run/wpa_supplicant-${interface}.pid"
 dhcp_pid="/run/udhcpc-${interface}.pid"
+for pidfile in "$dhcp_pid" "$wpa_pid"; do
+  if [ -r "$pidfile" ]; then
+    kill "$(cat "$pidfile")" 2>/dev/null || true
+    rm -f "$pidfile"
+  fi
+done
+ip address flush dev "$interface" 2>/dev/null || true
 [ "$CANVAS_DEBUG" = "1" ] && wpa_debug=-dd || wpa_debug=
 wpa_supplicant -B $wpa_debug -t -f "$wpa_log" -P "$wpa_pid" -i "$interface" -c "$config"
 

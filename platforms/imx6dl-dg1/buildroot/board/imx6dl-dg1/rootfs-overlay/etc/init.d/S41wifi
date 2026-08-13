@@ -4,8 +4,19 @@ case "$1" in
   start)
     echo "Starting Wi-Fi connection in background"
     /usr/sbin/wifi-connect &
+    echo $! >/run/wifi-connect.pid
+    if [ ! -r /run/wifi-watchdog.pid ] || ! kill -0 "$(cat /run/wifi-watchdog.pid)" 2>/dev/null; then
+      /usr/sbin/wifi-watchdog &
+      echo $! >/run/wifi-watchdog.pid
+    fi
     ;;
   stop)
+    for pidfile in /run/wifi-connect.pid /run/wifi-watchdog.pid; do
+      if [ -r "$pidfile" ]; then
+        kill "$(cat "$pidfile")" 2>/dev/null || true
+        rm -f "$pidfile"
+      fi
+    done
     for pidfile in /run/udhcpc-wlan?.pid /run/wpa_supplicant-wlan?.pid; do
       if [ -r "$pidfile" ]; then
         kill "$(cat "$pidfile")" 2>/dev/null || true

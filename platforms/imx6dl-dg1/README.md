@@ -12,11 +12,9 @@ The current adapter uses the board's four-partition SD layout:
 - partition 4: persistent application and configuration data mounted at
   `/data`.
 
-The boot environment currently expects `/boot/airtame-dg1.img` and
-`/boot/airtame-dg1.dtb`; these compatibility filenames are produced from the
-microFX kernel configuration and `imx6dl-microfx-dg1.dts`. Bootloader
-replacement and automated root-slot switching are separate platform
-milestones.
+The root filesystem carries the kernel and device tree as
+`/boot/microfx-imx6dl-dg1.img` and `/boot/microfx-imx6dl-dg1.dtb`, produced
+from the microFX kernel configuration and `imx6dl-microfx-dg1.dts`.
 
 ## Build
 
@@ -90,6 +88,11 @@ application API.
 
 The development onboarding profile displays the setup password on HDMI. A
 production deployment should provide its own credential and security policy.
+
+The board profile has no persistent real-time clock. `S42time` waits for
+networking and uses BusyBox NTP to initialize the clock from public time
+servers. It runs before the PeerJS service, retries asynchronously while Wi-Fi
+comes online, and writes diagnostics only to `/tmp/microfx-time-sync.log`.
 
 ## SSH deployment
 

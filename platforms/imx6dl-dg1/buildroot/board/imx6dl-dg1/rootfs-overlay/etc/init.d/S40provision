@@ -6,6 +6,20 @@ MICROFX_PRODUCT_NAME=${MICROFX_PRODUCT_NAME:-Graphics}
 MICROFX_SETUP_SSID=${MICROFX_SETUP_SSID:-graphics-setup}
 MICROFX_SETUP_PASSWORD=${MICROFX_SETUP_PASSWORD:-graphicssetup}
 
+close_portal() {
+  for pidfile in /run/hostapd-microfx.pid /run/dnsmasq-microfx.pid; do
+    [ -r "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
+    rm -f "$pidfile"
+  done
+  killall httpd 2>/dev/null || true
+  if [ -r /run/microfx-provision-watch.pid ]; then
+    kill "$(cat /run/microfx-provision-watch.pid)" 2>/dev/null || true
+    rm -f /run/microfx-provision-watch.pid
+  fi
+  ip address flush dev wlan0 2>/dev/null || true
+  ip link set wlan0 down 2>/dev/null || true
+}
+
 case "$1" in
   start)
     tries=0
@@ -40,16 +54,24 @@ case "$1" in
     ) &
     echo $! >/run/microfx-provision-watch.pid
     echo "Setup AP ready at http://10.42.0.1"
+    if [ -r /data/config/wpa_supplicant.conf ] || [ -r /etc/wpa_supplicant.conf ]; then
+      (
+        sleep 40
+        /etc/init.d/S40provision close
+      ) &
+      echo $! >/run/microfx-provision-expire.pid
+      echo "Setup AP will close after the 40-second onboarding window"
+    fi
+    ;;
+  close)
+    close_portal
+    rm -f /run/microfx-provision-expire.pid
     ;;
   stop)
-    for pidfile in /run/hostapd-microfx.pid /run/dnsmasq-microfx.pid; do
-      [ -r "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
-      rm -f "$pidfile"
-    done
-    killall httpd 2>/dev/null || true
-    if [ -r /run/microfx-provision-watch.pid ]; then
-      kill "$(cat /run/microfx-provision-watch.pid)" 2>/dev/null || true
-      rm -f /run/microfx-provision-watch.pid
+    close_portal
+    if [ -r /run/microfx-provision-expire.pid ]; then
+      kill "$(cat /run/microfx-provision-expire.pid)" 2>/dev/null || true
+      rm -f /run/microfx-provision-expire.pid
     fi
     ;;
   restart) "$0" stop; "$0" start ;;

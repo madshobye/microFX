@@ -2,9 +2,11 @@
 
 case "$1" in
   start)
-    mkdir -p /data/apps/current/assets /data/config
-    if [ ! -s /data/apps/current/main.js ]; then
-      cp /usr/share/microfx/main.js /data/apps/current/main.js
+    if grep -q ' /data ' /proc/mounts; then
+      mkdir -p /data/apps/current/assets /data/config
+      if [ ! -s /data/apps/current/main.js ]; then
+        cp /usr/share/microfx/main.js /data/apps/current/main.js
+      fi
     fi
     echo "Starting PeerJS bridge"
     (

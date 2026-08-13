@@ -48,7 +48,9 @@ fi
 
 while :; do
     app=/usr/bin/canvas-demo
-    [ -x /data/apps/current/canvas-demo ] && app=/data/apps/current/canvas-demo
+    grep -q ' /data ' /proc/mounts &&
+      [ -x /data/apps/current/canvas-demo ] &&
+      app=/data/apps/current/canvas-demo
     echo "Starting $app" >>"$log"
     "$app" >>"$log" 2>&1 &
     child=$!

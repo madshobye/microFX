@@ -39,6 +39,7 @@ struct Bridge {
   std::string remote_id;
   std::string connection_id;
   bool signaling_open = false;
+  unsigned negotiation = 0;
 };
 
 Bridge g;
@@ -50,32 +51,113 @@ std::string json_print(cJSON* value) {
   return result;
 }
 
+std::string application_mid(const std::string& sdp) {
+  const size_t media = sdp.find("m=application ");
+  if (media == std::string::npos) return {};
+  const size_t next_media = sdp.find("\r\nm=", media + 1);
+  const size_t mid = sdp.find("a=mid:", media);
+  if (mid == std::string::npos || (next_media != std::string::npos && mid > next_media)) return {};
+  const size_t value = mid + std::strlen("a=mid:");
+  const size_t end = sdp.find("\r\n", value);
+  if (end == std::string::npos || end == value) return {};
+  return sdp.substr(value, end - value);
+}
+
+std::string sdp_shape(const std::string& sdp) {
+  std::ostringstream out;
+  size_t media = sdp.find("m=");
+  bool first = true;
+  while (media != std::string::npos) {
+    const size_t line_end = sdp.find("\r\n", media);
+    const size_t section_end = sdp.find("\r\nm=", media + 1);
+    const size_t mid = sdp.find("a=mid:", media);
+    if (!first) out << ", ";
+    first = false;
+    out << sdp.substr(media, (line_end == std::string::npos ? sdp.size() : line_end) - media);
+    out << " mid=";
+    if (mid != std::string::npos && (section_end == std::string::npos || mid < section_end)) {
+      const size_t value = mid + std::strlen("a=mid:");
+      const size_t end = sdp.find("\r\n", value);
+      out << sdp.substr(value, (end == std::string::npos ? sdp.size() : end) - value);
+    } else {
+      out << "<none>";
+    }
+    media = section_end == std::string::npos ? std::string::npos : section_end + 2;
+  }
+  return out.str();
+}
+
+std::string candidate_shape(const char* candidate) {
+  std::istringstream input(candidate ? candidate : "");
+  std::vector<std::string> fields;
+  std::string field;
+  while (input >> field) fields.push_back(field);
+  std::ostringstream out;
+  if (fields.size() >= 8) {
+    out << "protocol=" << fields[2] << " endpoint=" << fields[4] << ':' << fields[5];
+    for (size_t i = 6; i + 1 < fields.size(); ++i) {
+      if (fields[i] == "typ") { out << " type=" << fields[i + 1]; break; }
+    }
+  } else {
+    out << "malformed";
+  }
+  return out.str();
+}
+
+void replace_all(std::string& text, const std::string& from, const std::string& to) {
+  if (from.empty()) return;
+  size_t position = 0;
+  while ((position = text.find(from, position)) != std::string::npos) {
+    text.replace(position, from.size(), to);
+    position += to.size();
+  }
+}
+
+std::string conform_answer_to_offer(const char* answer, const char* offer) {
+  std::string result = answer ? answer : "";
+  const std::string offered_mid = application_mid(offer ? offer : "");
+  if (!offered_mid.empty() && offered_mid != "datachannel") {
+    replace_all(result, "a=group:BUNDLE datachannel", "a=group:BUNDLE " + offered_mid);
+    replace_all(result, "a=mid:datachannel", "a=mid:" + offered_mid);
+  }
+  return result;
+}
+
 void queue_signal(std::string message) {
   std::lock_guard lock(g.mutex);
   g.outbound.push(std::move(message));
   if (g.context) lws_cancel_service(g.context);
 }
 
-void send_peer_json(cJSON* value) {
+void send_peer_json(cJSON* value, uint16_t sid) {
   std::string output = json_print(value);
   cJSON_Delete(value);
   std::lock_guard lock(g.mutex);
-  if (g.peer) peer_connection_datachannel_send(g.peer, output.data(), output.size());
+  if (g.peer) {
+    const int result = peer_connection_datachannel_send_sid(g.peer, output.data(), output.size(), sid);
+    std::fprintf(stderr, "NEGOTIATION %u DEVICE data-out sid=%u bytes=%zu result=%d\n",
+                 g.negotiation, sid, output.size(), result);
+  }
 }
 
-void on_data(char* message, size_t length, void*, uint16_t) {
-  send_peer_json(microfx::handle_project_command(message, length, kProjectRoot, kReloadSignal));
+void on_data(char* message, size_t length, void*, uint16_t sid) {
+  std::fprintf(stderr, "NEGOTIATION %u DEVICE data-in sid=%u bytes=%zu\n",
+               g.negotiation, sid, length);
+  send_peer_json(microfx::handle_project_command(message, length, kProjectRoot, kReloadSignal), sid);
 }
 
 void on_open(void*) { std::fprintf(stderr, "peer data channel open\n"); }
 void on_close(void*) { std::fprintf(stderr, "peer data channel closed\n"); }
 
 void on_state(PeerConnectionState state, void*) {
-  std::fprintf(stderr, "peer state: %s\n", peer_connection_state_to_string(state));
+  std::fprintf(stderr, "NEGOTIATION %u DEVICE ice-state %s\n", g.negotiation,
+               peer_connection_state_to_string(state));
 }
 
 void send_candidate(char* candidate, void*) {
   if (!candidate || std::strncmp(candidate, "candidate:", 10) != 0) return;
+  std::fprintf(stderr, "NEGOTIATION %u DEVICE candidate-out %s\n", g.negotiation,
+               candidate_shape(candidate).c_str());
   cJSON* root = cJSON_CreateObject();
   cJSON_AddStringToObject(root, "type", "CANDIDATE");
   cJSON_AddStringToObject(root, "dst", g.remote_id.c_str());
@@ -105,6 +187,11 @@ bool create_answer(cJSON* envelope) {
   if (!cJSON_IsString(source) || !cJSON_IsString(connection) || !cJSON_IsString(sdp)) return false;
 
   std::lock_guard lock(g.mutex);
+  ++g.negotiation;
+  std::fprintf(stderr, "NEGOTIATION %u DEVICE begin connection=%s\n", g.negotiation,
+               connection->valuestring);
+  std::fprintf(stderr, "NEGOTIATION %u DEVICE offer-shape %s\n", g.negotiation,
+               sdp_shape(sdp->valuestring).c_str());
   destroy_peer_locked();
   g.remote_id = source->valuestring;
   g.connection_id = connection->valuestring;
@@ -119,6 +206,9 @@ bool create_answer(cJSON* envelope) {
   peer_connection_set_remote_description(g.peer, sdp->valuestring, SDP_TYPE_OFFER);
   const char* answer = peer_connection_create_answer(g.peer);
   if (!answer) return false;
+  const std::string conformed_answer = conform_answer_to_offer(answer, sdp->valuestring);
+  std::fprintf(stderr, "NEGOTIATION %u DEVICE answer-shape %s\n", g.negotiation,
+               sdp_shape(conformed_answer).c_str());
 
   cJSON* root = cJSON_CreateObject();
   cJSON_AddStringToObject(root, "type", "ANSWER");
@@ -126,7 +216,7 @@ bool create_answer(cJSON* envelope) {
   cJSON* answer_payload = cJSON_AddObjectToObject(root, "payload");
   cJSON* answer_sdp = cJSON_AddObjectToObject(answer_payload, "sdp");
   cJSON_AddStringToObject(answer_sdp, "type", "answer");
-  cJSON_AddStringToObject(answer_sdp, "sdp", answer);
+  cJSON_AddStringToObject(answer_sdp, "sdp", conformed_answer.c_str());
   cJSON_AddStringToObject(answer_payload, "type", "data");
   cJSON_AddStringToObject(answer_payload, "connectionId", g.connection_id.c_str());
   g.outbound.push(json_print(root));
@@ -139,7 +229,11 @@ void add_candidate(cJSON* envelope) {
   cJSON* payload = cJSON_GetObjectItemCaseSensitive(envelope, "payload");
   cJSON* body = cJSON_GetObjectItemCaseSensitive(payload, "candidate");
   cJSON* candidate = cJSON_GetObjectItemCaseSensitive(body, "candidate");
-  if (!cJSON_IsString(candidate) || std::strstr(candidate->valuestring, " tcp ")) return;
+  if (!cJSON_IsString(candidate)) return;
+  const bool tcp = std::strstr(candidate->valuestring, " tcp ") != nullptr;
+  std::fprintf(stderr, "NEGOTIATION %u DEVICE candidate-in %s%s\n", g.negotiation,
+               candidate_shape(candidate->valuestring).c_str(), tcp ? " dropped=tcp" : "");
+  if (tcp) return;
   std::lock_guard lock(g.mutex);
   if (g.peer) peer_connection_add_ice_candidate(g.peer, candidate->valuestring);
 }

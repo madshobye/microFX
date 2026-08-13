@@ -1,0 +1,59 @@
+diff --git a/src/dtls_srtp.c b/src/dtls_srtp.c
+index dd54616..52694fa 100644
+--- a/src/dtls_srtp.c
++++ b/src/dtls_srtp.c
+@@ -166,6 +166,18 @@ int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
+   mbedtls_pk_init(&dtls_srtp->pkey);
+   mbedtls_entropy_init(&dtls_srtp->entropy);
+   mbedtls_ctr_drbg_init(&dtls_srtp->ctr_drbg);
++
++  if (dtls_srtp->role == DTLS_SRTP_ROLE_SERVER) {
++    mbedtls_ssl_config_defaults(&dtls_srtp->conf,
++                                MBEDTLS_SSL_IS_SERVER,
++                                MBEDTLS_SSL_TRANSPORT_DATAGRAM,
++                                MBEDTLS_SSL_PRESET_DEFAULT);
++  } else {
++    mbedtls_ssl_config_defaults(&dtls_srtp->conf,
++                                MBEDTLS_SSL_IS_CLIENT,
++                                MBEDTLS_SSL_TRANSPORT_DATAGRAM,
++                                MBEDTLS_SSL_PRESET_DEFAULT);
++  }
+ #if CONFIG_MBEDTLS_DEBUG
+   mbedtls_debug_set_threshold(3);
+   mbedtls_ssl_conf_dbg(&dtls_srtp->conf, dtls_srtp_debug, NULL);
+@@ -174,9 +186,9 @@ int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
+ 
+   mbedtls_ssl_conf_verify(&dtls_srtp->conf, dtls_srtp_cert_verify, NULL);
+ 
+-  mbedtls_ssl_conf_authmode(&dtls_srtp->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+-
+-  mbedtls_ssl_conf_ca_chain(&dtls_srtp->conf, &dtls_srtp->cert, NULL);
++  /* WebRTC authenticates the self-signed peer certificate against the
++   * fingerprint carried in SDP, not against a hostname/WebPKI CA chain. */
++  mbedtls_ssl_conf_authmode(&dtls_srtp->conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
+ 
+   mbedtls_ssl_conf_own_cert(&dtls_srtp->conf, &dtls_srtp->cert, &dtls_srtp->pkey);
+ 
+@@ -185,22 +197,12 @@ int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
+   mbedtls_ssl_conf_read_timeout(&dtls_srtp->conf, 1000);
+ 
+   if (dtls_srtp->role == DTLS_SRTP_ROLE_SERVER) {
+-    mbedtls_ssl_config_defaults(&dtls_srtp->conf,
+-                                MBEDTLS_SSL_IS_SERVER,
+-                                MBEDTLS_SSL_TRANSPORT_DATAGRAM,
+-                                MBEDTLS_SSL_PRESET_DEFAULT);
+-
+     mbedtls_ssl_cookie_init(&dtls_srtp->cookie_ctx);
+ 
+     mbedtls_ssl_cookie_setup(&dtls_srtp->cookie_ctx, mbedtls_ctr_drbg_random, &dtls_srtp->ctr_drbg);
+ 
+     mbedtls_ssl_conf_dtls_cookies(&dtls_srtp->conf, mbedtls_ssl_cookie_write, mbedtls_ssl_cookie_check, &dtls_srtp->cookie_ctx);
+ 
+-  } else {
+-    mbedtls_ssl_config_defaults(&dtls_srtp->conf,
+-                                MBEDTLS_SSL_IS_CLIENT,
+-                                MBEDTLS_SSL_TRANSPORT_DATAGRAM,
+-                                MBEDTLS_SSL_PRESET_DEFAULT);
+   }
+ 
+   dtls_srtp_x509_digest(&dtls_srtp->cert, dtls_srtp->local_fingerprint);

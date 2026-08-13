@@ -3,6 +3,7 @@ set -eu
 
 rm -f "${TARGET_DIR}/etc/init.d/S99canvas"
 rm -f "${TARGET_DIR}/etc/init.d/S50dropbear"
+find "${TARGET_DIR}" -name '._*' -delete
 
 PRIVATE_DIR="${BR2_EXTERNAL_IMX6DL_DG1_PATH}/../private"
 PRIVATE_WIFI="${PRIVATE_DIR}/wpa_supplicant.conf"
@@ -22,5 +23,10 @@ if [ -f "${PRIVATE_RUNTIME_CONFIG}" ]; then
 fi
 
 mkdir -p "${TARGET_DIR}/boot"
-cp "${BINARIES_DIR}/zImage" "${TARGET_DIR}/boot/airtame-dg1.img"
-cp "${BINARIES_DIR}/imx6dl-microfx-dg1.dtb" "${TARGET_DIR}/boot/airtame-dg1.dtb"
+find "${TARGET_DIR}/boot" -mindepth 1 -maxdepth 1 -type f \
+    ! -name uEnv.txt \
+    ! -name microfx-imx6dl-dg1.img \
+    ! -name microfx-imx6dl-dg1.dtb \
+    -delete
+cp "${BINARIES_DIR}/zImage" "${TARGET_DIR}/boot/microfx-imx6dl-dg1.img"
+cp "${BINARIES_DIR}/imx6dl-microfx-dg1.dtb" "${TARGET_DIR}/boot/microfx-imx6dl-dg1.dtb"

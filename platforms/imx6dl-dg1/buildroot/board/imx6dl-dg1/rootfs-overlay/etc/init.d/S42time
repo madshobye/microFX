@@ -1,0 +1,52 @@
+#!/bin/sh
+
+pidfile=/run/microfx-time-sync.pid
+log=/tmp/microfx-time-sync.log
+
+case "$1" in
+  start)
+    # The DG1 profile has no persistent real-time clock. Start asynchronously
+    # because Wi-Fi association and DHCP are also asynchronous at boot. PeerJS
+    # retries independently until this service makes TLS certificate dates
+    # meaningful.
+    if [ "$(date -u +%Y)" -ge 2024 ]; then
+      echo "System clock already valid: $(date -u -Iseconds)" >"$log"
+      exit 0
+    fi
+    echo "Starting network time synchronization"
+    (
+      attempts=0
+      while [ "$attempts" -lt 24 ]; do
+        attempts=$((attempts + 1))
+        echo "NTP attempt $attempts"
+        # Some BusyBox ntpd failure paths still return success (for example
+        # while DNS or Wi-Fi is only partially ready).  The exit status alone
+        # therefore cannot prove that TLS has a usable clock.
+        timeout 20 ntpd -q \
+          -p time.cloudflare.com \
+          -p pool.ntp.org || true
+
+        year=$(date -u +%Y)
+        if [ "$year" -ge 2024 ]; then
+          echo "System clock synchronized: $(date -u -Iseconds)"
+          exit 0
+        fi
+        echo "Clock still invalid after attempt $attempts: $(date -u -Iseconds)"
+        sleep 5
+      done
+      echo "Unable to synchronize the system clock"
+      exit 1
+    ) >"$log" 2>&1 &
+    echo $! >"$pidfile"
+    ;;
+  stop)
+    if [ -r "$pidfile" ]; then
+      kill "$(cat "$pidfile")" 2>/dev/null || true
+      rm -f "$pidfile"
+    fi
+    ;;
+  restart)
+    "$0" stop
+    "$0" start
+    ;;
+esac
