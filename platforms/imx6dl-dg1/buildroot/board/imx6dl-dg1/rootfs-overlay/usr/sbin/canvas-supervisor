@@ -1,0 +1,99 @@
+#!/bin/sh
+
+config=/etc/canvas.conf
+[ -r "$config" ] && . "$config"
+product_config=/etc/microfx-product.conf
+[ -r "$product_config" ] && . "$product_config"
+CANVAS_PERSIST_LOGS=${CANVAS_PERSIST_LOGS:-0}
+CANVAS_FAIL_FAST=${CANVAS_FAIL_FAST:-1}
+MICROFX_DEFAULT_PEER_ID=${MICROFX_DEFAULT_PEER_ID:-graphics-demo}
+MICROFX_SETUP_SSID=${MICROFX_SETUP_SSID:-graphics-setup}
+MICROFX_SETUP_PASSWORD=${MICROFX_SETUP_PASSWORD:-graphicssetup}
+
+if [ "$CANVAS_PERSIST_LOGS" = "1" ] && grep -q ' /data ' /proc/mounts; then
+    log=/data/state/canvas.log
+else
+    log=/tmp/canvas.log
+fi
+
+child=
+trap 'test -n "$child" && kill "$child" 2>/dev/null; exit 0' TERM INT
+
+rollback() {
+    if [ -L /data/apps/previous ]; then
+        previous=$(readlink /data/apps/previous)
+        ln -s "$previous" /data/apps/current.new
+        mv -Tf /data/apps/current.new /data/apps/current
+        echo "Rolled back canvas application to $previous" >>"$log"
+    fi
+    rm -f /data/state/app-pending
+}
+
+if [ ! -e /run/microfx-onboarding-shown ] &&
+   [ -x /usr/bin/canvas-demo ] &&
+   [ -r /usr/share/microfx/onboarding.js ]; then
+    touch /run/microfx-onboarding-shown
+    peer_id=$MICROFX_DEFAULT_PEER_ID
+    [ ! -s /data/config/peer-id ] || peer_id=$(head -n 1 /data/config/peer-id)
+    echo "Starting 40-second onboarding application" >>"$log"
+    MICROFX_SCRIPT=/usr/share/microfx/onboarding.js \
+    MICROFX_PEER_ID="$peer_id" \
+    MICROFX_AP_SSID="$MICROFX_SETUP_SSID" \
+    MICROFX_AP_PASSWORD="$MICROFX_SETUP_PASSWORD" \
+      /usr/bin/canvas-demo >>"$log" 2>&1 &
+    child=$!
+    wait "$child" || echo "Onboarding application exited with an error" >>"$log"
+    child=
+fi
+
+while :; do
+    app=/usr/bin/canvas-demo
+    [ -x /data/apps/current/canvas-demo ] && app=/data/apps/current/canvas-demo
+    echo "Starting $app" >>"$log"
+    "$app" >>"$log" 2>&1 &
+    child=$!
+    requested_reload=0
+
+    if [ -f /data/state/app-pending ]; then
+        sleep 10
+        if kill -0 "$child" 2>/dev/null; then
+            rm -f /data/state/app-pending
+            echo "Canvas application passed its health window" >>"$log"
+        else
+            wait "$child" 2>/dev/null || true
+            child=
+            rm -f /data/state/app-pending
+            echo "Canvas pending release failed its health window" >>"$log"
+            if [ "$CANVAS_FAIL_FAST" = "1" ]; then
+                echo "Fail-fast enabled; canvas supervisor is stopping" >>"$log"
+                exit 1
+            fi
+            rollback
+            sleep 1
+            continue
+        fi
+    fi
+
+    while kill -0 "$child" 2>/dev/null; do
+        if [ -f /run/microfx-project-reload ]; then
+            rm -f /run/microfx-project-reload
+            requested_reload=1
+            echo "Reloading active graphics project" >>"$log"
+            kill "$child" 2>/dev/null || true
+            break
+        fi
+        sleep 1
+    done
+    wait "$child" 2>/dev/null || true
+    child=
+    if [ "$requested_reload" = "1" ]; then
+        sleep 1
+        continue
+    fi
+    if [ "$CANVAS_FAIL_FAST" = "1" ]; then
+        echo "Canvas application exited; fail-fast supervisor is stopping" >>"$log"
+        exit 1
+    fi
+    echo "Canvas application exited; restarting" >>"$log"
+    sleep 1
+done

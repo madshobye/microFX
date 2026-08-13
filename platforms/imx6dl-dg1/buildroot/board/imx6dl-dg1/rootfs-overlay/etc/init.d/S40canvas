@@ -1,0 +1,22 @@
+#!/bin/sh
+
+pidfile=/run/canvas-supervisor.pid
+
+case "$1" in
+  start)
+    echo "Starting graphics supervisor"
+    /usr/sbin/canvas-supervisor &
+    echo $! >"$pidfile"
+    ;;
+  stop)
+    if [ -r "$pidfile" ]; then
+      kill "$(cat "$pidfile")" 2>/dev/null || true
+      rm -f "$pidfile"
+    fi
+    killall canvas-demo 2>/dev/null || true
+    ;;
+  restart)
+    "$0" stop
+    "$0" start
+    ;;
+esac

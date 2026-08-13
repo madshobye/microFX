@@ -1,0 +1,192 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/dts-v1/;
+
+#include "nxp/imx/imx6dl.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	model = "i.MX6DL DG1 graphics platform";
+	compatible = "microfx,imx6dl-dg1", "fsl,imx6dl";
+
+	aliases {
+		mmc0 = &usdhc3;
+		mmc1 = &usdhc1;
+		mmc2 = &usdhc2;
+		serial0 = &uart1;
+	};
+
+	chosen {
+		stdout-path = &uart1;
+	};
+
+	memory@10000000 {
+		device_type = "memory";
+		reg = <0x10000000 0x20000000>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		status {
+			label = "microfx:status";
+			gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "heartbeat";
+		};
+	};
+
+	keys {
+		compatible = "gpio-keys";
+		user-button {
+			label = "DG1 button";
+			linux,code = <KEY_OK>;
+			gpios = <&gpio7 12 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	reg_usb_h1_vbus: regulator-usb-h1-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_h1_vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&gpio3 31 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	reg_wlan1: regulator-wlan1 {
+		compatible = "regulator-fixed";
+		regulator-name = "wlan1_3p3v";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio2 22 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-always-on;
+	};
+
+	reg_wlan2: regulator-wlan2 {
+		compatible = "regulator-fixed";
+		regulator-name = "wlan2_3p3v";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio2 21 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-always-on;
+	};
+};
+
+&hdmi {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_hdmi_ddc &pinctrl_hdmi_cec>;
+	status = "okay";
+};
+
+&iomuxc {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_hog>;
+
+	pinctrl_hog: hoggrp {
+		fsl,pins = <
+			0x20c 0x5dc 0x000 0x0 0x0 0x130b0
+			0x27c 0x664 0x000 0x4 0x0 0x130b0
+			0x180 0x550 0x000 0x5 0x0 0x100b1
+			0x17c 0x54c 0x000 0x5 0x0 0x10081
+			0x110 0x4e0 0x000 0x5 0x0 0x100b1
+			0x114 0x4e4 0x000 0x5 0x0 0x100b1
+			0x218 0x5e8 0x000 0x5 0x0 0x1b081
+			0x240 0x610 0x000 0x5 0x0 0x100b1
+		>;
+	};
+
+	pinctrl_uart1: uart1grp {
+		fsl,pins = <
+			0x04c 0x360 0x000 0x3 0x0 0x1b0b1
+			0x050 0x364 0x8fc 0x3 0x1 0x1b0b1
+		>;
+	};
+
+	pinctrl_hdmi_ddc: hdmiddcgrp {
+		fsl,pins = <
+			0x250 0x638 0x860 0x2 0x1 0x4001b8b1
+			0x264 0x64c 0x864 0x2 0x1 0x4001b8b1
+		>;
+	};
+
+	pinctrl_hdmi_cec: hdmicecgrp {
+		fsl,pins = <0x260 0x648 0x85c 0x6 0x1 0x1f8b0>;
+	};
+
+	pinctrl_usdhc1: usdhc1grp {
+		fsl,pins = <
+			0x2e0 0x6c8 0x000 0x0 0x0 0x17059
+			0x2dc 0x6c4 0x928 0x0 0x1 0x10059
+			0x2e4 0x6cc 0x000 0x0 0x0 0x17059
+			0x2e8 0x6d0 0x000 0x0 0x0 0x17059
+			0x2ec 0x6d4 0x000 0x0 0x0 0x17059
+			0x2f0 0x6d8 0x000 0x0 0x0 0x17059
+		>;
+	};
+
+	pinctrl_usdhc2: usdhc2grp {
+		fsl,pins = <
+			0x2f8 0x6e0 0x000 0x0 0x0 0x17059
+			0x2f4 0x6dc 0x930 0x0 0x1 0x10059
+			0x2fc 0x6e4 0x000 0x0 0x0 0x17059
+			0x300 0x6e8 0x000 0x0 0x0 0x17059
+			0x304 0x6ec 0x000 0x0 0x0 0x17059
+			0x308 0x6f0 0x000 0x0 0x0 0x17059
+		>;
+	};
+
+	pinctrl_usdhc3: usdhc3grp {
+		fsl,pins = <
+			0x310 0x6f8 0x000 0x0 0x0 0x17059
+			0x30c 0x6f4 0x934 0x0 0x1 0x10059
+			0x314 0x6fc 0x000 0x0 0x0 0x17059
+			0x318 0x700 0x000 0x0 0x0 0x17059
+			0x31c 0x704 0x000 0x0 0x0 0x17059
+			0x320 0x708 0x000 0x0 0x0 0x17059
+		>;
+	};
+};
+
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_uart1>;
+	status = "okay";
+};
+
+&usbh1 {
+	vbus-supply = <&reg_usb_h1_vbus>;
+	disable-over-current;
+	status = "okay";
+};
+
+&usbotg {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&usdhc1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_usdhc1>;
+	bus-width = <4>;
+	non-removable;
+	vmmc-supply = <&reg_wlan1>;
+	status = "okay";
+};
+
+&usdhc2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_usdhc2>;
+	bus-width = <4>;
+	non-removable;
+	vmmc-supply = <&reg_wlan2>;
+	status = "okay";
+};
+
+&usdhc3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_usdhc3>;
+	bus-width = <4>;
+	no-1-8-v;
+	status = "okay";
+};

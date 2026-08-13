@@ -1,0 +1,50 @@
+#!/bin/sh
+
+config=/etc/canvas.conf
+[ -r "$config" ] && . "$config"
+CANVAS_SSH=${CANVAS_SSH:-0}
+CANVAS_DEBUG=${CANVAS_DEBUG:-0}
+CANVAS_PERSIST_LOGS=${CANVAS_PERSIST_LOGS:-0}
+pidfile=/run/dropbear-debug.pid
+hostkey=/data/ssh/dropbear_ed25519_host_key
+if [ "$CANVAS_PERSIST_LOGS" = "1" ]; then
+  log=/data/state/dropbear.log
+else
+  log=/tmp/dropbear.log
+fi
+
+case "$1" in
+  start)
+    [ "$CANVAS_SSH" = "1" ] || exit 0
+    grep -q ' /data ' /proc/mounts || { echo "Cannot start debug SSH: /data is not mounted"; exit 1; }
+    mkdir -p /data/ssh
+    [ "$CANVAS_PERSIST_LOGS" != "1" ] || mkdir -p /data/state
+    if [ ! -s "$hostkey" ]; then
+      umask 077
+      /usr/bin/dropbearkey -t ed25519 -f "$hostkey"
+    fi
+    echo "Starting key-only debug SSH"
+    {
+      echo "=== Starting Dropbear ==="
+      date
+      /usr/sbin/dropbear -F -s -j -k -E -r "$hostkey" -p 0.0.0.0:22
+    } >>"$log" 2>&1 &
+    echo $! >"$pidfile"
+    sleep 1
+    if ! kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+      echo "Debug SSH failed; see $log"
+      exit 1
+    fi
+    echo "Debug SSH is listening on port 22"
+    ;;
+  stop)
+    if [ -r "$pidfile" ]; then
+      kill "$(cat "$pidfile")" 2>/dev/null || true
+      rm -f "$pidfile"
+    fi
+    ;;
+  restart)
+    "$0" stop
+    "$0" start
+    ;;
+esac

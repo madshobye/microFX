@@ -1,0 +1,6 @@
+config BR2_PACKAGE_MICROFX_DEMO
+	bool "graphics demo"
+	depends on BR2_PACKAGE_RAYLIB_DRM
+	select BR2_PACKAGE_QUICKJS
+	help
+	  Boot-to-HDMI accelerated graphics demonstration.

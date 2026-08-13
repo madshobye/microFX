@@ -1,0 +1,22 @@
+#!/bin/sh
+
+case "$1" in
+  start)
+    if ! grep -q ' /data ' /proc/mounts; then
+      echo "Persistent data partition is not mounted"
+      exit 1
+    fi
+
+    mkdir -p /data/apps/incoming /data/apps/releases /data/config /data/ssh /data/state
+    mkdir -p /data/apps/releases/factory
+    if ! cmp -s /usr/bin/canvas-demo /data/apps/releases/factory/canvas-demo; then
+      cp /usr/bin/canvas-demo /data/apps/releases/factory/canvas-demo.new
+      chmod 0755 /data/apps/releases/factory/canvas-demo.new
+      mv /data/apps/releases/factory/canvas-demo.new /data/apps/releases/factory/canvas-demo
+      echo "Updated persistent factory application from firmware"
+    fi
+    if [ ! -L /data/apps/current ]; then
+      ln -s /data/apps/releases/factory /data/apps/current
+    fi
+    ;;
+esac

@@ -1,0 +1,160 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 83789d0..9e25924 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,9 +1,6 @@
+ cmake_minimum_required(VERSION 3.16)
+ cmake_policy(VERSION 3.16)
+ 
+-include(${CMAKE_CURRENT_LIST_DIR}/third_party/coreHTTP/httpFilePaths.cmake)
+-include(${CMAKE_CURRENT_LIST_DIR}/third_party/coreMQTT/mqttFilePaths.cmake)
+-
+ if (DEFINED ENV{IDF_PATH})
+   file(GLOB ESP32_CODES "./src/*.c")
+   idf_component_register(
+@@ -24,6 +21,10 @@ option(ADDRESS_SANITIZER "Build with AddressSanitizer." OFF)
+ option(MEMORY_SANITIZER "Build with MemorySanitizer." OFF)
+ option(THREAD_SANITIZER "Build with ThreadSanitizer." OFF)
+ option(UNDEFINED_BEHAVIOR_SANITIZER "Build with UndefinedBehaviorSanitizer." OFF)
++option(LIBPEER_USE_SYSTEM_DEPS "Use system libraries" OFF)
++option(BUILD_LIBPEER_EXAMPLES "Build examples" ON)
++set(CONFIG_USE_USRSCTP 1 CACHE STRING "Use usrsctp instead of internal SCTP")
++add_compile_definitions(CONFIG_USE_USRSCTP=${CONFIG_USE_USRSCTP})
+ 
+ include(ExternalProject)
+ 
+@@ -31,7 +32,10 @@ include_directories(${CMAKE_BINARY_DIR}/dist/include ${CMAKE_BINARY_DIR}/dist/in
+ 
+ link_directories(${CMAKE_BINARY_DIR}/dist/lib)
+ 
+-set(DEP_LIBS "srtp2" "usrsctp" "mbedtls" "mbedcrypto" "mbedx509" "cjson")
++set(DEP_LIBS "srtp2" "mbedtls" "mbedcrypto" "mbedx509")
++if(CONFIG_USE_USRSCTP)
++  list(APPEND DEP_LIBS "usrsctp")
++endif()
+ # Extended debug information (symbols, source code, and macro definitions)
+ set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g3")
+ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g3")
+@@ -62,49 +66,35 @@ endif()
+ add_definitions("-Wunused-variable -Werror=sequence-point -Werror=pointer-sign -Werror=return-type -Werror=sizeof-pointer-memaccess -Wincompatible-pointer-types -DHTTP_DO_NOT_USE_CUSTOM_CONFIG -DMQTT_DO_NOT_USE_CUSTOM_CONFIG")
+ 
+ add_subdirectory(src)
+-add_subdirectory(examples)
++if(BUILD_LIBPEER_EXAMPLES)
++  add_subdirectory(examples)
++endif()
+ 
+ if(ENABLE_TESTS)
+   add_subdirectory(tests)
+ endif()
+ 
+-ExternalProject_Add(cjson
+-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cJSON
+-  CMAKE_ARGS
+-    -DCMAKE_C_FLAGS="-fPIC"
+-    -DBUILD_SHARED_LIBS=off
+-    -DENABLE_CJSON_TEST=off
+-    -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/dist
+-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+-)
+-
+-ExternalProject_Add(mbedtls
+-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mbedtls
+-  CMAKE_ARGS
+-    -DCMAKE_C_FLAGS="-fPIC"
+-    -DENABLE_TESTING=off
+-    -DENABLE_PROGRAMS=off
+-    -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/dist
+-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+-)
+-file(READ ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mbedtls/include/mbedtls/mbedtls_config.h INPUT_CONTENT)
+-string(REPLACE "//#define MBEDTLS_SSL_DTLS_SRTP" "#define MBEDTLS_SSL_DTLS_SRTP" MODIFIED_CONTENT ${INPUT_CONTENT})
+-file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mbedtls/include/mbedtls/mbedtls_config.h ${MODIFIED_CONTENT})
+-
+-ExternalProject_Add(srtp2
+-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libsrtp
+-  CMAKE_ARGS
+-    -DCMAKE_C_FLAGS="-fPIC"
+-    -DTEST_APPS=off
+-    -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/dist
+-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+-)
+-
+-ExternalProject_Add(usrsctp
+-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/usrsctp
+-  CMAKE_ARGS
+-    -DCMAKE_C_FLAGS="-fPIC"
+-    -Dsctp_build_programs=off
+-    -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/dist
+-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+-)
++if(NOT LIBPEER_USE_SYSTEM_DEPS)
++  ExternalProject_Add(cjson
++    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cJSON
++    CMAKE_ARGS -DCMAKE_C_FLAGS="-fPIC" -DBUILD_SHARED_LIBS=off
++      -DENABLE_CJSON_TEST=off -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/dist
++      -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
++  ExternalProject_Add(mbedtls
++    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mbedtls
++    CMAKE_ARGS -DCMAKE_C_FLAGS="-fPIC" -DENABLE_TESTING=off
++      -DENABLE_PROGRAMS=off -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/dist
++      -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
++  ExternalProject_Add(srtp2
++    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libsrtp
++    CMAKE_ARGS -DCMAKE_C_FLAGS="-fPIC" -DTEST_APPS=off
++      -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/dist
++      -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
++  if(CONFIG_USE_USRSCTP)
++    ExternalProject_Add(usrsctp
++      SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/usrsctp
++      CMAKE_ARGS -DCMAKE_C_FLAGS="-fPIC" -Dsctp_build_programs=off
++        -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/dist
++        -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
++  endif()
++endif()
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 7721f87..921ca74 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -1,22 +1,22 @@
+ project(lib)
+ 
+ file(GLOB SRCS "*.c")
++if(LIBPEER_USE_SYSTEM_DEPS)
++  list(FILTER SRCS EXCLUDE REGEX ".*/(peer_signaling|ssl_transport)\\.c$")
++endif()
+ 
+ file(GLOB HEADERS "peer.h" "peer_connection.h" "peer_signaling.h")
+ 
+-add_library(peer
+-  ${SRCS}
+-  ${HTTP_SOURCES}
+-  ${MQTT_SOURCES}
+-  ${MQTT_SERIALIZER_SOURCES}
+-)
++add_library(peer ${SRCS})
+ 
+-include_directories(peer PUBLIC
+-  ${HTTP_INCLUDE_PUBLIC_DIRS}
+-  ${MQTT_INCLUDE_PUBLIC_DIRS}
+-)
++target_include_directories(peer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+ 
+-add_dependencies(peer cjson mbedtls usrsctp srtp2)
++if(NOT LIBPEER_USE_SYSTEM_DEPS)
++  add_dependencies(peer cjson mbedtls srtp2)
++  if(CONFIG_USE_USRSCTP)
++    add_dependencies(peer usrsctp)
++  endif()
++endif()
+ 
+ target_link_libraries(peer ${DEP_LIBS})
+ 
+@@ -24,6 +24,6 @@ set_target_properties(peer PROPERTIES PUBLIC_HEADER "${HEADERS}")
+ 
+ install(TARGETS peer
+   LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/
++  ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/
+   PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/include/
+ )
+-

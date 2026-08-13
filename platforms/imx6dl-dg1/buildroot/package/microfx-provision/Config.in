@@ -1,0 +1,6 @@
+config BR2_PACKAGE_MICROFX_PROVISION
+	bool "captive provisioning"
+	select BR2_PACKAGE_HOSTAPD
+	select BR2_PACKAGE_DNSMASQ
+	help
+	  Concurrent setup AP, captive portal, and persistent Wi-Fi configuration.

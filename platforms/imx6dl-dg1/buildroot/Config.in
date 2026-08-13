@@ -1,0 +1,6 @@
+source "$BR2_EXTERNAL_IMX6DL_DG1_PATH/package/raylib-drm/Config.in"
+source "$BR2_EXTERNAL_IMX6DL_DG1_PATH/package/usrsctp-microfx/Config.in"
+source "$BR2_EXTERNAL_IMX6DL_DG1_PATH/package/libpeer-microfx/Config.in"
+source "$BR2_EXTERNAL_IMX6DL_DG1_PATH/package/microfx-demo/Config.in"
+source "$BR2_EXTERNAL_IMX6DL_DG1_PATH/package/microfx-peer-bridge/Config.in"
+source "$BR2_EXTERNAL_IMX6DL_DG1_PATH/package/microfx-provision/Config.in"

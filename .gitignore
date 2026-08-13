@@ -1,0 +1,41 @@
+# macOS and editor files
+.DS_Store
+**/.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Native and CMake build output
+build/
+out/
+output/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.o
+*.a
+*.so
+*.so.*
+
+# Generated firmware, deployment bundles, captures, and logs
+platforms/*/artifacts/*
+!platforms/*/artifacts/.gitkeep
+*.rootfs
+*.rootfs.gz
+*.img
+*.log
+*.pid
+
+# Per-device credentials and local development configuration
+platforms/*/private/*
+!platforms/*/private/.gitignore
+
+# Test and language caches
+.cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+coverage/

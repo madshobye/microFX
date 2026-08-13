@@ -1,0 +1,56 @@
+#!/bin/sh
+
+product_config=/etc/microfx-product.conf
+[ -r "$product_config" ] && . "$product_config"
+MICROFX_PRODUCT_NAME=${MICROFX_PRODUCT_NAME:-Graphics}
+MICROFX_SETUP_SSID=${MICROFX_SETUP_SSID:-graphics-setup}
+MICROFX_SETUP_PASSWORD=${MICROFX_SETUP_PASSWORD:-graphicssetup}
+
+case "$1" in
+  start)
+    tries=0
+    while [ ! -d /sys/class/net/wlan0 ] && [ "$tries" -lt 20 ]; do
+      tries=$((tries + 1)); sleep 1
+    done
+    [ -d /sys/class/net/wlan0 ] || { echo "Provisioning radio wlan0 unavailable"; exit 1; }
+    ip link set wlan0 down 2>/dev/null || true
+    iw dev wlan0 set type __ap 2>/dev/null || true
+    ip link set wlan0 up
+    ip address add 10.42.0.1/24 dev wlan0 2>/dev/null || true
+    sed -e "s|@SETUP_SSID@|$MICROFX_SETUP_SSID|g" \
+        -e "s|@SETUP_PASSWORD@|$MICROFX_SETUP_PASSWORD|g" \
+        /etc/hostapd-microfx.conf >/run/hostapd-microfx.conf
+    hostapd -B -P /run/hostapd-microfx.pid /run/hostapd-microfx.conf
+    dnsmasq --conf-file=/etc/dnsmasq-microfx.conf --pid-file=/run/dnsmasq-microfx.pid
+    mkdir -p /run/microfx-www/cgi-bin
+    sed -e "s|@PRODUCT_NAME@|$MICROFX_PRODUCT_NAME|g" \
+        -e "s|@SETUP_SSID@|$MICROFX_SETUP_SSID|g" \
+        -e "s|@SETUP_PASSWORD@|$MICROFX_SETUP_PASSWORD|g" \
+        /www/index.html >/run/microfx-www/index.html
+    ln -sf /www/cgi-bin/save /run/microfx-www/cgi-bin/save
+    httpd -p 80 -h /run/microfx-www
+    (
+      while :; do
+        if [ -e /run/microfx-wifi-reload ]; then
+          rm -f /run/microfx-wifi-reload
+          /etc/init.d/S41wifi restart >/tmp/wifi-restart.log 2>&1 || true
+        fi
+        sleep 2
+      done
+    ) &
+    echo $! >/run/microfx-provision-watch.pid
+    echo "Setup AP ready at http://10.42.0.1"
+    ;;
+  stop)
+    for pidfile in /run/hostapd-microfx.pid /run/dnsmasq-microfx.pid; do
+      [ -r "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
+      rm -f "$pidfile"
+    done
+    killall httpd 2>/dev/null || true
+    if [ -r /run/microfx-provision-watch.pid ]; then
+      kill "$(cat /run/microfx-provision-watch.pid)" 2>/dev/null || true
+      rm -f /run/microfx-provision-watch.pid
+    fi
+    ;;
+  restart) "$0" stop; "$0" start ;;
+esac

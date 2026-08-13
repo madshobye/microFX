@@ -1,0 +1,2 @@
+name=airtame-dg1
+options=console=ttymxc0,115200n8 console=tty0 loglevel=7 ignore_loglevel rw rootfstype=ext4 rootwait cma=128M video=HDMI-A-1:1280x720@60

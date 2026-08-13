@@ -1,0 +1,9 @@
+config BR2_PACKAGE_RAYLIB_DRM
+	bool "raylib (DRM/KMS)"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on BR2_PACKAGE_MESA3D_OPENGL_EGL
+	depends on BR2_PACKAGE_MESA3D_OPENGL_ES
+	select BR2_PACKAGE_LIBDRM
+	help
+	  raylib built for direct DRM/KMS and OpenGL ES 2, without X11.
+

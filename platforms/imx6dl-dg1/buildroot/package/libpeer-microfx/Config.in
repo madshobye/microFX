@@ -1,0 +1,9 @@
+config BR2_PACKAGE_LIBPEER_MICROFX
+	bool "libpeer for the peer bridge"
+	select BR2_PACKAGE_MBEDTLS
+	select BR2_PACKAGE_MBEDTLS_DTLS_SRTP
+	select BR2_PACKAGE_LIBSRTP
+	select BR2_PACKAGE_USRSCTP_MICROFX
+	help
+	  Embedded WebRTC DataChannel library used by the optional project
+	  PeerJS bridge. Full usrsctp is enabled for fragmented code/assets.

@@ -1,0 +1,49 @@
+#!/bin/sh
+
+runtime_config=/etc/canvas.conf
+[ -r "$runtime_config" ] && . "$runtime_config"
+product_config=/etc/microfx-product.conf
+[ -r "$product_config" ] && . "$product_config"
+CANVAS_DEBUG=${CANVAS_DEBUG:-0}
+CANVAS_PERSIST_LOGS=${CANVAS_PERSIST_LOGS:-0}
+MICROFX_SETUP_SSID=${MICROFX_SETUP_SSID:-graphics-setup}
+
+config=/data/config/wpa_supplicant.conf
+[ -r "$config" ] || config=/etc/wpa_supplicant.conf
+if [ "$CANVAS_PERSIST_LOGS" = "1" ]; then log_dir=/data/state; else log_dir=/tmp; fi
+mkdir -p "$log_dir"
+log="$log_dir/wifi.log"
+wpa_log="$log_dir/wpa_supplicant.log"
+exec >>"$log" 2>&1
+[ "$CANVAS_DEBUG" = "1" ] && set -x
+date
+
+tries=0
+while [ ! -d /sys/class/net/wlan1 ] && [ "$tries" -lt 20 ]; do
+  tries=$((tries + 1)); sleep 1
+done
+[ -d /sys/class/net/wlan1 ] || { echo "Client radio wlan1 unavailable"; exit 1; }
+[ -r "$config" ] || { echo "No saved Wi-Fi networks; use $MICROFX_SETUP_SSID"; exit 0; }
+
+interface=wlan1
+iw reg set DK || true
+ip link set "$interface" up
+wpa_pid="/run/wpa_supplicant-${interface}.pid"
+dhcp_pid="/run/udhcpc-${interface}.pid"
+[ "$CANVAS_DEBUG" = "1" ] && wpa_debug=-dd || wpa_debug=
+wpa_supplicant -B $wpa_debug -t -f "$wpa_log" -P "$wpa_pid" -i "$interface" -c "$config"
+
+tries=0
+state=
+while [ "$tries" -lt 30 ]; do
+  state=$(wpa_cli -i "$interface" status 2>/dev/null | sed -n 's/^wpa_state=//p')
+  echo "wpa_state=${state:-unknown}"
+  [ "$state" = "COMPLETED" ] && break
+  tries=$((tries + 1)); sleep 1
+done
+wpa_cli -i "$interface" status || true
+if [ "$state" = "COMPLETED" ]; then
+  udhcpc -b -p "$dhcp_pid" -i "$interface" -x hostname:microfx
+else
+  echo "No configured network associated; setup AP remains available"
+fi

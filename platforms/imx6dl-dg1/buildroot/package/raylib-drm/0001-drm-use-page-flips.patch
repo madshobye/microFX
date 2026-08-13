@@ -1,0 +1,87 @@
+--- a/src/platforms/rcore_drm.c
++++ b/src/platforms/rcore_drm.c
+@@ -534,36 +534,82 @@
+ // Disables cursor (lock cursor)
+ void DisableCursor(void)
+ {
+     // Set cursor position in the middle
+     SetMousePosition(0, 0);
+ 
+     platform.cursorRelative = true;
+     CORE.Input.Mouse.cursorHidden = true;
+ }
+ 
++static void PageFlipHandler(int fd, unsigned int frame, unsigned int sec,
++                            unsigned int usec, void *data)
++{
++    (void)fd;
++    (void)frame;
++    (void)sec;
++    (void)usec;
++    int *waiting = (int *)data;
++    *waiting = 0;
++}
++
+ // Swap back buffer with front buffer (screen drawing)
+ void SwapScreenBuffer(void)
+ {
+     eglSwapBuffers(platform.device, platform.surface);
+ 
+     if (!platform.gbmSurface || (-1 == platform.fd) || !platform.connector || !platform.crtc) TRACELOG(LOG_ERROR, "DISPLAY: DRM initialization failed to swap");
+ 
+     struct gbm_bo *bo = gbm_surface_lock_front_buffer(platform.gbmSurface);
+     if (!bo) TRACELOG(LOG_ERROR, "DISPLAY: Failed GBM to lock front buffer");
+ 
+     uint32_t fb = 0;
+     int result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, 24, 32, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
+     if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeAddFB() failed with result: %d", result);
+ 
+-    result = drmModeSetCrtc(platform.fd, platform.crtc->crtc_id, fb, 0, 0, &platform.connector->connector_id, 1, &platform.connector->modes[platform.modeIndex]);
+-    if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeSetCrtc() failed with result: %d", result);
++    if (!platform.prevFB)
++    {
++        result = drmModeSetCrtc(platform.fd, platform.crtc->crtc_id, fb, 0, 0,
++            &platform.connector->connector_id, 1,
++            &platform.connector->modes[platform.modeIndex]);
++        if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeSetCrtc() failed with result: %d", result);
++    }
++    else
++    {
++        int waiting = 1;
++        drmEventContext event = { 0 };
++        event.version = DRM_EVENT_CONTEXT_VERSION;
++        event.page_flip_handler = PageFlipHandler;
++
++        result = drmModePageFlip(platform.fd, platform.crtc->crtc_id, fb,
++            DRM_MODE_PAGE_FLIP_EVENT, &waiting);
++        if (result == 0)
++        {
++            while (waiting)
++            {
++                result = drmHandleEvent(platform.fd, &event);
++                if (result != 0)
++                {
++                    TRACELOG(LOG_ERROR, "DISPLAY: drmHandleEvent() failed with result: %d", result);
++                    break;
++                }
++            }
++        }
++        else
++        {
++            TRACELOG(LOG_WARNING, "DISPLAY: drmModePageFlip() failed with result: %d; using modeset fallback", result);
++            result = drmModeSetCrtc(platform.fd, platform.crtc->crtc_id, fb, 0, 0,
++                &platform.connector->connector_id, 1,
++                &platform.connector->modes[platform.modeIndex]);
++            if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: fallback drmModeSetCrtc() failed with result: %d", result);
++        }
++    }
+ 
+     if (platform.prevFB)
+     {
+         result = drmModeRmFB(platform.fd, platform.prevFB);
+         if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeRmFB() failed with result: %d", result);
+     }
+ 
+     platform.prevFB = fb;
+ 
+     if (platform.prevBO) gbm_surface_release_buffer(platform.gbmSurface, platform.prevBO);

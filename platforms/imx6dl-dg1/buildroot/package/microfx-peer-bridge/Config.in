@@ -1,0 +1,9 @@
+config BR2_PACKAGE_MICROFX_PEER_BRIDGE
+	bool "PeerJS project bridge"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on !BR2_STATIC_LIBS
+	select BR2_PACKAGE_LIBPEER_MICROFX
+	select BR2_PACKAGE_CJSON
+	select BR2_PACKAGE_LIBWEBSOCKETS
+	help
+	  Optional PeerJS DataChannel service for editing graphics projects.

@@ -1,0 +1,421 @@
+#include "microfx/script.h"
+#include "microfx/assets.h"
+#include "microfx/identity.h"
+#include <quickjs/quickjs.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+struct MicroFxScript {
+    JSRuntime *runtime;
+    JSContext *context;
+    JSValue update;
+    MicroFxScene *scene;
+    char projectRoot[MICROFX_MAX_ASSET_PATH];
+};
+
+static uint32_t ColorArg(JSContext *ctx, JSValueConst value)
+{
+    uint32_t color = 0xffffffffu;
+    JS_ToUint32(ctx, &color, value);
+    return color;
+}
+
+static JSValue Handle(JSContext *ctx, int handle)
+{
+    if (handle < 0) return JS_ThrowRangeError(ctx,"retained scene capacity exceeded");
+    return JS_NewInt32(ctx,handle);
+}
+
+static JSValue AddSdfCircle(JSContext *ctx, JSValueConst thisValue,
+                         int argc, JSValueConst *argv)
+{
+    (void)thisValue;
+    MicroFxScript *script = JS_GetContextOpaque(ctx);
+    double x=0,y=0,r=0;
+    if (argc < 4 || JS_ToFloat64(ctx,&x,argv[0]) || JS_ToFloat64(ctx,&y,argv[1]) ||
+        JS_ToFloat64(ctx,&r,argv[2])) return JS_ThrowTypeError(ctx,"sdfCircle(x,y,r,rgba)");
+    return Handle(ctx,MicroFxSceneAddCircle(script->scene,x,y,r,ColorArg(ctx,argv[3])));
+}
+
+static JSValue AddFastCircle(JSContext *ctx, JSValueConst thisValue,
+                             int argc, JSValueConst *argv)
+{
+    (void)thisValue;
+    MicroFxScript *script = JS_GetContextOpaque(ctx);
+    double x=0,y=0,r=0;
+    if (argc < 4 || JS_ToFloat64(ctx,&x,argv[0]) || JS_ToFloat64(ctx,&y,argv[1]) ||
+        JS_ToFloat64(ctx,&r,argv[2])) return JS_ThrowTypeError(ctx,"circle(x,y,r,rgba)");
+    return Handle(ctx,MicroFxSceneAddFastCircle(script->scene,x,y,r,ColorArg(ctx,argv[3])));
+}
+
+static JSValue AddRoundedRect(JSContext *ctx, JSValueConst thisValue,
+                              int argc, JSValueConst *argv)
+{
+    (void)thisValue;
+    MicroFxScript *script = JS_GetContextOpaque(ctx);
+    double x=0,y=0,w=0,h=0,r=0;
+    if (argc < 6 || JS_ToFloat64(ctx,&x,argv[0]) || JS_ToFloat64(ctx,&y,argv[1]) ||
+        JS_ToFloat64(ctx,&w,argv[2]) || JS_ToFloat64(ctx,&h,argv[3]) ||
+        JS_ToFloat64(ctx,&r,argv[4])) return JS_ThrowTypeError(ctx,"sdfRoundedRect(x,y,w,h,r,rgba)");
+    return Handle(ctx,MicroFxSceneAddRoundedRect(script->scene,x,y,w,h,r,ColorArg(ctx,argv[5])));
+}
+
+static JSValue AddRect(JSContext *ctx, JSValueConst thisValue,
+                       int argc, JSValueConst *argv)
+{
+    (void)thisValue;
+    MicroFxScript *script = JS_GetContextOpaque(ctx);
+    double x=0,y=0,w=0,h=0;
+    if (argc < 5 || JS_ToFloat64(ctx,&x,argv[0]) || JS_ToFloat64(ctx,&y,argv[1]) ||
+        JS_ToFloat64(ctx,&w,argv[2]) || JS_ToFloat64(ctx,&h,argv[3]))
+        return JS_ThrowTypeError(ctx,"rect(x,y,w,h,rgba)");
+    return Handle(ctx,MicroFxSceneAddRect(script->scene,x,y,w,h,ColorArg(ctx,argv[4])));
+}
+
+static JSValue AddGradientRect(JSContext *ctx, JSValueConst thisValue,
+                               int argc, JSValueConst *argv)
+{
+    (void)thisValue;
+    MicroFxScript *script = JS_GetContextOpaque(ctx);
+    double x=0,y=0,w=0,h=0;
+    if (argc < 6 || JS_ToFloat64(ctx,&x,argv[0]) || JS_ToFloat64(ctx,&y,argv[1]) ||
+        JS_ToFloat64(ctx,&w,argv[2]) || JS_ToFloat64(ctx,&h,argv[3]))
+        return JS_ThrowTypeError(ctx,"gradientRect(x,y,w,h,topRgba,bottomRgba)");
+    return Handle(ctx,MicroFxSceneAddGradientRect(script->scene,x,y,w,h,
+                                                  ColorArg(ctx,argv[4]),
+                                                  ColorArg(ctx,argv[5])));
+}
+
+static JSValue AddBackground(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    if(argc<2)return JS_ThrowTypeError(ctx,"background(topRgba,bottomRgba)");
+    return Handle(ctx,MicroFxSceneAddBackground(script->scene,ColorArg(ctx,argv[0]),
+                                                ColorArg(ctx,argv[1])));
+}
+
+
+static JSValue AddPrimitive(JSContext *ctx, int argc, JSValueConst *argv,
+                            MicroFxMeshKind kind, const char *signature)
+{
+    MicroFxScript *script=JS_GetContextOpaque(ctx); double x=0,y=0,z=0,scale=0;
+    if(argc<5||JS_ToFloat64(ctx,&x,argv[0])||JS_ToFloat64(ctx,&y,argv[1])||
+       JS_ToFloat64(ctx,&z,argv[2])||JS_ToFloat64(ctx,&scale,argv[3]))
+        return JS_ThrowTypeError(ctx,"%s",signature);
+    uint32_t color=ColorArg(ctx,argv[4]);
+    int handle=kind==MICROFX_MESH_SPHERE?MicroFxSceneAddSphere(script->scene,x,y,z,scale,color):
+               kind==MICROFX_MESH_WIRE_CUBE?MicroFxSceneAddWireCube(script->scene,x,y,z,scale,color):
+               kind==MICROFX_MESH_GRID?MicroFxSceneAddGrid(script->scene,x,y,z,scale,color):
+               MicroFxSceneAddCube(script->scene,x,y,z,scale,color);
+    return Handle(ctx,handle);
+}
+
+static JSValue AddCube(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{ (void)thisValue; return AddPrimitive(ctx,argc,argv,MICROFX_MESH_CUBE,"cube(x,y,z,size,rgba)"); }
+static JSValue AddSphere(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{ (void)thisValue; return AddPrimitive(ctx,argc,argv,MICROFX_MESH_SPHERE,"sphere(x,y,z,size,rgba)"); }
+static JSValue AddWireCube(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{ (void)thisValue; return AddPrimitive(ctx,argc,argv,MICROFX_MESH_WIRE_CUBE,"wireCube(x,y,z,size,rgba)"); }
+static JSValue AddGrid(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{ (void)thisValue; return AddPrimitive(ctx,argc,argv,MICROFX_MESH_GRID,"grid(x,y,z,size,rgba)"); }
+
+static JSValue AddModel(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;
+    MicroFxScript *script=JS_GetContextOpaque(ctx);
+    double x=0,y=0,z=0,scale=0;
+    if(argc<6||JS_ToFloat64(ctx,&x,argv[1])||JS_ToFloat64(ctx,&y,argv[2])||
+       JS_ToFloat64(ctx,&z,argv[3])||JS_ToFloat64(ctx,&scale,argv[4]))
+        return JS_ThrowTypeError(ctx,"model(asset,x,y,z,size,rgba)");
+    const char *asset=JS_ToCString(ctx,argv[0]);
+    if(!asset)return JS_EXCEPTION;
+    char path[MICROFX_MAX_ASSET_PATH];
+    char error[128];
+    bool resolved=MicroFxResolveAsset(script->projectRoot,asset,path,sizeof(path),
+                                     error,sizeof(error));
+    JS_FreeCString(ctx,asset);
+    if(!resolved)return JS_ThrowReferenceError(ctx,"model asset rejected: %s",error);
+    return Handle(ctx,MicroFxSceneAddModel(script->scene,path,x,y,z,scale,
+                                          ColorArg(ctx,argv[5])));
+}
+
+static JSValue Transform(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    double v[7]={0};
+    if(argc<8||JS_ToInt32(ctx,&handle,argv[0]))return JS_ThrowTypeError(ctx,"transform(handle,x,y,z,rx,ry,rz,scale)");
+    for(int i=0;i<7;i++)if(JS_ToFloat64(ctx,&v[i],argv[i+1]))return JS_ThrowTypeError(ctx,"transform arguments must be numbers");
+    return JS_NewBool(ctx,MicroFxSceneTransform(script->scene,handle,v[0],v[1],v[2],v[3],v[4],v[5],v[6]));
+}
+
+static JSValue AddText(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);double x=0,y=0,size=0;
+    if(argc<5||JS_ToFloat64(ctx,&x,argv[1])||JS_ToFloat64(ctx,&y,argv[2])||JS_ToFloat64(ctx,&size,argv[3]))
+        return JS_ThrowTypeError(ctx,"text(value,x,y,size,rgba)");
+    const char *value=JS_ToCString(ctx,argv[0]);if(!value)return JS_EXCEPTION;
+    int handle=MicroFxSceneAddText(script->scene,value,x,y,size,ColorArg(ctx,argv[4]));
+    JS_FreeCString(ctx,value);return Handle(ctx,handle);
+}
+
+static JSValue SetText(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc<2||JS_ToInt32(ctx,&handle,argv[0]))return JS_ThrowTypeError(ctx,"setText(handle,value)");
+    const char *value=JS_ToCString(ctx,argv[1]);if(!value)return JS_EXCEPTION;
+    bool ok=MicroFxSceneSetText(script->scene,handle,value);JS_FreeCString(ctx,value);
+    return JS_NewBool(ctx,ok);
+}
+
+static JSValue SetColor(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc<2||JS_ToInt32(ctx,&handle,argv[0]))return JS_ThrowTypeError(ctx,"color(handle,rgba)");
+    return JS_NewBool(ctx,MicroFxSceneSetColor(script->scene,handle,ColorArg(ctx,argv[1])));
+}
+
+static JSValue SetEffect(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0,effect=0;
+    double amount=1.0,scale=4.0;
+    if(argc<2||JS_ToInt32(ctx,&handle,argv[0])||JS_ToInt32(ctx,&effect,argv[1])||
+       (argc>2&&JS_ToFloat64(ctx,&amount,argv[2]))||(argc>3&&JS_ToFloat64(ctx,&scale,argv[3])))
+        return JS_ThrowTypeError(ctx,"effect(handle,kind,amount=1,scale=4)");
+    return JS_NewBool(ctx,MicroFxSceneSetEffect(script->scene,handle,effect,(float)amount,(float)scale));
+}
+
+static JSValue SetCamera(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);double v[7]={0};
+    if(argc<7)return JS_ThrowTypeError(ctx,"camera(x,y,z,targetX,targetY,targetZ,fovY)");
+    for(int i=0;i<7;i++)if(JS_ToFloat64(ctx,&v[i],argv[i]))return JS_ThrowTypeError(ctx,"camera arguments must be numbers");
+    MicroFxSceneSetCamera(script->scene,v[0],v[1],v[2],v[3],v[4],v[5],v[6]);
+    return JS_UNDEFINED;
+}
+
+static bool NumberProperty(JSContext *ctx,JSValueConst object,const char *name,double *value)
+{
+    JSValue property=JS_GetPropertyStr(ctx,object,name);
+    if(JS_IsUndefined(property)){JS_FreeValue(ctx,property);return true;}
+    bool ok=JS_ToFloat64(ctx,value,property)==0;JS_FreeValue(ctx,property);return ok;
+}
+
+static JSValue Configure(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    if(argc<1||!JS_IsObject(argv[0]))return JS_ThrowTypeError(ctx,"configure(settings)");
+    MicroFxRuntimeSettings settings=script->scene->runtime;
+    double outputWidth=settings.outputWidth,outputHeight=settings.outputHeight;
+    double targetFps=settings.targetFps,minimum=settings.minimumPixelDensity;
+    double duration=settings.durationSeconds;
+    if(!NumberProperty(ctx,argv[0],"outputWidth",&outputWidth)||
+       !NumberProperty(ctx,argv[0],"outputHeight",&outputHeight)||
+       !NumberProperty(ctx,argv[0],"targetFps",&targetFps)||
+       !NumberProperty(ctx,argv[0],"minimumPixelDensity",&minimum)||
+       !NumberProperty(ctx,argv[0],"durationSeconds",&duration))
+        return JS_ThrowTypeError(ctx,"configure numeric setting is invalid");
+    JSValue density=JS_GetPropertyStr(ctx,argv[0],"pixelDensity");
+    if(!JS_IsUndefined(density)){
+        if(JS_IsString(density)){
+            const char *value=JS_ToCString(ctx,density);
+            if(!value||strcmp(value,"auto")!=0){if(value)JS_FreeCString(ctx,value);JS_FreeValue(ctx,density);return JS_ThrowRangeError(ctx,"pixelDensity must be auto or 0.25..1");}
+            JS_FreeCString(ctx,value);settings.automaticDensity=true;settings.pixelDensity=1.0f;
+        }else{
+            double value=0;if(JS_ToFloat64(ctx,&value,density)){JS_FreeValue(ctx,density);return JS_ThrowTypeError(ctx,"pixelDensity must be auto or a number");}
+            settings.automaticDensity=false;settings.pixelDensity=(float)value;
+        }
+    }
+    JS_FreeValue(ctx,density);
+    JSValue debug=JS_GetPropertyStr(ctx,argv[0],"debugBar");
+    if(!JS_IsUndefined(debug))settings.debugBar=JS_ToBool(ctx,debug)>0;
+    JS_FreeValue(ctx,debug);
+    settings.outputWidth=(int)outputWidth;settings.outputHeight=(int)outputHeight;
+    settings.targetFps=(int)targetFps;settings.minimumPixelDensity=(float)minimum;
+    settings.durationSeconds=(float)duration;
+    if(settings.targetFps<1||settings.minimumPixelDensity<0.25f||settings.minimumPixelDensity>1.0f||
+       settings.pixelDensity<settings.minimumPixelDensity||settings.pixelDensity>1.0f||
+       settings.durationSeconds<0.0f||
+       settings.outputWidth<0||settings.outputHeight<0||
+       ((settings.outputWidth==0)!=(settings.outputHeight==0)))
+        return JS_ThrowRangeError(ctx,"invalid output, density, or target FPS settings");
+    settings.configured=true;script->scene->runtime=settings;return JS_UNDEFINED;
+}
+
+static JSValue Environment(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;
+    if(argc<1)return JS_ThrowTypeError(ctx,"env(name, fallback='')");
+    const char *name=JS_ToCString(ctx,argv[0]);
+    if(!name)return JS_EXCEPTION;
+    const char *value=getenv(name);
+    JSValue result;
+    if(value){
+        result=JS_NewString(ctx,value);
+    }else if(argc>1){
+        const char *fallback=JS_ToCString(ctx,argv[1]);
+        if(!fallback){JS_FreeCString(ctx,name);return JS_EXCEPTION;}
+        result=JS_NewString(ctx,fallback);
+        JS_FreeCString(ctx,fallback);
+    }else{
+        result=JS_NewString(ctx,"");
+    }
+    JS_FreeCString(ctx,name);
+    return result;
+}
+
+static JSValue DebugBar(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    if(argc<1)return JS_ThrowTypeError(ctx,"debugBar(visible)");
+    script->scene->runtime.debugBar=JS_ToBool(ctx,argv[0])>0;
+    return JS_UNDEFINED;
+}
+
+static float Hash2(float x,float y)
+{
+    float value=sinf(x*127.1f+y*311.7f)*43758.5453f;
+    return value-floorf(value);
+}
+
+static JSValue MathHash(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;double x=0,y=0;if(argc<2||JS_ToFloat64(ctx,&x,argv[0])||JS_ToFloat64(ctx,&y,argv[1]))return JS_ThrowTypeError(ctx,"hash2(x,y)");
+    return JS_NewFloat64(ctx,Hash2((float)x,(float)y));
+}
+
+static JSValue MathNoise(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;double xd=0,yd=0;if(argc<2||JS_ToFloat64(ctx,&xd,argv[0])||JS_ToFloat64(ctx,&yd,argv[1]))return JS_ThrowTypeError(ctx,"noise2(x,y)");
+    float x=(float)xd,y=(float)yd,ix=floorf(x),iy=floorf(y),fx=x-ix,fy=y-iy;
+    fx=fx*fx*(3.0f-2.0f*fx);fy=fy*fy*(3.0f-2.0f*fy);
+    float a=Hash2(ix,iy),b=Hash2(ix+1,iy),c=Hash2(ix,iy+1),d=Hash2(ix+1,iy+1);
+    return JS_NewFloat64(ctx,(a+(b-a)*fx)+((c+(d-c)*fx)-(a+(b-a)*fx))*fy);
+}
+
+static JSValue MathLerp(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;double a=0,b=0,t=0;if(argc<3||JS_ToFloat64(ctx,&a,argv[0])||JS_ToFloat64(ctx,&b,argv[1])||JS_ToFloat64(ctx,&t,argv[2]))return JS_ThrowTypeError(ctx,"lerp(a,b,t)");
+    return JS_NewFloat64(ctx,a+(b-a)*t);
+}
+
+static JSValue Move(JSContext *ctx, JSValueConst thisValue,
+                    int argc, JSValueConst *argv)
+{
+    (void)thisValue;
+    MicroFxScript *script = JS_GetContextOpaque(ctx);
+    int32_t handle=0; double x=0,y=0,rotation=0;
+    if (argc < 4 || JS_ToInt32(ctx,&handle,argv[0]) || JS_ToFloat64(ctx,&x,argv[1]) ||
+        JS_ToFloat64(ctx,&y,argv[2]) || JS_ToFloat64(ctx,&rotation,argv[3]))
+        return JS_ThrowTypeError(ctx,"move(handle,x,y,rotation)");
+    return JS_NewBool(ctx,MicroFxSceneMove(script->scene,handle,x,y,rotation));
+}
+
+static void DumpException(JSContext *ctx)
+{
+    JSValue exception = JS_GetException(ctx);
+    const char *message = JS_ToCString(ctx, exception);
+    fprintf(stderr, "MICROFX_JS %s\n", message ? message : "unknown exception");
+    JS_FreeCString(ctx, message);
+    JS_FreeValue(ctx, exception);
+}
+
+MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
+{
+    FILE *file = fopen(path, "rb");
+    if (!file) { fprintf(stderr,"MICROFX_JS script not found: %s\n",path); return NULL; }
+    fseek(file,0,SEEK_END); long size=ftell(file); rewind(file);
+    char *source = malloc((size_t)size+1);
+    if (!source || fread(source,1,(size_t)size,file)!=(size_t)size) {
+        fclose(file); free(source); return NULL;
+    }
+    fclose(file); source[size]='\0';
+    MicroFxScript *script=calloc(1,sizeof(*script));
+    if(!script){free(source);return NULL;}
+    char rootError[128];
+    if(!MicroFxProjectRoot(path,script->projectRoot,sizeof(script->projectRoot),
+                          rootError,sizeof(rootError))){
+        fprintf(stderr,"MICROFX_ASSET %s\n",rootError);
+        free(source);free(script);return NULL;
+    }
+    script->scene=scene; script->runtime=JS_NewRuntime(); script->context=JS_NewContext(script->runtime);
+    JS_SetMemoryLimit(script->runtime, 16*1024*1024);
+    JS_SetMaxStackSize(script->runtime, 512*1024);
+    JS_SetContextOpaque(script->context,script);
+    JSValue global=JS_GetGlobalObject(script->context);
+    JSValue fx=JS_NewObject(script->context);
+    JS_SetPropertyStr(script->context,fx,"circle",JS_NewCFunction(script->context,AddFastCircle,"circle",4));
+    JS_SetPropertyStr(script->context,fx,"sdfCircle",JS_NewCFunction(script->context,AddSdfCircle,"sdfCircle",4));
+    JS_SetPropertyStr(script->context,fx,"sdfRoundedRect",JS_NewCFunction(script->context,AddRoundedRect,"sdfRoundedRect",6));
+    JS_SetPropertyStr(script->context,fx,"rect",JS_NewCFunction(script->context,AddRect,"rect",5));
+    JS_SetPropertyStr(script->context,fx,"gradientRect",JS_NewCFunction(script->context,AddGradientRect,"gradientRect",6));
+    JS_SetPropertyStr(script->context,fx,"background",JS_NewCFunction(script->context,AddBackground,"background",2));
+    JS_SetPropertyStr(script->context,fx,"move",JS_NewCFunction(script->context,Move,"move",4));
+    JS_SetPropertyStr(script->context,fx,"cube",JS_NewCFunction(script->context,AddCube,"cube",5));
+    JS_SetPropertyStr(script->context,fx,"sphere",JS_NewCFunction(script->context,AddSphere,"sphere",5));
+    JS_SetPropertyStr(script->context,fx,"wireCube",JS_NewCFunction(script->context,AddWireCube,"wireCube",5));
+    JS_SetPropertyStr(script->context,fx,"grid",JS_NewCFunction(script->context,AddGrid,"grid",5));
+    JS_SetPropertyStr(script->context,fx,"model",JS_NewCFunction(script->context,AddModel,"model",6));
+    JS_SetPropertyStr(script->context,fx,"transform",JS_NewCFunction(script->context,Transform,"transform",8));
+    JS_SetPropertyStr(script->context,fx,"text",JS_NewCFunction(script->context,AddText,"text",5));
+    JS_SetPropertyStr(script->context,fx,"setText",JS_NewCFunction(script->context,SetText,"setText",2));
+    JS_SetPropertyStr(script->context,fx,"color",JS_NewCFunction(script->context,SetColor,"color",2));
+    JS_SetPropertyStr(script->context,fx,"effect",JS_NewCFunction(script->context,SetEffect,"effect",4));
+    JS_SetPropertyStr(script->context,fx,"camera",JS_NewCFunction(script->context,SetCamera,"camera",7));
+    JS_SetPropertyStr(script->context,fx,"configure",JS_NewCFunction(script->context,Configure,"configure",1));
+    JS_SetPropertyStr(script->context,fx,"debugBar",JS_NewCFunction(script->context,DebugBar,"debugBar",1));
+    JS_SetPropertyStr(script->context,fx,"env",JS_NewCFunction(script->context,Environment,"env",2));
+    JSValue product=JS_NewObject(script->context);
+    JS_SetPropertyStr(script->context,product,"name",JS_NewString(script->context,MICROFX_PRODUCT_NAME));
+    JS_SetPropertyStr(script->context,product,"slug",JS_NewString(script->context,MICROFX_PRODUCT_SLUG));
+    JS_SetPropertyStr(script->context,product,"defaultPeerId",JS_NewString(script->context,MICROFX_DEFAULT_PEER_ID));
+    JS_SetPropertyStr(script->context,product,"defaultSetupSsid",JS_NewString(script->context,MICROFX_DEFAULT_SETUP_SSID));
+    JS_SetPropertyStr(script->context,product,"defaultSetupPassword",JS_NewString(script->context,MICROFX_DEFAULT_SETUP_PASSWORD));
+    JS_SetPropertyStr(script->context,fx,"product",product);
+    JSValue math=JS_NewObject(script->context);
+    JS_SetPropertyStr(script->context,math,"hash2",JS_NewCFunction(script->context,MathHash,"hash2",2));
+    JS_SetPropertyStr(script->context,math,"noise2",JS_NewCFunction(script->context,MathNoise,"noise2",2));
+    JS_SetPropertyStr(script->context,math,"lerp",JS_NewCFunction(script->context,MathLerp,"lerp",3));
+    JS_SetPropertyStr(script->context,fx,"math",math);
+    JSValue effects=JS_NewObject(script->context);
+    JS_SetPropertyStr(script->context,effects,"solid",JS_NewInt32(script->context,0));
+    JS_SetPropertyStr(script->context,effects,"gradient",JS_NewInt32(script->context,1));
+    JS_SetPropertyStr(script->context,effects,"noise",JS_NewInt32(script->context,2));
+    JS_SetPropertyStr(script->context,effects,"bands",JS_NewInt32(script->context,3));
+    JS_SetPropertyStr(script->context,fx,"effects",effects);
+    JS_SetPropertyStr(script->context,global,"fx",fx);
+    JS_FreeValue(script->context,global);
+    JSValue result=JS_Eval(script->context,source,(size_t)size,path,JS_EVAL_TYPE_GLOBAL);
+    free(source);
+    if (JS_IsException(result)) { DumpException(script->context); JS_FreeValue(script->context,result); MicroFxScriptDestroy(script); return NULL; }
+    JS_FreeValue(script->context,result);
+    global=JS_GetGlobalObject(script->context);
+    script->update=JS_GetPropertyStr(script->context,global,"update");
+    JS_FreeValue(script->context,global);
+    if (!JS_IsFunction(script->context,script->update)) { fprintf(stderr,"MICROFX_JS update(time,delta) missing\n"); MicroFxScriptDestroy(script); return NULL; }
+    printf("MICROFX_JS loaded=%s sdf=%d quads=%d mesh=%d text=%d\n", path,
+           scene->sdfCount, scene->quadCount, scene->meshCount, scene->textCount);
+    return script;
+}
+
+bool MicroFxScriptUpdate(MicroFxScript *script, double time, double delta)
+{
+    if (!script) return false;
+    script->scene->time=(float)time;
+    JSValue args[2]={JS_NewFloat64(script->context,time),JS_NewFloat64(script->context,delta)};
+    JSValue result=JS_Call(script->context,script->update,JS_UNDEFINED,2,args);
+    JS_FreeValue(script->context,args[0]); JS_FreeValue(script->context,args[1]);
+    if (JS_IsException(result)) { DumpException(script->context); JS_FreeValue(script->context,result); return false; }
+    JS_FreeValue(script->context,result);
+    return true;
+}
+
+void MicroFxScriptDestroy(MicroFxScript *script)
+{
+    if (!script) return;
+    if (script->context) JS_FreeValue(script->context,script->update);
+    if (script->context) JS_FreeContext(script->context);
+    if (script->runtime) JS_FreeRuntime(script->runtime);
+    free(script);
+}

@@ -1,0 +1,6 @@
+config BR2_PACKAGE_USRSCTP_MICROFX
+	bool "usrsctp for the peer bridge"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	help
+	  Full userspace SCTP implementation used by libpeer for reliable,
+	  fragmented WebRTC DataChannel project and asset transfers.

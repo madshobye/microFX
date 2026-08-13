@@ -1,0 +1,20 @@
+#!/bin/sh
+
+case "$1" in
+  start)
+    echo "Starting Wi-Fi connection in background"
+    /usr/sbin/wifi-connect &
+    ;;
+  stop)
+    for pidfile in /run/udhcpc-wlan?.pid /run/wpa_supplicant-wlan?.pid; do
+      if [ -r "$pidfile" ]; then
+        kill "$(cat "$pidfile")" 2>/dev/null || true
+        rm -f "$pidfile"
+      fi
+    done
+    ;;
+  restart)
+    "$0" stop
+    "$0" start
+    ;;
+esac

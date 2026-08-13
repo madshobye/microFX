@@ -1,0 +1,33 @@
+#!/bin/sh
+
+case "$1" in
+  start)
+    mkdir -p /data/apps/current/assets /data/config
+    if [ ! -s /data/apps/current/main.js ]; then
+      cp /usr/share/microfx/main.js /data/apps/current/main.js
+    fi
+    echo "Starting PeerJS bridge"
+    (
+      child=
+      trap 'if [ -n "$child" ]; then kill "$child" 2>/dev/null || true; fi; exit 0' TERM INT
+      while true; do
+        /usr/bin/microfx-peer-bridge &
+        child=$!
+        wait "$child" || true
+        child=
+        sleep 5
+      done
+    ) >/run/microfx-peer-bridge.log 2>&1 &
+    echo $! >/run/microfx-peer-bridge.pid
+    ;;
+  stop)
+    if [ -r /run/microfx-peer-bridge.pid ]; then
+      kill "$(cat /run/microfx-peer-bridge.pid)" 2>/dev/null || true
+      rm -f /run/microfx-peer-bridge.pid
+    fi
+    ;;
+  restart)
+    "$0" stop
+    "$0" start
+    ;;
+esac
