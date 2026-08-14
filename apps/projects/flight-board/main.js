@@ -2,20 +2,20 @@ fx.configure({ targetFps: 60, pixelDensity: 1, debugBar: 1 });
 
 // Change this block to move the entire sketch to another airport.
 const PLACE = {
-  label: "CORDOBA",
+  label: "LONDON",
   airport: {
-    iata: "COR",
-    icao: "SACO",
-    latitude: -31.31,
-    longitude: -64.208333
+    iata: "LHR",
+    icao: "EGLL",
+    latitude: 51.47,
+    longitude: -0.4543
   },
   mapCenter: {
-    latitude: -31.37,
-    longitude: -64.2
+    latitude: 51.49,
+    longitude: -0.25
   },
   mapZoom: 11.45,
   searchRadiusNm: 25,
-  airportGroundRadiusKm: 3
+  airportGroundRadiusKm: 4
 };
 
 const POLL_SECONDS = 5;
