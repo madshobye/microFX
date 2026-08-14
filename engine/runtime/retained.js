@@ -5,6 +5,8 @@
   const groupMembers = new WeakMap();
   const groupOwners = new WeakMap();
   const groups = new WeakSet();
+  const sceneOwners = new WeakMap();
+  const feedCache = new Map();
 
   function numericHandle(value) {
     if (typeof value === "number") return value;
@@ -18,7 +20,9 @@
       x: 0, y: 0, z: 0,
       rx: 0, ry: 0, rz: 0,
       rotation: 0,
-      scale: 1
+      scale: 1,
+      enabled: true,
+      sceneVisible: true
     }, initial || {});
 
     const object = {
@@ -66,9 +70,12 @@
       },
 
       scale(value) {
-        if (dimension !== 3) throw new TypeError("scale() is only available on 3D elements");
+        if (dimension !== 3 && state.kind !== "image") {
+          throw new TypeError("scale() is available on 3D and image elements");
+        }
         state.scale = value;
-        applyTransform();
+        if (state.kind === "image") fx._imageScale(handle, value);
+        else applyTransform();
         return object;
       },
 
@@ -78,7 +85,14 @@
       },
 
       visible(value) {
-        fx._visible(handle, Boolean(value));
+        state.enabled = Boolean(value);
+        applyVisibility();
+        return object;
+      },
+
+      enabled(value) {
+        state.enabled = Boolean(value);
+        applyVisibility();
         return object;
       },
 
@@ -89,12 +103,14 @@
       },
 
       show() {
-        fx._visible(handle, true);
+        state.enabled = true;
+        applyVisibility();
         return object;
       },
 
       hide() {
-        fx._visible(handle, false);
+        state.enabled = false;
+        applyVisibility();
         return object;
       },
 
@@ -123,6 +139,10 @@
         fx._transform(handle, state.x, state.y, state.z,
                       state.rx, state.ry, state.rz, state.scale);
       }
+    }
+
+    function applyVisibility() {
+      fx._visible(handle, state.enabled && state.sceneVisible);
     }
 
     elementStates.set(object, state);
@@ -268,8 +288,11 @@
                            { x, y, kind: "text" });
     return fontPath === undefined ? result : result.font(fontPath);
   };
-  fx.image = function image(path, x, y, width, height, tint) {
-    return make2d(fx._image, arguments, { x, y });
+  fx.image = function image(path, x, y, scale, tint) {
+    if (arguments.length !== 5) {
+      throw new TypeError("image(path, x, y, scale, tint) requires exactly 5 arguments");
+    }
+    return make2d(fx._image, arguments, { x, y, scale, kind: "image" });
   };
 
   fx.group = function group() {
@@ -313,6 +336,7 @@
     return fx._color(numericHandle(target), value);
   };
   fx.visible = function visible(target, value) {
+    if (target && elementStates.has(target)) return target.visible(value);
     return fx._visible(numericHandle(target), Boolean(value));
   };
   fx.opacity = function opacity(target, value) {
@@ -330,29 +354,59 @@
              (byte(blue) << 8) | byte(alpha === undefined ? 255 : alpha)) >>> 0);
   };
 
+  // Network ownership stays in the platform adapter. A feed is read once per
+  // renderer activation, so calling this helper from update() cannot turn into
+  // a per-frame file read or HTTP request. Changed live data reloads the active
+  // project after the adapter's bounded refresh interval.
+  fx.feed = function feed(path, fallback) {
+    const key = String(path);
+    if (feedCache.has(key)) return feedCache.get(key);
+    const value = arguments.length > 1 ? fx.data(key, fallback) : fx.data(key);
+    feedCache.set(key, value);
+    return value;
+  };
+
   fx.scene = function scene(options) {
     const members = [];
-    return {
+    const flattened = [];
+    const state = { active: false, requested: false };
+    const object = {
       name: options && options.name ? String(options.name) : "scene",
       add(value) {
         if (!value || (!elementStates.has(value) && !groups.has(value))) {
           throw new TypeError("scene.add() expects a retained element or group");
         }
+        const additions = groups.has(value) ? groupMembers.get(value) : [value];
+        additions.forEach(member => {
+          if (sceneOwners.has(member)) throw new Error("retained element already belongs to a scene");
+        });
+        additions.forEach(member => {
+          sceneOwners.set(member, object);
+          const memberState = elementStates.get(member);
+          memberState.sceneVisible = false;
+          fx._visible(member.handle, false);
+          flattened.push(member);
+        });
         members.push(value);
         return value;
+      },
+      show() {
+        state.requested = true;
+        return object;
+      },
+      hide() {
+        state.requested = false;
+        return object;
       },
       elements() {
         return members.slice();
       },
       flattenedElements() {
-        const flattened = [];
-        members.forEach(value => {
-          if (groups.has(value)) flattened.push(...groupMembers.get(value));
-          else flattened.push(value);
-        });
-        return flattened;
+        return flattened.slice();
       }
     };
+    Object.defineProperty(object, "_sceneState", { value: state });
+    return object;
   };
 
   const scenes = [];
@@ -367,5 +421,22 @@
     all() {
       return scenes.slice();
     }
+  };
+
+  fx._beginFrame = function beginFrame() {
+    scenes.forEach(scene => { scene._sceneState.requested = false; });
+  };
+
+  fx._endFrame = function endFrame() {
+    scenes.forEach(scene => {
+      const state = scene._sceneState;
+      if (state.active === state.requested) return;
+      state.active = state.requested;
+      scene.flattenedElements().forEach(member => {
+        const memberState = elementStates.get(member);
+        memberState.sceneVisible = state.active;
+        fx._visible(member.handle, memberState.enabled && memberState.sceneVisible);
+      });
+    });
   };
 })(fx);

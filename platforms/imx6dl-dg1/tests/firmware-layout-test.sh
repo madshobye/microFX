@@ -9,6 +9,8 @@ PROVISION_PACKAGE="$ROOT/buildroot/package/microfx-provision/microfx-provision.m
 RELEASE="$ROOT/buildroot/board/imx6dl-dg1/rootfs-overlay/etc/microfx-release"
 ACTIVE_ROOT_UPDATER="$ROOT/scripts/install-active-root-ssh.sh"
 ACTIVE_ROOT_TARGET="$ROOT/scripts/lib/active-root-update-target.sh"
+NETWORK_UPDATER="$ROOT/scripts/install-network-hardening-ssh.sh"
+NETWORK_TARGET="$ROOT/scripts/lib/network-hardening-update-target.sh"
 
 grep -q 'install-ar6003-board-data.sh' "$POST_BUILD"
 grep -q 'verify-target-firmware.sh' "$POST_BUILD"
@@ -29,12 +31,26 @@ test -x "$ROOT/buildroot/board/imx6dl-dg1/rootfs-overlay/usr/sbin/microfx-recove
 test -x "$ROOT/buildroot/board/imx6dl-dg1/rootfs-overlay/usr/sbin/microfx-recovery-client"
 test -x "$ACTIVE_ROOT_UPDATER"
 test -x "$ACTIVE_ROOT_TARGET"
+test -x "$NETWORK_UPDATER"
+test -x "$NETWORK_TARGET"
 test ! -e "$ROOT/buildroot/board/imx6dl-dg1/rootfs-overlay/etc/init.d/S42dropbear-debug"
 grep -q 'root-update-backups' "$ACTIVE_ROOT_TARGET"
 grep -q "default .* dev wlan1" "$ACTIVE_ROOT_TARGET"
 grep -q '\[d\]ropbear' "$ACTIVE_ROOT_TARGET"
 if grep -E 'S41wifi|S39dropbear-debug|wifi-connect|wpa_supplicant' "$ACTIVE_ROOT_TARGET" >/dev/null; then
   echo "active-root updater is allowed to change the client Wi-Fi or SSH service" >&2
+  exit 1
+fi
+for required in S39dropbear-debug S39recovery-client S40canvas S41wifi \
+  microfx-recovery-guardian microfx-recovery-client wifi-connect wifi-watchdog; do
+  grep -q "$required" "$NETWORK_TARGET" || {
+    echo "network hardening updater is missing $required" >&2
+    exit 1
+  }
+done
+if grep -E 'wpa_supplicant\.conf|microfx-product\.conf' \
+     "$NETWORK_TARGET" "$NETWORK_UPDATER" >/dev/null; then
+  echo "network hardening updater can replace credentials or the proven connector" >&2
   exit 1
 fi
 if grep -E 'hostapd[[:space:]].*-B|dnsmasq[[:space:]]+--|set type __ap|power_save|radio-policy|wifi-policy' \

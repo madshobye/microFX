@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 export const defaultCapacities = Object.freeze({
   sdf: 256,
-  quad: 256,
+  quad: 512,
   mesh: 16,
   text: 32,
   image: 16
@@ -68,6 +68,8 @@ function instrumentedNativeFx(root, capacities) {
   }
 
   const fx = {
+    width: 1920,
+    height: 1080,
     _rect: add("quad"),
     _gradientRect: add("quad"),
     _background: add("quad"),
@@ -76,6 +78,9 @@ function instrumentedNativeFx(root, capacities) {
     _sdfRoundedRect: add("sdf"),
     _text: add("text"),
     _image: add("image"),
+    _imageScale(handle, scale) {
+      return mutation("transform", handle, [scale]);
+    },
     _cube: add("mesh"),
     _sphere: add("mesh"),
     _wireCube: add("mesh"),
@@ -125,7 +130,9 @@ function instrumentedNativeFx(root, capacities) {
       assert.ok((settings.targetFps ?? 30) > 0, "target FPS must be positive");
     },
     debugBar(value) {
-      assert.equal(typeof value, "boolean", "debugBar() expects a boolean");
+      assert.ok(typeof value === "boolean" ||
+                (typeof value === "number" && Number.isFinite(value) && value >= 0),
+                "debugBar() expects a boolean or non-negative minutes");
     },
     camera(...values) {
       finite("camera", values);
@@ -160,8 +167,10 @@ function instrumentedNativeFx(root, capacities) {
     beginFrame() {
       phase = "update";
       frameCalls = 0;
+      fx._beginFrame();
     },
     endFrame() {
+      fx._endFrame();
       maximumFrameCalls = Math.max(maximumFrameCalls, frameCalls);
       totalUpdateCalls += frameCalls;
     },
@@ -189,7 +198,8 @@ export function createAppRuntimeTest({
   assert.equal(typeof source, "string", "application source is required");
   assert.equal(typeof runtimeSource, "string", "retained runtime source is required");
   const native = instrumentedNativeFx(root, capacities);
-  const context = vm.createContext({ fx: native.fx, console, Math, Date });
+  const context = vm.createContext({ fx: native.fx, width: 1920, height: 1080,
+                                     console, Math, Date });
   vm.runInContext(runtimeSource, context, { filename: "retained.js", timeout });
   vm.runInContext(
     `${source}\n;globalThis.__microfxUpdate = typeof update === "function" ? update : null;`,

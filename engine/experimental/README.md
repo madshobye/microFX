@@ -25,9 +25,8 @@ membership, logical dimensions, orientation, blend, opacity, effects, and
 per-layer pixel density, then emits the exact numeric requests consumed by the
 C planner. `layer_stack.c` validates the same bounded descriptor before
 planning. Both implementations are test-only prototypes; neither is embedded
-in the runtime or linked into the appliance renderer yet. The i.MX6 hardware probe in
-`platforms/imx6dl-dg1/COMPOSITOR.md` is the gate before enabling any native
-plane backend.
+in the runtime or linked into the appliance renderer. The single GLES renderer
+remains authoritative.
 
 The contract also adopts Aura's useful rule that render-target orientation and
 logical dimensions must be explicit. A later target implementation must carry

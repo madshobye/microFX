@@ -37,7 +37,8 @@ asset trees are kept as whole-project snapshots under each project's
 `revisions/` directory, with a bounded history of 20. Inspection is read-only;
 restoration first preserves the current state as another snapshot. Legacy
 code-only revisions remain readable and restorable. The PeerJS device ID is read
-from `/data/config/peer-id` and defaults to `microfx-demo`.
+from `/data/config/peer-id`. The DG1 first-boot identity helper creates a stable
+human-readable default there; a later portal edit remains authoritative.
 
 Assets remain binary-safe on the JSON wire. Studio uses chunks of at most 48
 KiB while the device enforces a 128 KiB decoded chunk ceiling and a 16 MiB

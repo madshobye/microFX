@@ -3,14 +3,14 @@ fx.configure({
   pixelDensity: "auto",
   minimumPixelDensity: 0.5,
   quality: "balanced",
-  debugBar: false
+  debugBar: 10
 });
 
 const scene = fx.scenes.add(fx.scene({ name: "layered-poster" }));
 scene.add(fx.background(0x17112cff, 0x03040aff));
 
 const mark = scene.add(fx.image("assets/images/microfx-mark.png",
-  960, 535, 310, 310, 0xffffffff)).opacity(0.82);
+  960, 535, 310 / 192, 0xffffffff)).opacity(0.82);
 
 const panels = [
   scene.add(fx.gradientRect(215, 155, 620, 690, 0x5ce4ffff, 0x163b8dff)).opacity(0.72),
@@ -32,6 +32,7 @@ const counter = scene.add(fx.text("FRAME 0000", 1510, 1005, 17, 0xffdc6eff));
 let frame = 0;
 
 function update(time) {
+  scene.show();
   frame += 1;
   mark.position(960 + Math.sin(time * 0.23) * 28,
                 535 + Math.cos(time * 0.19) * 18,

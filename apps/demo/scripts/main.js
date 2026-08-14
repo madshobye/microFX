@@ -5,11 +5,11 @@ fx.configure({
   pixelDensity: "auto",       // or a fixed value from 0.25 to 1.0
   minimumPixelDensity: 0.50,
   targetFps: 30,
-  debugBar: true
+  debugBar: 10
 });
 
 // This can also be changed from update() when an application wants its own UI.
-fx.debugBar(true);
+fx.debugBar(10);
 
 const scene = fx.scenes.add(fx.scene({ name: "default-demo" }));
 
@@ -53,6 +53,7 @@ sideCube.effect(fx.effects.gradient, 0.85, 1.0);
 sideSphere.effect(fx.effects.gradient, 0.85, 1.0);
 
 function update(time, delta) {
+    scene.show();
   fx.camera(1.2 * Math.sin(time * 0.10), 3.3, 9.5, 0, 1.2, 0, 48);
   sun.position(1530 + Math.sin(time * 0.35) * 55, 210);
   pulse.position(390, 220 + Math.sin(time * 0.8) * 45);

@@ -1,4 +1,5 @@
 #include "microfx/scene.h"
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -21,11 +22,11 @@ void MicroFxSceneInit(MicroFxScene *scene)
     scene->runtime.depthBits = 16;
     scene->runtime.automaticDensity = true;
     scene->runtime.dithering = true;
-    scene->runtime.debugBar = true;
+    scene->runtime.debugBarUntilSeconds = 10.0f*60.0f;
     scene->runtime.profiling = false;
     scene->runtime.profileIntervalFrames = 120;
-    scene->runtime.densitySampleFrames = 180;
-    scene->runtime.densityStep = 0.025f;
+    scene->runtime.densitySampleFrames = 60;
+    scene->runtime.densityStep = 0.1f;
     scene->runtime.densityDownThreshold = 1.08f;
     scene->runtime.densityUpThreshold = 0.72f;
     scene->runtime.densityUpSamples = 4;
@@ -109,6 +110,30 @@ int MicroFxSceneAddBackground(MicroFxScene *scene, uint32_t topColor,
     return handle;
 }
 
+bool MicroFxSceneHasOpaqueCoveringBackground(const MicroFxScene *scene)
+{
+    if (!scene) return false;
+    for (int i = 0; i < scene->quadCount; i++) {
+        const MicroFxQuadElement *element = &scene->quad[i];
+        if (!element->background || !element->visible ||
+            element->kind != MICROFX_QUAD_RECT ||
+            fabsf(element->rotation) > 0.0001f || element->opacity < 0.999f ||
+            (element->topColor & 255u) != 255u ||
+            (element->bottomColor & 255u) != 255u) {
+            continue;
+        }
+        const float left = element->x - element->width*0.5f;
+        const float right = element->x + element->width*0.5f;
+        const float top = element->y - element->height*0.5f;
+        const float bottom = element->y + element->height*0.5f;
+        if (left <= 0.0f && top <= 0.0f &&
+            right >= MICROFX_DESIGN_WIDTH && bottom >= MICROFX_DESIGN_HEIGHT) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool MicroFxSceneMove(MicroFxScene *scene, int handle, float x, float y,
                      float rotation)
 {
@@ -129,7 +154,6 @@ bool MicroFxSceneMove(MicroFxScene *scene, int handle, float x, float y,
     if (kind == MICROFX_HANDLE_IMAGE && index >= 0 && index < scene->imageCount) {
         MicroFxImageElement *element = &scene->image[index];
         element->x = x; element->y = y; element->rotation = rotation;
-        scene->imageDirty = true;
         return true;
     }
     return false;
@@ -215,18 +239,26 @@ int MicroFxSceneAddText(MicroFxScene *scene, const char *text, float x, float y,
 }
 
 int MicroFxSceneAddImage(MicroFxScene *scene, const char *assetPath,
-                        float x, float y, float width, float height,
-                        uint32_t tint)
+                        float x, float y, float scale, uint32_t tint)
 {
-    if (!assetPath || !assetPath[0] || width <= 0.0f || height <= 0.0f ||
+    if (!assetPath || !assetPath[0] || scale <= 0.0f ||
         scene->imageCount >= MICROFX_MAX_IMAGE_ELEMENTS) return -1;
     int index = scene->imageCount++;
     MicroFxImageElement *element = &scene->image[index];
     snprintf(element->assetPath, sizeof(element->assetPath), "%s", assetPath);
-    element->x = x; element->y = y; element->width = width; element->height = height;
+    element->x = x; element->y = y; element->scale = scale;
     element->tint = tint; element->opacity = 1.0f; element->visible = true;
     scene->imageDirty = true;
     return MICROFX_HANDLE_IMAGE | index;
+}
+
+bool MicroFxSceneSetImageScale(MicroFxScene *scene, int handle, float scale)
+{
+    if ((handle & MICROFX_HANDLE_KIND_MASK) != MICROFX_HANDLE_IMAGE || scale <= 0.0f)
+        return false;
+    int index=handle & MICROFX_HANDLE_INDEX_MASK;
+    if(index<0 || index>=scene->imageCount)return false;
+    scene->image[index].scale=scale;scene->imageDirty=true;return true;
 }
 
 bool MicroFxSceneSetText(MicroFxScene *scene, int handle, const char *text)
@@ -275,7 +307,7 @@ bool MicroFxSceneSetColor(MicroFxScene *scene, int handle, uint32_t color)
         return true;
     }
     if (kind == MICROFX_HANDLE_IMAGE && index < scene->imageCount) {
-        scene->image[index].tint = color; scene->imageDirty = true; return true;
+        scene->image[index].tint = color; return true;
     }
     return false;
 }
@@ -296,7 +328,7 @@ bool MicroFxSceneSetOpacity(MicroFxScene *scene, int handle, float opacity)
         scene->text[index].opacity = opacity; scene->textDirty = true; return true;
     case MICROFX_HANDLE_IMAGE:
         if (index < 0 || index >= scene->imageCount) return false;
-        scene->image[index].opacity = opacity; scene->imageDirty = true; return true;
+        scene->image[index].opacity = opacity; return true;
     default:
         return false;
     }
@@ -308,19 +340,27 @@ bool MicroFxSceneSetVisible(MicroFxScene *scene, int handle, bool visible)
     switch (handle & MICROFX_HANDLE_KIND_MASK) {
     case MICROFX_HANDLE_SDF:
         if (index < 0 || index >= scene->sdfCount) return false;
+        if (scene->sdf[index].visible == visible) return true;
         scene->sdf[index].visible = visible; scene->sdfDirty = true; return true;
     case MICROFX_HANDLE_QUAD:
         if (index < 0 || index >= scene->quadCount) return false;
+        if (scene->quad[index].visible == visible) return true;
         scene->quad[index].visible = visible; scene->quadDirty = true; return true;
     case MICROFX_HANDLE_MESH:
         if (index < 0 || index >= scene->meshCount) return false;
-        scene->mesh[index].visible = visible; scene->meshStateDirty = true; return true;
+        if (scene->mesh[index].visible == visible) return true;
+        scene->mesh[index].visible = visible;
+        scene->meshGeometryDirty = true;
+        scene->meshStateDirty = true;
+        return true;
     case MICROFX_HANDLE_TEXT:
         if (index < 0 || index >= scene->textCount) return false;
+        if (scene->text[index].visible == visible) return true;
         scene->text[index].visible = visible; scene->textDirty = true; return true;
     case MICROFX_HANDLE_IMAGE:
         if (index < 0 || index >= scene->imageCount) return false;
-        scene->image[index].visible = visible; scene->imageDirty = true; return true;
+        if (scene->image[index].visible == visible) return true;
+        scene->image[index].visible = visible; return true;
     default: return false;
     }
 }

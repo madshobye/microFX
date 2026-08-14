@@ -11,10 +11,16 @@ CANVAS_FAIL_FAST=${CANVAS_FAIL_FAST:-1}
 MICROFX_DEFAULT_PEER_ID=${MICROFX_DEFAULT_PEER_ID:-graphics-demo}
 MICROFX_SETUP_SSID=${MICROFX_SETUP_SSID:-graphics-setup}
 MICROFX_SETUP_PASSWORD=${MICROFX_SETUP_PASSWORD:-graphicssetup}
+identity_library=${MICROFX_IDENTITY_LIBRARY:-/usr/lib/microfx/device-identity.sh}
+[ ! -r "$identity_library" ] || {
+    . "$identity_library"
+    microfx_load_device_identity
+}
 MICROFX_DATA_ROOT=${MICROFX_DATA_ROOT:-/data}
 MICROFX_RUN_ROOT=${MICROFX_RUN_ROOT:-/run}
 MICROFX_FACTORY_APP=${MICROFX_FACTORY_APP:-/usr/bin/canvas-demo}
 MICROFX_ONBOARDING_SCRIPT=${MICROFX_ONBOARDING_SCRIPT:-/usr/share/microfx/onboarding.js}
+MICROFX_ERROR_SCRIPT=${MICROFX_ERROR_SCRIPT:-/usr/share/microfx/error.js}
 MICROFX_HEALTH_SECONDS=${MICROFX_HEALTH_SECONDS:-2}
 MICROFX_REQUIRE_DATA_MOUNT=${MICROFX_REQUIRE_DATA_MOUNT:-1}
 reload_request=$MICROFX_RUN_ROOT/microfx-project-reload
@@ -63,18 +69,33 @@ write_activation_status() {
 }
 
 renderer_failure_detail() {
-    detail=$(tail -n 1 "$log" 2>/dev/null | tr '\t\r\n' '   ')
+    first_line=$((renderer_log_start + 1))
+    detail=$(sed -n "${first_line},\$p" "$log" 2>/dev/null | grep 'MICROFX_JS_ERROR ' | tail -n 1 | sed 's/^.*MICROFX_JS_ERROR //' | tr '\t\r\n' '   ' | sed 's/[[:space:]]*$//')
+    [ -n "$detail" ] || detail=$(sed -n "${first_line},\$p" "$log" 2>/dev/null | tail -n 1 | tr '\t\r\n' '   ' | sed 's/[[:space:]]*$//')
     [ -n "$detail" ] || detail="renderer exited during health check"
     printf '%s' "$detail"
 }
 
 wait_for_activation_request() {
+    error_detail=${1:-}
     echo "Renderer stopped; waiting for the next project activation" >>"$log"
+    if [ -n "$error_detail" ] && [ -r "$MICROFX_ERROR_SCRIPT" ]; then
+        echo "Starting project error application" >>"$log"
+        MICROFX_SCRIPT="$MICROFX_ERROR_SCRIPT" \
+        MICROFX_ERROR_DETAIL="$error_detail" \
+          "$MICROFX_FACTORY_APP" >>"$log" 2>&1 &
+        child=$!
+    fi
     while :; do
         if [ -f "$reload_request" ]; then
             IFS="$(printf '\t')" read -r activation_token activation_project <"$reload_request" || true
             rm -f "$reload_request"
             if [ -n "$activation_token" ] && [ -n "$activation_project" ]; then
+                if [ -n "$child" ]; then
+                    kill "$child" 2>/dev/null || true
+                    wait "$child" 2>/dev/null || true
+                    child=
+                fi
                 write_activation_status "$activation_token" "$activation_project" pending "starting renderer after previous failure"
                 return 0
             fi
@@ -111,11 +132,26 @@ if [ ! -e "$onboarding_marker" ] &&
     touch "$onboarding_marker"
     peer_id=$MICROFX_DEFAULT_PEER_ID
     [ ! -s "$MICROFX_DATA_ROOT/config/peer-id" ] || peer_id=$(head -n 1 "$MICROFX_DATA_ROOT/config/peer-id")
+    wifi_qr=
+    if command -v qrencode >/dev/null 2>&1; then
+        wifi_payload="WIFI:T:WPA;S:$MICROFX_SETUP_SSID;P:$MICROFX_SETUP_PASSWORD;;"
+        wifi_qr=$(qrencode -t ASCII -m 0 "$wifi_payload" 2>/dev/null | awk '
+          {
+            row=""
+            for (column=1; column<=length($0); column+=2) {
+              row=row (substr($0,column,2)=="  " ? "0" : "1")
+            }
+            if (length(row)>0) print row
+          }
+        ' || true)
+    fi
     echo "Starting 40-second onboarding application" >>"$log"
     MICROFX_SCRIPT="$MICROFX_ONBOARDING_SCRIPT" \
     MICROFX_PEER_ID="$peer_id" \
     MICROFX_AP_SSID="$MICROFX_SETUP_SSID" \
     MICROFX_AP_PASSWORD="$MICROFX_SETUP_PASSWORD" \
+    MICROFX_WIFI_QR="$wifi_qr" \
+    MICROFX_CAPTIVE_PORTAL=1 \
     MICROFX_PROVISIONING="${MICROFX_PROVISIONING:-0}" \
       "$MICROFX_FACTORY_APP" >>"$log" 2>&1 &
     child=$!
@@ -125,12 +161,15 @@ fi
 
 activation_token=
 activation_project=
+renderer_log_start=0
 
 while :; do
     app=$MICROFX_FACTORY_APP
     data_available &&
       [ -x "$apps_root/current-runtime/canvas-demo" ] &&
       app=$apps_root/current-runtime/canvas-demo
+    renderer_log_start=$(wc -l "$log" 2>/dev/null | awk '{print $1}')
+    case "$renderer_log_start" in ''|*[!0-9]*) renderer_log_start=0;; esac
     echo "Starting $app" >>"$log"
     (
       apply_benchmark_overrides
@@ -159,7 +198,7 @@ while :; do
             activation_token=
             activation_project=
             if [ "$CANVAS_FAIL_FAST" = "1" ]; then
-                wait_for_activation_request
+                wait_for_activation_request "$failure_detail"
             fi
             sleep 1
             continue
@@ -212,7 +251,7 @@ while :; do
     fi
     if [ "$CANVAS_FAIL_FAST" = "1" ]; then
         echo "Canvas application exited; fail-fast supervisor will wait for an explicit activation" >>"$log"
-        wait_for_activation_request
+        wait_for_activation_request "$(renderer_failure_detail)"
         continue
     fi
     echo "Canvas application exited; restarting" >>"$log"

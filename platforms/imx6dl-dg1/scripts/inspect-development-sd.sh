@@ -51,16 +51,30 @@ for partition in 2 3; do
     show_stat "$device" /root/.ssh/authorized_keys
     show_file "$device" /etc/init.d/S39dropbear-debug
     show_file "$device" /etc/init.d/S39recovery-client
+    show_file "$device" /etc/init.d/S41wifi
+    show_file "$device" /usr/sbin/microfx-recovery-guardian
+    show_file "$device" /usr/sbin/microfx-recovery-client
 done
 
 device="${DISK}s4"
 echo "===== DATA PARTITION 4 ====="
-for path in / /ssh /state /apps /apps/current /apps/releases/factory; do
+for path in / /ssh /state /state/root-update-backups /recovery /apps /apps/current /apps/releases /apps/releases/factory; do
     echo "--- ls $path"
     "$E2FS/debugfs" -R "ls -l $path" "$device" 2>&1 || true
 done
 show_stat "$device" /ssh/dropbear_ed25519_host_key
 show_file "$device" /state/dropbear.log
 show_file "$device" /state/canvas.log
+show_file "$device" /state/wifi.log
+show_file "$device" /state/wpa_supplicant.log
+show_file "$device" /state/boot-count
+show_file "$device" /state/short-boot-count
+show_file "$device" /state/boot-pending
+show_file "$device" /state/boot-stable
+show_stat "$device" /config/wpa_supplicant.conf
+show_stat "$device" /apps/current
+show_stat "$device" /apps/current-runtime
+show_stat "$device" /apps/previous-runtime
+show_file "$device" /apps/projects/demo-scene/main.js
 
 echo "Read-only diagnostic complete; $DISK remains unmounted"

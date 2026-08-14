@@ -5,10 +5,9 @@ the physical i.MX6DL appliance. The normal firmware build, A/B SD-card layout,
 SSH update workflow, and single DRM/GBM/EGL renderer remain the authoritative
 general-development setup.
 
-The independent boot work in `bootloader/` and the multi-plane compositor work
-in `COMPOSITOR.md` are feasibility mappings only. Neither is packaged by the
-normal build or installers. `tests/prototype-isolation-test.sh` enforces that
-boundary.
+The independent boot work in `bootloader/` is a feasibility mapping only. It is
+not packaged by the normal build or installers.
+`tests/prototype-isolation-test.sh` enforces that boundary.
 
 ## Verified without hardware
 
@@ -90,9 +89,6 @@ the resulting time state rather than requiring `ntpd` to remain resident.
 
 ## Later experimental validation
 
-- Probe DRM plane formats and scaling with `scripts/drm-plane-probe.sh` before
-  implementing a second 2D composition path. Keep it optional until blending,
-  color conversion, synchronization, and fallback behavior are proven.
 - Complete the DDR, storage offsets, pin multiplexing, and serial recovery facts
   in `bootloader/` before producing any custom boot image. Test it on a spare SD
   card; do not replace the current boot chain during general development.

@@ -240,6 +240,7 @@ static bool Rebuild(MicroFxMeshRenderer *renderer, MicroFxScene *scene)
     Model models[MICROFX_MAX_MESH_ELEMENTS]={0};
     int capacity=0;
     for(int i=0;i<scene->meshCount;i++){
+        if(!scene->mesh[i].visible)continue;
         if(scene->mesh[i].kind==MICROFX_MESH_CUBE)capacity+=36;
         else if(scene->mesh[i].kind==MICROFX_MESH_SPHERE)
             capacity+=SPHERE_RINGS*SPHERE_SLICES*6;
@@ -265,6 +266,7 @@ static bool Rebuild(MicroFxMeshRenderer *renderer, MicroFxScene *scene)
     }
     int cursor=0;
     for (int i=0;i<scene->meshCount;i++) {
+        if(!scene->mesh[i].visible)continue;
         if (scene->mesh[i].kind==MICROFX_MESH_CUBE) Cube(vertices,&cursor,i);
         else if(scene->mesh[i].kind==MICROFX_MESH_SPHERE)Sphere(vertices,&cursor,i);
         else if(scene->mesh[i].kind==MICROFX_MESH_WIRE_CUBE)WireCube(vertices,&cursor,i);

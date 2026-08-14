@@ -55,8 +55,9 @@ bool MicroFxQuadRendererInit(MicroFxQuadRenderer *renderer)
     glGetProgramiv(renderer->program, GL_LINK_STATUS, &linked);
     if (!linked) return false;
     renderer->viewportLocation = glGetUniformLocation(renderer->program, "uViewport");
-    glGenBuffers(1, &renderer->vertexBuffer);
-    return renderer->vertexBuffer != 0;
+    glGenBuffers(3, renderer->vertexBuffers);
+    return renderer->vertexBuffers[0] != 0 && renderer->vertexBuffers[1] != 0 &&
+           renderer->vertexBuffers[2] != 0;
 }
 
 static void Color(float out[4], uint32_t color)
@@ -81,11 +82,17 @@ static void Rebuild(MicroFxQuadRenderer *renderer, MicroFxScene *scene)
 {
     QuadVertex vertices[MICROFX_MAX_QUAD_ELEMENTS*MAX_VERTICES_PER_ELEMENT];
     int cursor = 0;
+    renderer->backgroundOpaque = true;
     for (int pass=0;pass<2;pass++) {
       for (int i = 0; i < scene->quadCount; i++) {
         const MicroFxQuadElement *e = &scene->quad[i];
         if(e->background!=(pass==0))continue;
         if (!e->visible) continue;
+        if (pass == 0 &&
+            (((e->topColor & 255u) != 255u) ||
+             ((e->bottomColor & 255u) != 255u) || e->opacity < 0.999f)) {
+            renderer->backgroundOpaque = false;
+        }
         if (e->kind == MICROFX_QUAD_CIRCLE) {
             const float tau = 6.28318530717958647692f;
             float radius = e->width*0.5f;
@@ -111,7 +118,9 @@ static void Rebuild(MicroFxQuadRenderer *renderer, MicroFxScene *scene)
       }
         if(pass==0)renderer->backgroundVertexCount=cursor;
     }
-    glBindBuffer(GL_ARRAY_BUFFER, renderer->vertexBuffer);
+    renderer->activeVertexBuffer = (renderer->activeVertexBuffer + 1u)%3u;
+    glBindBuffer(GL_ARRAY_BUFFER,
+                 renderer->vertexBuffers[renderer->activeVertexBuffer]);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cursor*sizeof(*vertices)),
                  vertices, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -126,7 +135,8 @@ void MicroFxQuadRendererDraw(MicroFxQuadRenderer *renderer, MicroFxScene *scene,
     if (scene->quadDirty) Rebuild(renderer, scene);
     glUseProgram(renderer->program);
     glUniform2f(renderer->viewportLocation, (float)width, (float)height);
-    glBindBuffer(GL_ARRAY_BUFFER, renderer->vertexBuffer);
+    glBindBuffer(GL_ARRAY_BUFFER,
+                 renderer->vertexBuffers[renderer->activeVertexBuffer]);
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(QuadVertex),
@@ -136,8 +146,12 @@ void MicroFxQuadRendererDraw(MicroFxQuadRenderer *renderer, MicroFxScene *scene,
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    if (background && renderer->backgroundOpaque) {
+        glDisable(GL_BLEND);
+    } else {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
     int first=background?0:renderer->backgroundVertexCount;
     int count=background?renderer->backgroundVertexCount:
                          renderer->vertexCount-renderer->backgroundVertexCount;
@@ -150,7 +164,7 @@ void MicroFxQuadRendererDraw(MicroFxQuadRenderer *renderer, MicroFxScene *scene,
 
 void MicroFxQuadRendererDestroy(MicroFxQuadRenderer *renderer)
 {
-    if (renderer->vertexBuffer) glDeleteBuffers(1, &renderer->vertexBuffer);
+    glDeleteBuffers(3, renderer->vertexBuffers);
     if (renderer->program) glDeleteProgram(renderer->program);
     *renderer = (MicroFxQuadRenderer){ 0 };
 }

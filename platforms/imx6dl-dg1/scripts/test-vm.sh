@@ -9,7 +9,7 @@ microfx_require_build_vm
 
 # Stage the authoritative repository instead of relying on a Lima host mount.
 # This remains valid after a checkout is moved or the VM predates its path.
-SOURCE_ARCHIVE=$(mktemp /tmp/microfx-test-source.XXXXXX.tar)
+SOURCE_ARCHIVE=$(mktemp /tmp/microfx-test-source.XXXXXX)
 trap 'rm -f "$SOURCE_ARCHIVE"' EXIT HUP INT TERM
 COPYFILE_DISABLE=1 COPY_EXTENDED_ATTRIBUTES_DISABLE=1 tar -C "$REPO_DIR" \
     --exclude=.git \

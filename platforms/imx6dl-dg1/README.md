@@ -45,12 +45,10 @@ hardware testing.
 
 ## Experimental mappings
 
-The custom bootloader files in `bootloader/` and the IPU/DRM layer proposal in
-`COMPOSITOR.md` are isolated prototypes. They are not inputs to `build.sh`, the
-Buildroot configuration, the SD installers, or the runtime supervisor. The
-existing boot chain and single Etnaviv OpenGL ES render path remain the
-authoritative general-development setup until separate hardware validation is
-complete. The staged checks and acceptance criteria are recorded in
+The custom bootloader files in `bootloader/` are an isolated prototype. They
+are not inputs to `build.sh`, the Buildroot configuration, the SD installers,
+or the runtime supervisor. The existing boot chain and single Etnaviv OpenGL ES
+render path remain authoritative. Hardware validation gates are recorded in
 [`HARDWARE-VALIDATION.md`](HARDWARE-VALIDATION.md).
 
 ## SD installation
@@ -82,8 +80,8 @@ MICROFX_OUTPUT_HEIGHT=0
 MICROFX_PIXEL_DENSITY=auto
 MICROFX_MIN_PIXEL_DENSITY=0.50
 MICROFX_TARGET_FPS=30
-MICROFX_DENSITY_SAMPLE_FRAMES=180
-MICROFX_DENSITY_STEP=0.025
+MICROFX_DENSITY_SAMPLE_FRAMES=60
+MICROFX_DENSITY_STEP=0.1
 MICROFX_DENSITY_DOWN_THRESHOLD=1.08
 MICROFX_DENSITY_UP_THRESHOLD=0.72
 MICROFX_DENSITY_UP_SAMPLES=4
@@ -100,8 +98,12 @@ upscale pass.
 
 At boot the platform supervisor runs the portable microFX onboarding app for 40
 seconds before starting the active project. It shows the configured PeerJS
-device ID and a countdown. Setup-network information is included only when the
-platform setup network is enabled.
+device ID and a countdown. On first boot, a board-derived (or randomly seeded)
+human-readable suffix creates unique setup SSID, setup password, and PeerJS
+defaults in `/data/config/device-identity.conf`; the editable PeerJS value is
+kept separately in `/data/config/peer-id`. Setup-network information and a
+Wi-Fi registration QR are included only when the platform setup network is
+enabled.
 
 Development images default to `MICROFX_PROVISIONING=0` in
 `/etc/microfx.conf`. This prevents hostapd, dnsmasq, the setup HTTP server, and
@@ -114,6 +116,11 @@ Product defaults are centralized in `/etc/microfx-product.conf`. The platform
 adapter owns hostapd, dnsmasq, HTTP, Wi-Fi interface selection, and init
 integration; none of those concerns enter the graphics engine or JavaScript
 application API.
+
+If Save & Run activates JavaScript that fails to parse or throws during the
+health check, the supervisor keeps the failed activation status and starts the
+firmware-owned error scene. It presents the QuickJS message and source line as
+white text on black until the next activation request; SSH remains independent.
 
 The setup-network watchdog validates more than daemon PIDs: it requires hostapd
 to report an active beacon, AP mode, an UP link, `10.42.0.1/24`, and a successful
@@ -188,6 +195,7 @@ and retrieve a screenshot with:
 ./scripts/canvas-upload.sh 192.168.3.109
 ./scripts/canvas-screenshot.sh 192.168.3.109
 ./scripts/install-active-root-ssh.sh 192.168.3.109
+./scripts/install-network-hardening-ssh.sh 192.168.3.109
 ./scripts/canvas-profile.sh 192.168.3.109 on
 ./scripts/canvas-profile.sh 192.168.3.109 status
 ./scripts/canvas-profile.sh 192.168.3.109 off
@@ -208,19 +216,27 @@ service, SSH service, kernel, DTB, inactive root, or partition layout, and it
 does not reboot. Use a complete SD image for a release or when both root slots
 must match.
 
+`install-network-hardening-ssh.sh` is the still narrower exception for the
+reviewed development recovery services. It checksums a fixed file list, never
+includes WPA credentials, backs up every replacement, installs atomically, and
+does not restart the live Wi-Fi or SSH session. It updates only the active root;
+the full SD installer remains authoritative for matching both A/B slots.
+
 In the development profile, `S39dropbear-debug` starts key-only SSH before the
-graphics and normal networking services. A RAM-only recovery guardian then
-allows the normal client path 60 seconds to establish an addressed default
-route. After three failed health checks it stops the normal Wi-Fi processes and
+graphics and normal networking services. The normal `S41wifi` connector keeps
+its hardware-proven boot position and performs up to four clean association
+rounds. Its watchdog and the RAM-only recovery guardian wait 120 seconds so
+they cannot compete with those rounds. After three failed health checks the guardian stops the normal Wi-Fi processes and
 uses the frozen, known-working `wlan1` + `wpa_supplicant` + `udhcpc` sequence
 with `/data/config/wpa_supplicant.conf` (or the image fallback configuration),
-then starts SSH again. This recovery path never creates an access point.
+then starts SSH again. Recovery is bounded; on failure it removes its ownership
+flag and restarts normal Wi-Fi. This path never creates an access point.
 
-The same debug-only guardian counts boots in `/data/state`. A boot becomes
-stable after ten minutes of uptime; three consecutive boots that end before
-that marker cause stored-network recovery to start immediately on the next
-boot. No counters are written when `/data` is not actually mounted, and the
-entire guardian is disabled unless both `CANVAS_DEBUG=1` and `CANVAS_SSH=1`.
+The same SSH-development guardian counts boots in `/data/state`. A boot becomes
+stable after three minutes of uptime; two consecutive boots that end before
+that marker cause `S40canvas` to remain off for the next boot while normal
+Wi-Fi and SSH recover. No counters are written when `/data` is not actually
+mounted, and the guardian is disabled unless `CANVAS_SSH=1`.
 
 `/etc/canvas.conf` controls development diagnostics. Routine logs stay in RAM
 under `/tmp`; enable `CANVAS_PERSIST_LOGS=1` only when persistence is worth the

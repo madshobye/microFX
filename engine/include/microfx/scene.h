@@ -4,8 +4,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define MICROFX_DESIGN_WIDTH 1920
+#define MICROFX_DESIGN_HEIGHT 1080
+
 #define MICROFX_MAX_SDF_ELEMENTS 256
-#define MICROFX_MAX_QUAD_ELEMENTS 256
+#define MICROFX_MAX_QUAD_ELEMENTS 512
 #define MICROFX_MAX_MESH_ELEMENTS 16
 #define MICROFX_MAX_TEXT_ELEMENTS 32
 #define MICROFX_MAX_IMAGE_ELEMENTS 16
@@ -92,8 +95,7 @@ typedef struct {
     char assetPath[MICROFX_MAX_ASSET_PATH];
     float x;
     float y;
-    float width;
-    float height;
+    float scale;
     float rotation;
     uint32_t tint;
     float opacity;
@@ -128,7 +130,9 @@ typedef struct {
     int depthBits;
     bool automaticDensity;
     bool dithering;
-    bool debugBar;
+    // 0 disables diagnostics, a negative value keeps them visible, and a
+    // positive value is the absolute runtime second when they disappear.
+    float debugBarUntilSeconds;
     bool profiling;
     int profileIntervalFrames;
     int densitySampleFrames;
@@ -177,6 +181,7 @@ int MicroFxSceneAddGradientRect(MicroFxScene *scene, float x, float y,
                                uint32_t bottomColor);
 int MicroFxSceneAddBackground(MicroFxScene *scene, uint32_t topColor,
                              uint32_t bottomColor);
+bool MicroFxSceneHasOpaqueCoveringBackground(const MicroFxScene *scene);
 bool MicroFxSceneMove(MicroFxScene *scene, int handle, float x, float y,
                      float rotation);
 int MicroFxSceneAddCube(MicroFxScene *scene, float x, float y, float z,
@@ -195,8 +200,8 @@ bool MicroFxSceneTransform(MicroFxScene *scene, int handle, float x, float y,
 int MicroFxSceneAddText(MicroFxScene *scene, const char *text, float x, float y,
                        float size, uint32_t color);
 int MicroFxSceneAddImage(MicroFxScene *scene, const char *assetPath,
-                        float x, float y, float width, float height,
-                        uint32_t tint);
+                        float x, float y, float scale, uint32_t tint);
+bool MicroFxSceneSetImageScale(MicroFxScene *scene, int handle, float scale);
 bool MicroFxSceneSetText(MicroFxScene *scene, int handle, const char *text);
 bool MicroFxSceneSetTextFont(MicroFxScene *scene, int handle,
                              const char *assetPath);

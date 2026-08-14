@@ -1,0 +1,171 @@
+--- a/src/platforms/rcore_drm.c
++++ b/src/platforms/rcore_drm.c
+@@ -136,6 +136,8 @@
+ 
+ static PlatformData platform = { 0 };   // Platform specific data
+ 
++#include "microfx_ipu_backend.inc"
++
+ //----------------------------------------------------------------------------------
+ // Local Variables Definition
+ //----------------------------------------------------------------------------------
+@@ -342,7 +344,28 @@
+ // Set window dimensions
+ void SetWindowSize(int width, int height)
+ {
+-    TRACELOG(LOG_WARNING, "SetWindowSize() not available on target platform");
++    if (!MicroFxIpuRequested())
++    {
++        TRACELOG(LOG_WARNING, "SetWindowSize() requires MICROFX_IPU_SCALER=1 on DRM");
++        return;
++    }
++    if (MicroFxIpuResizeSurface(width, height, platform.gbmDevice,
++                                &platform.gbmSurface, platform.device,
++                                platform.config, platform.context,
++                                &platform.surface) != 0)
++    {
++        TRACELOG(LOG_ERROR, "MICROFX_IPU failed to resize render surface to %dx%d", width, height);
++        return;
++    }
++    CORE.Window.screen.width = width;
++    CORE.Window.screen.height = height;
++    CORE.Window.render.width = width;
++    CORE.Window.render.height = height;
++    CORE.Window.renderOffset.x = 0;
++    CORE.Window.renderOffset.y = 0;
++    CORE.Window.currentFbo.width = width;
++    CORE.Window.currentFbo.height = height;
++    SetupViewport(width, height);
+ }
+ 
+ // Set window opacity, value opacity is between 0.0 and 1.0
+@@ -562,6 +585,17 @@
+ // Swap back buffer with front buffer (screen drawing)
+ void SwapScreenBuffer(void)
+ {
++    if (MicroFxIpuRequested())
++    {
++        if (MicroFxIpuPresent(platform.device, platform.surface,
++                              platform.gbmSurface, platform.crtc,
++                              platform.connector,
++                              &platform.connector->modes[platform.modeIndex]) != 0)
++        {
++            CORE.Window.shouldClose = true;
++        }
++        return;
++    }
+     static unsigned int swapCount = 0;
+     static int flipPending = 0;
+     static int flipWaiting = 0;
+@@ -919,18 +953,33 @@
+ 
+     const bool allowInterlaced = CORE.Window.flags & FLAG_INTERLACED_HINT;
+     const int fps = (CORE.Time.target > 0)? (1.0/CORE.Time.target) : 60;
++
++    uint modeWidth = CORE.Window.screen.width;
++    uint modeHeight = CORE.Window.screen.height;
++    if (MicroFxIpuRequested())
++    {
++        const char *outputWidth = getenv("MICROFX_IPU_OUTPUT_WIDTH");
++        const char *outputHeight = getenv("MICROFX_IPU_OUTPUT_HEIGHT");
++        if (!outputWidth || !outputHeight || atoi(outputWidth) < 320 || atoi(outputHeight) < 240)
++        {
++            TRACELOG(LOG_ERROR, "MICROFX_IPU missing valid native output dimensions");
++            return -1;
++        }
++        modeWidth = (uint)atoi(outputWidth);
++        modeHeight = (uint)atoi(outputHeight);
++    }
+ 
+     // Try to find an exact matching mode
+-    platform.modeIndex = FindExactConnectorMode(platform.connector, CORE.Window.screen.width, CORE.Window.screen.height, fps, allowInterlaced);
++    platform.modeIndex = FindExactConnectorMode(platform.connector, modeWidth, modeHeight, fps, allowInterlaced);
+ 
+     // If nothing found, try to find a nearly matching mode
+-    if (platform.modeIndex < 0) platform.modeIndex = FindNearestConnectorMode(platform.connector, CORE.Window.screen.width, CORE.Window.screen.height, fps, allowInterlaced);
++    if (platform.modeIndex < 0) platform.modeIndex = FindNearestConnectorMode(platform.connector, modeWidth, modeHeight, fps, allowInterlaced);
+ 
+     // If nothing found, try to find an exactly matching mode including interlaced
+-    if (platform.modeIndex < 0) platform.modeIndex = FindExactConnectorMode(platform.connector, CORE.Window.screen.width, CORE.Window.screen.height, fps, true);
++    if (platform.modeIndex < 0) platform.modeIndex = FindExactConnectorMode(platform.connector, modeWidth, modeHeight, fps, true);
+ 
+     // If nothing found, try to find a nearly matching mode including interlaced
+-    if (platform.modeIndex < 0) platform.modeIndex = FindNearestConnectorMode(platform.connector, CORE.Window.screen.width, CORE.Window.screen.height, fps, true);
++    if (platform.modeIndex < 0) platform.modeIndex = FindNearestConnectorMode(platform.connector, modeWidth, modeHeight, fps, true);
+ 
+     // If nothing found, there is no suitable mode
+     if (platform.modeIndex < 0)
+@@ -966,8 +1015,14 @@
+         return -1;
+     }
+ 
+-    platform.gbmSurface = gbm_surface_create(platform.gbmDevice, platform.connector->modes[platform.modeIndex].hdisplay,
+-        platform.connector->modes[platform.modeIndex].vdisplay, (getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? GBM_FORMAT_ARGB8888 : GBM_FORMAT_RGB565, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
++    uint32_t surfaceWidth = MicroFxIpuRequested()? (uint32_t)CORE.Window.screen.width : platform.connector->modes[platform.modeIndex].hdisplay;
++    uint32_t surfaceHeight = MicroFxIpuRequested()? (uint32_t)CORE.Window.screen.height : platform.connector->modes[platform.modeIndex].vdisplay;
++    uint32_t surfaceFormat = MicroFxIpuRequested()? GBM_FORMAT_XRGB8888 :
++        ((getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? GBM_FORMAT_ARGB8888 : GBM_FORMAT_RGB565);
++    uint32_t surfaceFlags = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING;
++    if (MicroFxIpuRequested()) surfaceFlags |= GBM_BO_USE_LINEAR;
++    platform.gbmSurface = gbm_surface_create(platform.gbmDevice, surfaceWidth,
++        surfaceHeight, surfaceFormat, surfaceFlags);
+     if (!platform.gbmSurface)
+     {
+         TRACELOG(LOG_WARNING, "DISPLAY: Failed to create GBM surface");
+@@ -987,10 +1042,10 @@
+     {
+         EGL_RENDERABLE_TYPE, (rlGetVersion() == RL_OPENGL_ES_30)? EGL_OPENGL_ES3_BIT : EGL_OPENGL_ES2_BIT,      // Type of context support
+         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,          // Don't use it on Android!
+-        EGL_RED_SIZE, (getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 5,
+-        EGL_GREEN_SIZE, (getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 6,
+-        EGL_BLUE_SIZE, (getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 5,
+-        EGL_ALPHA_SIZE, (getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 0,
++        EGL_RED_SIZE, MicroFxIpuRequested()? 8 : ((getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 5),
++        EGL_GREEN_SIZE, MicroFxIpuRequested()? 8 : ((getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 6),
++        EGL_BLUE_SIZE, MicroFxIpuRequested()? 8 : ((getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 5),
++        EGL_ALPHA_SIZE, MicroFxIpuRequested()? 0 : ((getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 0),
+         //EGL_TRANSPARENT_TYPE, EGL_NONE, // Request transparent framebuffer (EGL_TRANSPARENT_RGB does not work on RPI)
+         EGL_DEPTH_SIZE, getenv("MICROFX_DEPTH_BITS")? atoi(getenv("MICROFX_DEPTH_BITS")) : 16,
+         //EGL_STENCIL_SIZE, 8,      // Stencil buffer size
+@@ -1058,7 +1113,9 @@
+             continue;
+         }
+ 
+-        if (((getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? GBM_FORMAT_ARGB8888 : GBM_FORMAT_RGB565) == id)
++        uint32_t expectedFormat = MicroFxIpuRequested()? GBM_FORMAT_XRGB8888 :
++            ((getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? GBM_FORMAT_ARGB8888 : GBM_FORMAT_RGB565);
++        if (expectedFormat == (uint32_t)id)
+         {
+             TRACELOG(LOG_TRACE, "DISPLAY: Using EGL config: %d", i);
+             platform.config = configs[i];
+@@ -1118,6 +1175,14 @@
+     if (result != EGL_FALSE)
+     {
+         CORE.Window.ready = true;
++        if (MicroFxIpuInitialize(platform.fd, platform.gbmDevice,
++                platform.crtc->crtc_id,
++                platform.connector->modes[platform.modeIndex].hdisplay,
++                platform.connector->modes[platform.modeIndex].vdisplay) != 0)
++        {
++            TRACELOG(LOG_ERROR, "MICROFX_IPU initialization failed");
++            return -1;
++        }
+ 
+         CORE.Window.render.width = CORE.Window.screen.width;
+         CORE.Window.render.height = CORE.Window.screen.height;
+@@ -1181,6 +1246,15 @@
+ // Close platform
+ void ClosePlatform(void)
+ {
++    if (microFxIpu.initialized && microFxIpu.displayConfigured &&
++        platform.crtc && platform.connector)
++    {
++        drmModeSetCrtc(platform.fd, platform.crtc->crtc_id,
++            platform.crtc->buffer_id, platform.crtc->x, platform.crtc->y,
++            &platform.connector->connector_id, 1, &platform.crtc->mode);
++    }
++    MicroFxIpuShutdown();
++
+     if (platform.prevFB)
+     {
+         drmModeRmFB(platform.fd, platform.prevFB);

@@ -17,7 +17,8 @@ code outside the engine.
 ## Source layout and ownership
 
 - `apps/demo`: executable demonstration and its models/shaders.
-- `apps/onboarding`: portable 40-second boot information scene and portal QR.
+- `apps/onboarding`: portable 40-second boot information scene and Wi-Fi QR.
+- `apps/error`: firmware-owned black-screen JavaScript error presentation.
 - `engine`: reusable scene, script, renderer and asset modules. Platform-neutral
   interfaces belong here; direct DRM, Wi-Fi and init scripts do not.
 - `services/provision`: optional portable captive-portal handler and web UI;
@@ -56,8 +57,11 @@ Script exceptions are fail-fast. Keep construction out of `update(time, delta)`
 and extend the bindings only with bounded retained operations. See
 `engine/README.md` for the current API.
 
-The output mode defaults to the first preferred connected DRM mode. Renderer
-settings are read in this order: compiled defaults, `/etc/microfx.conf`,
+The output mode defaults to the first preferred connected DRM mode; do not
+replace that policy with a fixed 1080p mode. A future backend must atomic-test
+the preferred mode and try lower advertised modes when the SoC cannot drive it
+(for example, a 4K preference). Renderer settings are read in this order:
+compiled defaults, `/etc/microfx.conf`,
 `/data/config/microfx.conf`, the application's top-level `fx.configure({...})`,
 then `MICROFX_*` environment variables. This lets an application carry its own
 normal policy while preserving a final operator override. Supported keys are:
@@ -102,7 +106,7 @@ updates are separate and are not yet automated.
 Once per firmware boot, the supervisor first runs the firmware-owned engine with
 `apps/onboarding/scripts/main.js`. For 40 seconds it shows the current PeerJS ID
 and a countdown, then exits cleanly and starts the active project. Setup AP
-credentials and the portal QR are shown only when provisioning is enabled; the
+credentials and the Wi-Fi registration QR are shown only when provisioning is enabled; the
 default development policy instead identifies stored-network mode. The scene is
 regular JavaScript; only the supervisor's environment values are
 platform-specific. Restarting the canvas service does not replay it because
@@ -116,6 +120,12 @@ validated networks transactionally to `/data/config/wpa_supplicant.conf`;
 wpa_supplicant chooses among all saved networks. The configurable peer ID is
 stored at `/data/config/peer-id`. Captive HTTP/DNS are platform services and
 must remain outside the renderer.
+
+The first boot derives a stable human-readable suffix from board identity (or
+credited randomness when hardware identity is unavailable), then atomically
+stores setup SSID, setup password, and default PeerJS ID in
+`/data/config/device-identity.conf`. The portal's peer-ID edit remains the
+separate authoritative `/data/config/peer-id` value and survives later boots.
 
 Remote editing is also optional and separate. `services/peer-bridge` answers
 PeerJS DataChannels through pinned `sepfy/libpeer`, stores `main.js` and assets
@@ -161,6 +171,10 @@ The development-only active-root updater has a narrow, tested whitelist for
 init/configuration hardening. It must preserve the client Wi-Fi and SSH services,
 create a persistent backup, verify live health, and never be treated as an A/B
 firmware installer. Release images are still written to both root slots from SD.
+Network/SSH recovery changes use the separate, narrower
+`install-network-hardening-ssh.sh` workflow. It may replace only the reviewed
+connector, watchdog, recovery and related init files, never credentials; it
+must not restart the live network session during installation.
 
 The root artifact is a partition image, not a whole-card image. The supported
 installer requires an already prepared card with the proven raw bootloader and

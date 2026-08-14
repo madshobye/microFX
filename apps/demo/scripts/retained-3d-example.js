@@ -4,7 +4,7 @@ fx.configure({
   pixelDensity: 1.0,
   minimumPixelDensity: 0.5,
   targetFps: 30,
-  debugBar: true
+  debugBar: 10
 });
 
 const heading = fx.text("RETAINED 3D STRESS EXAMPLE", 64, 64, 32, 0xffde64ff);

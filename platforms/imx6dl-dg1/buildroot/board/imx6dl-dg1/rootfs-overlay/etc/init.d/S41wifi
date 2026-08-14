@@ -1,29 +1,69 @@
 #!/bin/sh
 
+product_config=${MICROFX_PRODUCT_CONFIG:-/etc/microfx-product.conf}
+[ -r "$product_config" ] && . "$product_config"
+interface=${MICROFX_WIFI_INTERFACE:-wlan1}
+run_root=${MICROFX_RUN_ROOT:-/run}
+
+pid_alive() {
+  [ -r "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null
+}
+
+stop_pidfile() {
+  pidfile=$1
+  [ -r "$pidfile" ] || return 0
+  pid=$(cat "$pidfile" 2>/dev/null || true)
+  case "$pid" in
+    ''|*[!0-9]*) ;;
+    *)
+      kill "$pid" 2>/dev/null || true
+      waited=0
+      while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 3 ]; do
+        waited=$((waited + 1))
+        sleep 1
+      done
+      kill -9 "$pid" 2>/dev/null || true
+      ;;
+  esac
+  rm -f "$pidfile"
+}
+
+client_healthy() {
+  [ "$(wpa_cli -i "$interface" status 2>/dev/null | sed -n 's/^wpa_state=//p')" = COMPLETED ] &&
+    ip -4 address show dev "$interface" 2>/dev/null | grep -q ' inet '
+}
+
 case "$1" in
   start)
-    [ ! -e /run/microfx-recovery-active ] || { echo "Stored-network recovery owns the radios"; exit 0; }
+    [ ! -e "$run_root/microfx-recovery-active" ] || { echo "Stored-network recovery owns the radios"; exit 0; }
+    if pid_alive "$run_root/wifi-connect.pid"; then
+      echo "Wi-Fi connection already starting"
+      exit 0
+    fi
+    if client_healthy; then
+      echo "Client Wi-Fi is already connected"
+      if ! pid_alive "$run_root/wifi-watchdog.pid"; then
+        /usr/sbin/wifi-watchdog &
+        echo $! >"$run_root/wifi-watchdog.pid"
+      fi
+      exit 0
+    fi
     echo "Starting Wi-Fi connection in background"
     /usr/sbin/wifi-connect &
-    echo $! >/run/wifi-connect.pid
-    if [ ! -r /run/wifi-watchdog.pid ] || ! kill -0 "$(cat /run/wifi-watchdog.pid)" 2>/dev/null; then
+    echo $! >"$run_root/wifi-connect.pid"
+    if ! pid_alive "$run_root/wifi-watchdog.pid"; then
       /usr/sbin/wifi-watchdog &
-      echo $! >/run/wifi-watchdog.pid
+      echo $! >"$run_root/wifi-watchdog.pid"
     fi
     ;;
   stop)
-    for pidfile in /run/wifi-connect.pid /run/wifi-watchdog.pid; do
-      if [ -r "$pidfile" ]; then
-        kill "$(cat "$pidfile")" 2>/dev/null || true
-        rm -f "$pidfile"
-      fi
+    for pidfile in "$run_root/wifi-connect.pid" "$run_root/wifi-watchdog.pid"; do
+      stop_pidfile "$pidfile"
     done
-    for pidfile in /run/udhcpc-wlan?.pid /run/wpa_supplicant-wlan?.pid; do
-      if [ -r "$pidfile" ]; then
-        kill "$(cat "$pidfile")" 2>/dev/null || true
-        rm -f "$pidfile"
-      fi
+    for pidfile in "$run_root"/udhcpc-wlan?.pid "$run_root"/wpa_supplicant-wlan?.pid; do
+      stop_pidfile "$pidfile"
     done
+    rm -f "$run_root/wpa_supplicant/$interface"
     ;;
   restart)
     "$0" stop

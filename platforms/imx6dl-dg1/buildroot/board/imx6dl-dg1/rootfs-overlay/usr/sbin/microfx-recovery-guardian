@@ -5,24 +5,25 @@
 # and invokes the independent clean connector only after sustained failure.
 runtime_config=${MICROFX_RUNTIME_CONFIG:-/etc/canvas.conf}
 [ -r "$runtime_config" ] && . "$runtime_config"
-[ "${CANVAS_DEBUG:-0}" = 1 ] || exit 0
 [ "${CANVAS_SSH:-0}" = 1 ] || exit 0
 
 run_root=${MICROFX_RUN_ROOT:-/run}
-initial_delay=${MICROFX_RECOVERY_INITIAL_DELAY:-60}
+initial_delay=${MICROFX_RECOVERY_INITIAL_DELAY:-120}
 poll_delay=${MICROFX_RECOVERY_POLL_DELAY:-10}
 failure_limit=${MICROFX_RECOVERY_FAILURE_LIMIT:-3}
 max_cycles=${MICROFX_RECOVERY_MAX_CYCLES:-0}
 ssh_service=${MICROFX_SSH_SERVICE:-/etc/init.d/S39dropbear-debug}
 ssh_pidfile=${MICROFX_SSH_PIDFILE:-$run_root/dropbear-debug.pid}
 recovery_client=${MICROFX_RECOVERY_CLIENT:-/usr/sbin/microfx-recovery-client}
+wifi_service=${MICROFX_WIFI_SERVICE:-/etc/init.d/S41wifi}
 status=${MICROFX_RECOVERY_STATUS:-$run_root/microfx-recovery-status}
 log=${MICROFX_RECOVERY_GUARDIAN_LOG:-/tmp/microfx-recovery-guardian.log}
+graphics_safe_mode=${MICROFX_GRAPHICS_SAFE_MODE_FLAG:-$run_root/microfx-graphics-safe-mode}
 state_root=${MICROFX_RECOVERY_STATE_ROOT:-/data/state}
 require_data_mount=${MICROFX_RECOVERY_REQUIRE_DATA_MOUNT:-1}
 mounts_file=${MICROFX_MOUNTS_FILE:-/proc/mounts}
-stable_seconds=${MICROFX_RECOVERY_STABLE_SECONDS:-600}
-short_boot_limit=${MICROFX_RECOVERY_SHORT_BOOT_LIMIT:-3}
+stable_seconds=${MICROFX_RECOVERY_STABLE_SECONDS:-180}
+short_boot_limit=${MICROFX_RECOVERY_SHORT_BOOT_LIMIT:-2}
 disable_boot_guard=${MICROFX_RECOVERY_DISABLE_BOOT_GUARD:-0}
 disable_stable_timer=${MICROFX_RECOVERY_DISABLE_STABLE_TIMER:-0}
 failures=0
@@ -97,9 +98,9 @@ mkdir -p "$run_root"
 echo "Recovery guardian waiting for normal LAN SSH" >"$log"
 [ "$disable_boot_guard" = 1 ] || begin_boot_guard
 if [ "$short_boot_count" -ge "$short_boot_limit" ]; then
-  write_status activating-boot-loop
-  echo "$(date) boot $boot_count follows $short_boot_count consecutive boots shorter than ${stable_seconds}s" >>"$log"
-  exec "$recovery_client"
+  : >"$graphics_safe_mode"
+  write_status graphics-safe-mode
+  echo "$(date) boot $boot_count follows $short_boot_count consecutive boots shorter than ${stable_seconds}s; graphics suppressed while normal networking recovers" >>"$log"
 fi
 sleep "$initial_delay"
 
@@ -117,7 +118,13 @@ while :; do
   if [ "$failures" -ge "$failure_limit" ]; then
     write_status activating
     echo "$(date) activating clean stored-network recovery" >>"$log"
-    exec "$recovery_client"
+    if "$recovery_client"; then
+      exit 0
+    fi
+    echo "$(date) bounded recovery failed; returning radio ownership to normal Wi-Fi" >>"$log"
+    rm -f "$run_root/microfx-recovery-active"
+    "$wifi_service" restart >>"$log" 2>&1 || true
+    failures=0
   fi
 
   cycles=$((cycles + 1))

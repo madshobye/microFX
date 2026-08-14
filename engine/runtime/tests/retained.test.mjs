@@ -8,7 +8,7 @@ const source = await readFile(new URL("../retained.js", import.meta.url), "utf8"
 function runtime() {
   let nextHandle = 1;
   const calls = [];
-  const fx = {};
+  const fx = { data: (path, fallback) => ({ path, fallback }) };
   for (const name of [
     "circle", "sdfCircle", "sdfRoundedRect", "rect", "gradientRect",
     "background", "cube", "sphere", "wireCube", "grid", "model", "text", "image"
@@ -24,6 +24,10 @@ function runtime() {
       return true;
     };
   }
+  fx._imageScale = (...args) => {
+    calls.push(["_imageScale", ...args]);
+    return true;
+  };
   vm.runInNewContext(source, { fx });
   return { fx, calls };
 }
@@ -115,6 +119,34 @@ test("scene membership accepts groups while retaining flat renderer inspection",
   assert.deepEqual(scene.flattenedElements(), group.elements());
 });
 
+test("each frame disables scenes until show selects one and stable selection is a no-op", () => {
+  const { fx, calls } = runtime();
+  const first = fx.scenes.add(fx.scene({ name: "first" }));
+  const second = fx.scenes.add(fx.scene({ name: "second" }));
+  const firstItem = first.add(fx.rect(0, 0, 10, 10, 0xffffffff));
+  second.add(fx.rect(20, 0, 10, 10, 0xffffffff));
+  calls.length = 0;
+  fx._beginFrame();
+  first.show();
+  fx._endFrame();
+  assert.deepEqual(calls, [["_visible", firstItem.handle, true]]);
+  calls.length = 0;
+  fx._beginFrame();
+  first.show();
+  fx._endFrame();
+  assert.deepEqual(calls, []);
+  firstItem.enabled(false);
+  assert.deepEqual(calls, [["_visible", firstItem.handle, false]]);
+  calls.length = 0;
+  fx._beginFrame();
+  second.show();
+  fx._endFrame();
+  assert.deepEqual(calls, [
+    ["_visible", firstItem.handle, false],
+    ["_visible", 2, true]
+  ]);
+});
+
 test("operation helpers accept retained objects and numeric handles", () => {
   const { fx, calls } = runtime();
   const label = fx.text("one", 0, 0, 12, 0xffffffff);
@@ -170,20 +202,39 @@ test("2D and text opacity stays on retained objects", () => {
                 /2D elements/);
 });
 
-test("images are project assets with retained 2D transforms", () => {
+test("images preserve native proportions through one retained scale", () => {
   const { fx, calls } = runtime();
-  const image = fx.image("images/logo.png", 100, 200, 320, 180, 0xffffffff);
-  image.move(5, -10).rotation(0.25).opacity(0.75);
+  const image = fx.image("images/logo.png", 100, 200, 1.5, 0xffffffff);
+  image.move(5, -10).rotation(0.25).scale(2).opacity(0.75);
   assert.deepEqual(calls, [
-    ["_image", "images/logo.png", 100, 200, 320, 180, 0xffffffff],
+    ["_image", "images/logo.png", 100, 200, 1.5, 0xffffffff],
     ["_move", 1, 105, 190, 0],
     ["_move", 1, 105, 190, 0.25],
+    ["_imageScale", 1, 2],
     ["_opacity", 1, 0.75]
   ]);
+});
+
+test("images reject the obsolete width and height signature loudly", () => {
+  const { fx } = runtime();
+  assert.throws(
+    () => fx.image("images/poster.jpg", 0, 0, 2000, 1200, 0xffffffff),
+    /requires exactly 5 arguments/
+  );
 });
 
 test("rgba clamps and packs channels as RRGGBBAA", () => {
   const { fx } = runtime();
   assert.equal(fx.rgba(255, 128, -2), 0xff8000ff);
   assert.equal(fx.rgba(1, 2, 3, 4), 0x01020304);
+});
+
+test("feed caches one bounded platform snapshot per activation", () => {
+  const { fx } = runtime();
+  let reads = 0;
+  fx.data = path => { reads += 1; return { path, reads }; };
+  const first = fx.feed("live.json", {});
+  const second = fx.feed("live.json", {});
+  assert.equal(first, second);
+  assert.equal(reads, 1);
 });

@@ -6,7 +6,7 @@ fx.configure({
   pixelDensity: 1.0,
   minimumPixelDensity: 0.50,
   targetFps: 30,
-  debugBar: true
+  debugBar: 10
 });
 
 fx.text(fx.product.name + " DEMO", 64, 54, 38, 0xffde64ff);

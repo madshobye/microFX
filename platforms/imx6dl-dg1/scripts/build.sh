@@ -13,7 +13,7 @@ BUILDROOT_VERSION=$MICROFX_BUILDROOT_VERSION
 
 # The VM may predate a repository move and therefore have stale host mounts.
 # Stage the authoritative working tree explicitly for every build.
-SOURCE_ARCHIVE=$(mktemp /tmp/microfx-build-source.XXXXXX.tar)
+SOURCE_ARCHIVE=$(mktemp /tmp/microfx-build-source.XXXXXX)
 trap 'rm -f "$SOURCE_ARCHIVE"' EXIT
 COPYFILE_DISABLE=1 COPY_EXTENDED_ATTRIBUTES_DISABLE=1 tar -C "$REPO_DIR" \
   --exclude=.git \

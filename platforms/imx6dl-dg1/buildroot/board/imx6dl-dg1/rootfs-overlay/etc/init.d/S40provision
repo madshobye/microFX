@@ -31,6 +31,11 @@ mkdir -p "$run_root"
 MICROFX_PRODUCT_NAME=${MICROFX_PRODUCT_NAME:-Graphics}
 MICROFX_SETUP_SSID=${MICROFX_SETUP_SSID:-graphics-setup}
 MICROFX_SETUP_PASSWORD=${MICROFX_SETUP_PASSWORD:-graphicssetup}
+identity_library=${MICROFX_IDENTITY_LIBRARY:-/usr/lib/microfx/device-identity.sh}
+[ ! -r "$identity_library" ] || {
+  . "$identity_library"
+  microfx_load_device_identity
+}
 . "${MICROFX_PROVISION_HEALTH_LIBRARY:-/usr/lib/microfx/provision-health.sh}"
 . "${MICROFX_PROVISION_CONTENT_LIBRARY:-/usr/lib/microfx/provision-content.sh}"
 

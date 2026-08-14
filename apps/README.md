@@ -1,14 +1,15 @@
 # Bundled projects
 
-microFX ships ten small retained-mode projects. `demo` is the default fallback;
+microFX ships eleven small retained-mode projects. `demo` is the default fallback;
 the other folders are independent examples installed into the same persistent
 project library on first boot. Each project consists of `main.js`,
 `project.json`, and an optional `assets/` directory.
 
 The gallery deliberately spans typography, 2D composition, particles,
 wireframe and solid 3D, diagnostic gradients, clocks, and data-visualization
-concepts. `flight-board` and `energy-clock` read bounded JSON assets through
-`fx.data()`. The bundled files are deterministic fallbacks; a constrained platform
+concepts. `scene-switcher` demonstrates per-frame `scene.show()` selection and
+disabled-element culling. `flight-board` and `energy-clock` read bounded live
+snapshots through `fx.feed()`. The bundled files are deterministic fallbacks; a constrained platform
 adapter can atomically refresh them from a flight or electricity-price service
 without adding unrestricted filesystem or network access to JavaScript.
 

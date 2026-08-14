@@ -21,8 +21,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DESIGN_WIDTH 1920
-#define DESIGN_HEIGHT 1080
+#define DESIGN_WIDTH MICROFX_DESIGN_WIDTH
+#define DESIGN_HEIGHT MICROFX_DESIGN_HEIGHT
 #define DEFAULT_OUTPUT_WIDTH 1280
 #define DEFAULT_OUTPUT_HEIGHT 720
 typedef struct {
@@ -204,8 +204,8 @@ static RuntimeConfig LoadRuntimeConfig(const MicroFxScene *scene)
         .resolutionFixed = false,
         .profiling = false,
         .profileIntervalFrames = 120,
-        .densitySampleFrames = 180,
-        .densityStep = 0.025f,
+        .densitySampleFrames = 60,
+        .densityStep = 0.1f,
         .densityDownThreshold = 1.08f,
         .densityUpThreshold = 0.72f,
         .densityUpSamples = 4
@@ -247,7 +247,7 @@ static RuntimeConfig LoadRuntimeConfig(const MicroFxScene *scene)
     }
     config.targetFps = (config.targetFps < 1) ? 30 : config.targetFps;
     config.profileIntervalFrames = config.profileIntervalFrames < 30 ? 120 : config.profileIntervalFrames;
-    config.densitySampleFrames = config.densitySampleFrames < 30 ? 180 : config.densitySampleFrames;
+    config.densitySampleFrames = config.densitySampleFrames < 30 ? 60 : config.densitySampleFrames;
     config.densityStep = Clamp(config.densityStep, 0.01f, 0.25f);
     config.densityDownThreshold = Clamp(config.densityDownThreshold, 1.0f, 2.0f);
     config.densityUpThreshold = Clamp(config.densityUpThreshold, 0.25f,
@@ -317,6 +317,7 @@ static double ProcessCpuMilliseconds(void)
 
 typedef struct {
     double script, begin, background, mesh, overlay, interface, present;
+    double overlayQuads, sdf, image, text;
     double wall, processCpu, nonCpu, maxWall;
     unsigned int samples, overBudget;
 } FrameProfile;
@@ -324,7 +325,8 @@ typedef struct {
 static void AddProfileSample(FrameProfile *profile,
                              double frameStart, double scriptEnd,
                              double beginEnd, double backgroundEnd,
-                             double meshEnd, double overlayEnd,
+                             double meshEnd, double overlayQuadsEnd,
+                             double sdfEnd, double imageEnd, double overlayEnd,
                              double interfaceEnd, double presentEnd,
                              double processCpuMs, double frameBudgetMs)
 {
@@ -332,6 +334,10 @@ static void AddProfileSample(FrameProfile *profile,
     profile->begin += (beginEnd - scriptEnd)*1000.0;
     profile->background += (backgroundEnd - beginEnd)*1000.0;
     profile->mesh += (meshEnd - backgroundEnd)*1000.0;
+    profile->overlayQuads += (overlayQuadsEnd - meshEnd)*1000.0;
+    profile->sdf += (sdfEnd - overlayQuadsEnd)*1000.0;
+    profile->image += (imageEnd - sdfEnd)*1000.0;
+    profile->text += (overlayEnd - imageEnd)*1000.0;
     profile->overlay += (overlayEnd - meshEnd)*1000.0;
     profile->interface += (interfaceEnd - overlayEnd)*1000.0;
     profile->present += (presentEnd - interfaceEnd)*1000.0;
@@ -353,12 +359,15 @@ static void ReportAndResetProfile(FrameProfile *profile,
     const double budget = 1000.0/targetFps;
     printf("MICROFX_PROFILE frames=%u output=%dx%d density=%.3f fps=%d target_fps=%d budget=%.3f "
            "script=%.3f begin=%.3f background=%.3f mesh=%.3f "
-           "overlay=%.3f interface=%.3f present=%.3f cpu=%.3f noncpu=%.3f "
+           "overlay=%.3f overlay_quads=%.3f sdf=%.3f image=%.3f text=%.3f "
+           "interface=%.3f present=%.3f cpu=%.3f noncpu=%.3f "
            "wall=%.3f max_wall=%.3f over_budget=%u\n",
            profile->samples, outputWidth, outputHeight, density, fps, targetFps, budget,
            profile->script/divisor, profile->begin/divisor,
            profile->background/divisor, profile->mesh/divisor,
-           profile->overlay/divisor, profile->interface/divisor,
+           profile->overlay/divisor, profile->overlayQuads/divisor,
+           profile->sdf/divisor, profile->image/divisor, profile->text/divisor,
+           profile->interface/divisor,
            profile->present/divisor, profile->processCpu/divisor,
            profile->nonCpu/divisor, profile->wall/divisor, profile->maxWall,
            profile->overBudget);
@@ -368,36 +377,59 @@ static void ReportAndResetProfile(FrameProfile *profile,
 
 static void DrawInterface(int fps, float time,
                           float cpuAverageMs, float gpuAverageMs,
-                          bool automaticDensity)
+                          bool automaticDensity, float pixelDensity,
+                          int outputWidth, int outputHeight)
 {
     const int barX = 38;
-    const int barY = DESIGN_HEIGHT - 58;
-    const int barWidth = 630;
-    const int meterY = barY + 17;
-    const int meterWidth = 62;
+    const int barY = DESIGN_HEIGHT - 54;
+    const int barHeight = 34;
+    const int padding = 10;
+    const int gap = 12;
+    const int fontSize = 16;
+    const int meterWidth = 21;
+    const int meterHeight = fontSize;
+    const int meterY = barY + (barHeight - meterHeight)/2;
     const float meterScale = (float)meterWidth/33.333f;
     int cpuWidth = (int)fminf(cpuAverageMs*meterScale, (float)meterWidth);
     int gpuWidth = (int)fminf(gpuAverageMs*meterScale, (float)meterWidth);
-    const int cpuMeterX = barX + 421;
-    const int gpuMeterX = barX + 548;
-
-    DrawRectangle(barX, barY, barWidth, 40, (Color){ 4, 8, 22, 245 });
-    DrawRectangleLines(barX, barY, barWidth, 40, (Color){ 65, 105, 145, 255 });
-    DrawText(TextFormat("UP %ds", (int)time), barX + 14, barY + 12, 16,
-             (Color){ 180, 205, 235, 255 });
-    DrawText(TextFormat("%d FPS", fps), barX + 91, barY + 12, 16,
-             (Color){ 255, 210, 70, 255 });
-    DrawText(TextFormat("%dx%d", GetScreenWidth(), GetScreenHeight()),
-             barX + 166, barY + 12, 16, RAYWHITE);
-    DrawText(automaticDensity ? "AUTO" : "FIXED", barX + 274, barY + 12, 16,
-             (Color){ 180, 205, 235, 255 });
-
-    DrawText("CPU", barX + 380, barY + 12, 16, (Color){ 40, 205, 255, 255 });
-    DrawRectangle(cpuMeterX, meterY, meterWidth, 6, (Color){ 35, 42, 66, 255 });
-    DrawRectangle(cpuMeterX, meterY, cpuWidth, 6, (Color){ 40, 205, 255, 255 });
-    DrawText("GPU", barX + 507, barY + 12, 16, (Color){ 255, 85, 180, 255 });
-    DrawRectangle(gpuMeterX, meterY, meterWidth, 6, (Color){ 35, 42, 66, 255 });
-    DrawRectangle(gpuMeterX, meterY, gpuWidth, 6, (Color){ 255, 85, 180, 255 });
+    const float minute=60.0f,hour=3600.0f,day=86400.0f,year=31557600.0f;
+    const char *unit="s";float uptime=time;
+    if(time>=year){uptime=time/year;unit="y";}
+    else if(time>=day){uptime=time/day;unit="d";}
+    else if(time>=hour){uptime=time/hour;unit="h";}
+    else if(time>=minute){uptime=time/minute;unit="m";}
+    char up[32],fpsText[24],mode[24],resolution[32];
+    snprintf(up,sizeof(up),"UP %.1f%s",uptime,unit);
+    snprintf(fpsText,sizeof(fpsText),"%d FPS",fps);
+    if (GetScreenWidth() == outputWidth && GetScreenHeight() == outputHeight) {
+        snprintf(resolution,sizeof(resolution),"%dx%d",outputWidth,outputHeight);
+    } else {
+        snprintf(resolution,sizeof(resolution),"%dx%d>%dx%d",
+                 GetScreenWidth(),GetScreenHeight(),outputWidth,outputHeight);
+    }
+    snprintf(mode,sizeof(mode),"%s %.2f",automaticDensity?"AUTO":"FIXED",
+             pixelDensity);
+    int width=padding*2+MeasureText(up,fontSize)+MeasureText(fpsText,fontSize)+
+      MeasureText(resolution,fontSize)+MeasureText(mode,fontSize)+
+      MeasureText("CPU",fontSize)+MeasureText("GPU",fontSize)+meterWidth*2+gap*7;
+    DrawRectangle(barX,barY,width,barHeight,(Color){4,8,22,245});
+    DrawRectangleLines(barX,barY,width,barHeight,(Color){65,105,145,255});
+    int x=barX+padding,y=barY+(barHeight-fontSize)/2;
+#define DRAW_FIELD(value,red,green,blue) do { \
+    DrawText((value),x,y,fontSize,(Color){red,green,blue,255}); \
+    x+=MeasureText((value),fontSize)+gap; \
+} while(0)
+    DRAW_FIELD(up,180,205,235);
+    DRAW_FIELD(fpsText,255,210,70);
+    DRAW_FIELD(resolution,245,245,245);
+    DRAW_FIELD(mode,180,205,235);
+    DRAW_FIELD("CPU",40,205,255);
+    DrawRectangle(x,meterY,meterWidth,meterHeight,(Color){35,42,66,255});
+    DrawRectangle(x,meterY,cpuWidth,meterHeight,(Color){40,205,255,255});x+=meterWidth+gap;
+    DRAW_FIELD("GPU",255,85,180);
+    DrawRectangle(x,meterY,meterWidth,meterHeight,(Color){35,42,66,255});
+    DrawRectangle(x,meterY,gpuWidth,meterHeight,(Color){255,85,180,255});
+#undef DRAW_FIELD
 }
 
 int main(void)
@@ -417,7 +449,9 @@ int main(void)
     // The DRM backend already waits for the page-flip completion event. Asking
     // EGL for VSync as well can serialize two independent synchronization
     // points on etnaviv and quantize the application to a lower divisor of 60.
-    setenv("MICROFX_COLOR_FORMAT", runtime.colorFormat == MICROFX_COLOR_RGBA8888 ? "rgba8888" : "rgb565", 1);
+    setenv("MICROFX_COLOR_FORMAT",
+           runtime.colorFormat == MICROFX_COLOR_RGBA8888
+               ? "rgba8888" : "rgb565", 1);
     char depthValue[8];
     snprintf(depthValue, sizeof(depthValue), "%d", runtime.depthBits);
     setenv("MICROFX_DEPTH_BITS", depthValue, 1);
@@ -483,6 +517,12 @@ int main(void)
     int densityUnderBudgetSamples = 0;
     double previousScriptTime = GetTime();
     FrameProfile profile = { 0 };
+    const bool synchronizedProfiling = runtime.profiling &&
+        access("/run/microfx-profile-sync", F_OK) == 0;
+    if (synchronizedProfiling) {
+        printf("MICROFX_PROFILE_SYNC enabled\n");
+        fflush(stdout);
+    }
     while (!WindowShouldClose()) {
         double frameStart = GetTime();
         double processCpuStart = ProcessCpuMilliseconds();
@@ -496,15 +536,15 @@ int main(void)
         double scriptEnd = GetTime();
 
         BeginDrawing();
-        rlPushMatrix();
-        rlScalef((float)GetScreenWidth()/DESIGN_WIDTH,
-                 (float)GetScreenHeight()/DESIGN_HEIGHT, 1.0f);
-        ClearBackground((Color){ 8, 12, 29, 255 });
-        rlPopMatrix();
-        rlDrawRenderBatchActive();
+        if (!MicroFxSceneHasOpaqueCoveringBackground(&scriptScene)) {
+            ClearBackground((Color){ 8, 12, 29, 255 });
+            rlDrawRenderBatchActive();
+        }
+        if (synchronizedProfiling) glFinish();
         double beginEnd = GetTime();
         MicroFxQuadRendererDraw(&quadRenderer,&scriptScene,
                                DESIGN_WIDTH,DESIGN_HEIGHT,true);
+        if (synchronizedProfiling) glFinish();
         double backgroundEnd = GetTime();
         Matrix scriptView = { 0 };
         Matrix scriptProjection = { 0 };
@@ -534,32 +574,43 @@ int main(void)
             fprintf(stderr, "MICROFX_MESH fatal asset or renderer failure\n");
             break;
         }
+        if (synchronizedProfiling) glFinish();
         double meshEnd = GetTime();
         // Retained 2D and text are overlays and therefore follow every 3D pass.
         MicroFxQuadRendererDraw(&quadRenderer, &scriptScene,
                                DESIGN_WIDTH, DESIGN_HEIGHT, false);
+        if (synchronizedProfiling) glFinish();
+        double overlayQuadsEnd = GetTime();
         MicroFxSdfRendererDraw(&sdfRenderer, &scriptScene,
                               DESIGN_WIDTH, DESIGN_HEIGHT);
+        if (synchronizedProfiling) glFinish();
+        double sdfEnd = GetTime();
         if (!MicroFxImageRendererDraw(&imageRenderer, &scriptScene,
                                       DESIGN_WIDTH, DESIGN_HEIGHT)) {
             fprintf(stderr, "MICROFX_IMAGE fatal asset or renderer failure\n");
             break;
         }
+        if (synchronizedProfiling) glFinish();
+        double imageEnd = GetTime();
         if (!MicroFxTextRendererDraw(&textRenderer, &scriptScene,
                                      DESIGN_WIDTH, DESIGN_HEIGHT)) {
             fprintf(stderr, "MICROFX_TEXT fatal asset or renderer failure\n");
             break;
         }
+        if (synchronizedProfiling) glFinish();
         double overlayEnd = GetTime();
 
-        if (scriptScene.runtime.debugBar) {
+        if (scriptScene.runtime.debugBarUntilSeconds < 0.0f ||
+            time < scriptScene.runtime.debugBarUntilSeconds) {
             rlPushMatrix();
             rlScalef((float)GetScreenWidth()/DESIGN_WIDTH,
                      (float)GetScreenHeight()/DESIGN_HEIGHT, 1.0f);
             DrawInterface(GetFPS(), time, cpuAverageMs, gpuAverageMs,
-                          runtime.automaticDensity);
+                          runtime.automaticDensity, runtime.pixelDensity,
+                          runtime.outputWidth, runtime.outputHeight);
             rlPopMatrix();
         }
+        if (synchronizedProfiling) glFinish();
         double interfaceEnd = GetTime();
         EndDrawing();
         double presentEnd = GetTime();
@@ -577,7 +628,8 @@ int main(void)
         }
         if (runtime.profiling) {
             AddProfileSample(&profile, frameStart, scriptEnd, beginEnd,
-                             backgroundEnd, meshEnd, overlayEnd, interfaceEnd,
+                             backgroundEnd, meshEnd, overlayQuadsEnd, sdfEnd,
+                             imageEnd, overlayEnd, interfaceEnd,
                              presentEnd, frameCpuMs, 1000.0/runtime.targetFps);
         }
 
@@ -636,7 +688,7 @@ int main(void)
         }
         if (runtime.profiling &&
             (renderedFrames % runtime.profileIntervalFrames) == 0) {
-            ReportAndResetProfile(&profile, GetScreenWidth(), GetScreenHeight(),
+            ReportAndResetProfile(&profile, runtime.outputWidth, runtime.outputHeight,
                                   runtime.pixelDensity, GetFPS(), runtime.targetFps);
         }
     }

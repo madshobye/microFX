@@ -6,6 +6,11 @@ supervisor=${MICROFX_SUPERVISOR:-/usr/sbin/canvas-supervisor}
 
 case "$1" in
   start)
+    safe_mode=${MICROFX_GRAPHICS_SAFE_MODE_FLAG:-$run_root/microfx-graphics-safe-mode}
+    if [ -e "$safe_mode" ]; then
+      echo "Graphics suppressed for recovery: $safe_mode"
+      exit 0
+    fi
     if [ -r "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
       echo "Graphics supervisor already running"
       exit 0

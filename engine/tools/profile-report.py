@@ -48,7 +48,8 @@ def configuration(row):
 
 def summarize_rows(profile, drm):
     profile_fields = ("fps", "script", "begin", "background", "mesh", "overlay",
-                      "interface", "present", "cpu", "noncpu", "wall")
+                      "overlay_quads", "sdf", "image", "text", "interface",
+                      "present", "cpu", "noncpu", "wall")
     averages, frames = weighted(profile, "frames", profile_fields)
     drm_fields = ("egl", "lock", "addfb", "wait_previous", "flip_submit",
                   "post_submit", "total")
@@ -122,6 +123,11 @@ def print_summary(summary):
           f"present {summary['averageMs']['present']:.3f} ms")
     print(f"stages account for {summary['accountedStageMs']:.3f} ms; "
           f"unaccounted {summary['unaccountedMs']:.3f} ms; dominant {summary['dominantStage']}")
+    average = summary["averageMs"]
+    if any(average[name] for name in ("overlay_quads", "sdf", "image", "text")):
+        print(f"overlay detail: quads {average['overlay_quads']:.3f} ms; "
+              f"SDF {average['sdf']:.3f} ms; image {average['image']:.3f} ms; "
+              f"text {average['text']:.3f} ms")
     if summary["drmSamples"]:
         drm = summary["drmAverageMs"]
         print(f"DRM egl {drm['egl']:.3f} ms; lock {drm['lock']:.3f} ms; addfb {drm['addfb']:.3f} ms; "

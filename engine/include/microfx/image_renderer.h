@@ -10,6 +10,8 @@ typedef struct {
     GLuint vertexBuffer;
     GLint viewportLocation;
     GLint textureLocation;
+    GLint transformLocation;
+    GLint colorLocation;
     Texture2D textures[MICROFX_MAX_IMAGE_ELEMENTS];
     char texturePaths[MICROFX_MAX_IMAGE_ELEMENTS][MICROFX_MAX_ASSET_PATH];
     int textureIndex[MICROFX_MAX_IMAGE_ELEMENTS];

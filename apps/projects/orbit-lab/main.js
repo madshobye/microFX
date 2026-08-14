@@ -1,4 +1,4 @@
-fx.configure({ targetFps: 30, pixelDensity: "auto", minimumPixelDensity: 0.5, debugBar: true });
+fx.configure({ targetFps: 30, pixelDensity: "auto", minimumPixelDensity: 0.5, debugBar: 10 });
 const scene = fx.scenes.add(fx.scene({ name: "orbit-lab" }));
 scene.add(fx.background(0x061325ff, 0x02040aff));
 scene.add(fx.text("ORBIT LAB", 70, 55, 38, 0x8fe9ffff));
@@ -7,6 +7,7 @@ const core = scene.add(fx.sphere(0, 0, 0, 1.3, 0xffc74fff)).effect(fx.effects.gr
 const satellites = Array.from({ length: 10 }, (_, index) =>
   scene.add(fx.wireCube(0, 0, 0, 0.35 + index % 3 * 0.1, 0x65ddffff)));
 function update(time) {
+  scene.show();
   fx.camera(Math.sin(time * 0.12) * 2, 4.2, 11, 0, 0, 0, 48);
   core.rotation(0, time * 0.2, 0);
   satellites.forEach((object, index) => {

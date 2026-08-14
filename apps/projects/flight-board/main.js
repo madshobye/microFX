@@ -1,4 +1,4 @@
-fx.configure({ targetFps: 30, pixelDensity: "auto", minimumPixelDensity: 0.5, debugBar: false });
+fx.configure({ targetFps: 30, pixelDensity: "auto", minimumPixelDensity: 0.5, debugBar: 10 });
 const scene = fx.scenes.add(fx.scene({ name: "flight-board" }));
 scene.add(fx.background(0x07182dff, 0x02060dff));
 scene.add(fx.text("CPH LIVE AIRSPACE", 55, 45, 28, 0x7ee5ffff));
@@ -14,7 +14,7 @@ for (let y = 120; y <= 980; y += 172)
 scene.add(fx.line(790, 660, 1110, 635, 16, 0xb9c7d0ff));
 scene.add(fx.text("CPH", 1130, 620, 17, 0xb9c7d0ff));
 
-const feed = fx.data("flights.json", { flights: [] });
+const feed = fx.feed("flights.json", { flights: [] });
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapX = longitude => 100 + clamp((longitude - 11.4) / 1.9, 0, 1) * 1720;
 const mapY = latitude => 980 - clamp((latitude - 55.3) / 0.9, 0, 1) * 860;
@@ -45,6 +45,7 @@ const flights = feed.flights.slice(0, 8).map((item, index) => {
 });
 
 function update(time) {
+  scene.show();
   flights.forEach(flight => {
     // Slow geographic extrapolation keeps the live snapshot legible between
     // five-minute data refreshes; it resets when the adapter reloads the app.

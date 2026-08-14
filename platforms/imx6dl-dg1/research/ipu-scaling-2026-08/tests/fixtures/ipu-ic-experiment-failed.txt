@@ -1,0 +1,11 @@
+CLIENT_CAP name=atomic supported=yes errno=0
+CAP name=prime supported=yes value=3 errno=0
+MODE connector=50 index=0 name=1920x1080 width=1920 height=1080 refresh=60 preferred=yes
+PLANE id=32 type=primary formats=XR24
+PLANE id=38 type=overlay formats=XR24
+MICROFX_EVIDENCE xrgbScaleNegotiation=yes
+MICROFX_EVIDENCE v4l2DmaBufQueues=yes
+MICROFX_EVIDENCE primaryScalingTest=no
+MICROFX_EVIDENCE overlayScalingTest=no
+MICROFX_EVIDENCE ipuIcCompositionTest=no
+PROFILE frames=61 fps=20.0 processCpuPercent=20.0 ipuConvertAvgMs=35.0 ipuConvertMaxMs=45.0

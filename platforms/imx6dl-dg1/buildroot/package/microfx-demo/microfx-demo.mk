@@ -38,6 +38,7 @@ define MICROFX_DEMO_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0644 $(@D)/apps/demo/assets/models/icosahedron.obj $(TARGET_DIR)/usr/share/microfx/projects/demo/assets/models/icosahedron.obj
 	cp -R $(@D)/apps/projects/. $(TARGET_DIR)/usr/share/microfx/projects/
 	$(INSTALL) -D -m 0644 $(@D)/apps/onboarding/scripts/main.js $(TARGET_DIR)/usr/share/microfx/onboarding.js
+	$(INSTALL) -D -m 0644 $(@D)/apps/error/scripts/main.js $(TARGET_DIR)/usr/share/microfx/error.js
 endef
 
 $(eval $(generic-package))

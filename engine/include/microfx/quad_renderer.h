@@ -6,10 +6,12 @@
 
 typedef struct {
     GLuint program;
-    GLuint vertexBuffer;
+    GLuint vertexBuffers[3];
+    unsigned activeVertexBuffer;
     GLint viewportLocation;
     int backgroundVertexCount;
     int vertexCount;
+    bool backgroundOpaque;
 } MicroFxQuadRenderer;
 
 bool MicroFxQuadRendererInit(MicroFxQuadRenderer *renderer);

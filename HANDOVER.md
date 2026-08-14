@@ -15,7 +15,10 @@ There are three update levels. Use the narrowest one that fits the change:
    service/configuration files on the active root. It creates a backup under
    `/data/state/root-update-backups`, validates network/SSH/graphics afterward,
    does not reboot, and never changes Wi-Fi or SSH startup itself.
-3. `install-full-sd.sh` writes the complete image to both Linux root slots.
+3. `install-network-hardening-ssh.sh` updates only reviewed network/SSH
+   recovery services on the active root. It backs up replacements, never
+   includes credentials, and does not restart the live connection.
+4. `install-full-sd.sh` writes the complete image to both Linux root slots.
    This is destructive and is the normal way to make both slots match.
 
 Never use `dd` against an unresolved disk name. Never rewrite the raw boot area
@@ -164,22 +167,29 @@ Useful read-only device checks:
 ./scripts/canvas-ssh.sh 192.168.3.109 'mount | grep " /data "'
 ./scripts/canvas-ssh.sh 192.168.3.109 'ip route show default'
 ./scripts/canvas-ssh.sh 192.168.3.109 'readlink /data/apps/current'
+./scripts/canvas-ssh.sh 192.168.3.109 'cat /data/config/device-identity.conf; cat /data/config/peer-id'
 ./scripts/canvas-ssh.sh 192.168.3.109 'tail -100 /tmp/canvas.log'
 ```
 
 The application uploader compiles from the current checkout, stages a release
 below `/data/apps/incoming`, verifies SHA-256 on the device, then atomically
 activates it. If upload validation fails, the incoming release is not selected.
+If the uploaded JavaScript fails activation, HDMI shows the firmware error app
+with the QuickJS message/line while the supervisor waits for the next Save &
+Run request. The generated setup identity persists in
+`/data/config/device-identity.conf`; a portal-edited peer ID in
+`/data/config/peer-id` is intentionally not regenerated.
 
 ## Recovery expectations
 
-Development images start key-only Dropbear early. With both `CANVAS_DEBUG=1`
-and `CANVAS_SSH=1`, the RAM-only recovery guardian gives normal client Wi-Fi
-60 seconds to establish an addressed default route. After repeated failure it
+Development images start key-only Dropbear early. With `CANVAS_SSH=1`, normal
+client Wi-Fi gets four clean association rounds at its original boot position.
+The RAM-only recovery guardian waits 120 seconds. After repeated failure it
 stops competing Wi-Fi processes and runs the frozen stored-network recovery
-sequence on `wlan1`; it never creates an access point. Three consecutive boots
-that do not reach the ten-minute stable marker trigger immediate recovery on
-the next boot.
+sequence on `wlan1`; it never creates an access point. Failed bounded recovery
+returns ownership to normal Wi-Fi. Two consecutive boots that do not reach the
+three-minute stable marker suppress graphics on the next boot while normal
+networking and SSH recover.
 
 If the application breaks but SSH works, upload a known-good app or inspect
 `/tmp/canvas.log`. If userspace service files are known to be stale but Wi-Fi
@@ -212,6 +222,7 @@ read again from the device.
 | `hardware-smoke.sh` | Collect read-only hardware evidence | Host artifacts |
 | `hardware-acceptance.sh` | Evaluate collected evidence | Host artifacts |
 | `install-active-root-ssh.sh` | Whitelisted, backed-up userspace hotfix | Active root + backup on `/data` |
+| `install-network-hardening-ssh.sh` | Whitelisted network/recovery hotfix | Active root + backup on `/data` |
 | `install-full-sd.sh` | Write the complete image to p2 and p3 | Destructive root-slot write |
 | `inspect-development-sd.sh` | Inspect an inserted prepared card | No |
 

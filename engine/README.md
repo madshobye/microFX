@@ -21,13 +21,13 @@ fx.configure({
   outputHeight: 0,
   pixelDensity: "auto",
   minimumPixelDensity: 0.5,
-  densitySampleFrames: 180,   // adaptation cadence
-  densityStep: 0.025,         // requested density step (DRM modes are discrete)
+  densitySampleFrames: 60,    // adaptation cadence
+  densityStep: 0.1,           // in-process render-buffer density step
   densityDownThreshold: 1.08, // overload relative to frame budget
   densityUpThreshold: 0.72,   // spare-capacity threshold
   densityUpSamples: 4,        // consecutive samples before raising quality
   targetFps: 30,
-  debugBar: true,
+  debugBar: 10,
   durationSeconds: 0,
   quality: "performance",     // performance, balanced, or quality
   colorFormat: "rgb565",      // rgb565 or rgba8888
@@ -48,19 +48,21 @@ const model = scene.add(fx.model("models/icosahedron.obj", 0, 1, 0, 2.4,
                                  0x65d9ffff));
 const label = scene.add(fx.text("hello GPU", 80, 160, 32, 0xffffffff,
                                 "fonts/display.ttf"));
-const logo = scene.add(fx.image("images/logo.png", 1600, 150, 240, 120,
+const logo = scene.add(fx.image("images/logo.png", 1600, 150, 1.0,
                                 0xffffffff));
 
 fx.camera(0, 3, 9, 0, 1, 0, 48);
 cube.effect(fx.effects.gradient, 0.9, 1.0);
 
 function update(time, delta) {
+  scene.show();
   dot.position(200 + Math.sin(time) * 100, 200);
   cube.position(0, 1, 0).rotation(time * 0.2, time * 0.5, 0);
 }
 ```
 
-2D and text coordinates use the 1920×1080 design space and map to the selected
+`width`, `height`, `fx.width`, and `fx.height` are the full 1920×1080 canvas.
+2D and text coordinates use that design space and map to the selected
 global HDMI mode. 3D uses world coordinates and radians. Colors are
 `0xRRGGBBAA`. Construction belongs at script load; `update` should mutate
 retained objects. `position()` sets an absolute position while `move()` adds a
@@ -81,10 +83,11 @@ relative offset. Both are fluent and return the same object.
 | `element.position(x,y[,z])` | Set an element's absolute position |
 | `element.move(dx,dy[,dz])` | Move an element relative to its current position |
 | `element.rotation(...)` / `rotate(...)` | Set/add retained rotation |
-| `element.scale(size)` | Set a 3D element's retained size |
+| `element.scale(size)` | Set a 3D or image element's retained scale |
 | `element.color(color)` | Change an element's color |
 | `element.opacity(value)` | Set 2D/text/image opacity from 0 to 1 |
 | `element.visible(value)` | Set retained visibility without reallocating |
+| `element.enabled(value)` | Include or cull an element without reallocating |
 | `element.show()` / `element.hide()` | Convenience visibility controls |
 | `element.effect(kind,amount,scale)` | Select a GPU material effect |
 | `element.text(value)` | Change a retained text element |
@@ -94,7 +97,7 @@ relative offset. Both are fluent and return the same object.
 | `wireCube(x,y,z,size,color)` | Add a retained 3D cube outline |
 | `grid(x,y,z,size,color)` | Add a retained horizontal 3D grid |
 | `model(path,x,y,z,size,color)` | Load a project-relative model asset |
-| `image(path,x,y,w,h,tint)` | Load a project-relative image as a retained 2D quad |
+| `image(path,x,y,scale,tint)` | Load a bilinear-filtered image at native aspect ratio and uniform scale; other argument counts fail |
 | `camera(x,y,z,tx,ty,tz,fovY)` | Set retained perspective camera |
 | `text(value,x,y,size,color[,fontPath])` | Add retained atlas text with an optional project font |
 | `scene(options)` / `scenes.add(scene)` | Create and register an application scene |
@@ -102,10 +105,12 @@ relative offset. Both are fluent and return the same object.
 | `group.add(element)` | Add one retained element; an element belongs to at most one group |
 | `group.position(...)` / `move(...)` | Translate every member while preserving its retained local state |
 | `scene.add(elementOrGroup)` | Record explicit membership and return the element or group |
+| `scene.show()` | Select a scene for the current frame |
 | `configure(settings)` | Set startup output/FPS policy from the application |
-| `debugBar(visible)` | Show or hide the native runtime diagnostics bar |
+| `debugBar(booleanOrMinutes)` | Disable, persist, or restart the diagnostics timeout |
 | `env(name,fallback)` | Read deployment information supplied to the app |
 | `data(path[,fallback])` | Parse a bounded project-relative JSON asset |
+| `feed(path[,fallback])` | Read one cached platform-managed live snapshot per activation |
 
 `fx.product` supplies the centralized product identity (`name`, `slug`,
 `defaultPeerId`, `defaultSetupSsid`, and `defaultSetupPassword`). Its compiled
@@ -138,6 +143,13 @@ support translation only; silently approximating hierarchical rotation or
 scale would produce incorrect 2D/3D semantics. A group's opacity is available
 only when all members are 2D, matching the underlying depth policy.
 
+Registered scenes start every frame disabled. `update()` selects any scene that
+should render by calling `scene.show()`; leaving every scene unselected produces
+a blank application frame. Selection is committed after `update()`, so keeping
+the same scene active does not dirty its buffers. `element.enabled(false)` is
+an authored culling control: 2D geometry is omitted from rebuilt batches and 3D
+geometry is removed from the single mesh VBO until re-enabled.
+
 Opacity is retained for 2D quads, SDF shapes, text, and images. Translucent
 3D meshes are intentionally not exposed yet: making them correct requires a
 documented depth-write and back-to-front sorting policy rather than silently
@@ -147,8 +159,10 @@ producing order-dependent artifacts.
 Both output dimensions must be zero (native/automatic) or both non-zero (fixed).
 The named quality preset establishes a complete baseline, after which explicit
 `colorFormat`, `antialiasing`, `depthBits`, and `dithering` values override it.
-Environment variables are the final deployment override. `debugBar()` may also
-be called from `update()` and takes effect on the next frame.
+Environment variables are the final deployment override. The diagnostics bar
+defaults to ten minutes after each renderer start. `debugBar(false)` disables
+it, `debugBar(true)` keeps it visible, and `debugBar(minutes)` restarts a timed
+window; calls from `update()` take effect on the next frame.
 Automatic density uses separate overload and recovery thresholds to avoid
 oscillation. It lowers at the first overloaded sample and raises only after
 `densityUpSamples` consecutive under-budget samples. The five density policy
@@ -191,7 +205,7 @@ Font parsing and GPU upload happen once, after graphics initialization; a bad
 font or a fifth distinct face is a visible fatal asset error rather than an
 implicit fallback.
 
-Current limits are 256 SDF elements, 16 mesh elements, 32 text elements of 127
+Current limits are 256 SDF elements, 512 quad elements, 16 mesh elements, 32 text elements of 127
 bytes each, four font faces, 16 image elements/textures, a 16 MiB JS heap, and a 512 KiB JS stack. A script exception is fatal
 by design so a bad remote revision remains visible through independent SSH
 rather than silently changing behavior.
@@ -203,6 +217,11 @@ persistent `assets/`. Platform adapters can therefore publish atomic live JSON
 updates without recurring SD-card writes or giving application JavaScript
 general network/filesystem access. Passing a fallback as the second argument
 makes a missing asset non-fatal; malformed JSON remains a visible script error.
+`feed()` caches this result for the renderer activation. On the DG1 platform,
+bounded network adapters fetch and normalize OpenSky and Energinet data outside
+the renderer, publish it atomically in RAM, and reload only the matching active
+project at five-minute and hourly intervals respectively. Calling `feed()` in
+`update()` therefore cannot create a per-frame request.
 
 `apps/demo/scripts/text-benchmark.js` isolates the retained glyph path at fixed
 native density. On the target GC880, three static strings retain the same

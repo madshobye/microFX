@@ -8,7 +8,7 @@ product_config=${MICROFX_PRODUCT_CONFIG:-/etc/microfx-product.conf}
 [ -r "$product_config" ] && . "$product_config"
 interface=${MICROFX_WIFI_INTERFACE:-wlan1}
 run_root=${MICROFX_RUN_ROOT:-/run}
-initial_delay=${MICROFX_WIFI_WATCHDOG_INITIAL_DELAY:-45}
+initial_delay=${MICROFX_WIFI_WATCHDOG_INITIAL_DELAY:-120}
 poll_delay=${MICROFX_WIFI_WATCHDOG_POLL_DELAY:-10}
 rebuild_delay=${MICROFX_WIFI_WATCHDOG_REBUILD_DELAY:-30}
 max_cycles=${MICROFX_WIFI_WATCHDOG_MAX_CYCLES:-0}

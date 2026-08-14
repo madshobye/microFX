@@ -22,7 +22,6 @@ grep -q 'isolated prototype only' "$ROOT/../../README.md"
 grep -q 'not consumed by the firmware build' "$ROOT/../../README.md"
 grep -q 'authoritative general-development setup' "$ROOT/README.md"
 grep -q 'isolated feasibility prototype' "$ROOT/bootloader/README.md"
-grep -q 'not an enabled render path' "$ROOT/COMPOSITOR.md"
 
 python3 "$ROOT/tests/boot-layout-test.py"
 

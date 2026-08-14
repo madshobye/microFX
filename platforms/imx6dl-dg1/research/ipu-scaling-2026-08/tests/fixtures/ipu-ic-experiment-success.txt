@@ -1,0 +1,19 @@
+CLIENT_CAP name=atomic supported=yes errno=0
+CAP name=prime supported=yes value=3 errno=0
+MODE connector=50 index=0 name=1920x1080 width=1920 height=1080 refresh=60 preferred=yes
+PLANE id=32 type=primary formats=XR24,RG16
+PLANE id=38 type=overlay formats=XR24,RG16
+MICROFX_EVIDENCE xrgbScaleNegotiation=yes
+MICROFX_EVIDENCE v4l2DmaBufQueues=yes
+MICROFX_EVIDENCE primaryScalingTest=no
+MICROFX_EVIDENCE overlayScalingTest=no
+MICROFX_EVIDENCE ipuIcCompositionTest=yes
+PROFILE frames=901 elapsedMs=30000.034 fps=30.033 renderFinishAvgMs=10.055 processCpuMs=1579.366 processCpuPercent=5.265 ipuConvertAvgMs=12.325 ipuConvertMaxMs=19.837 atomicCommitAvgMs=10.886 atomicCommitMaxMs=15.293
+MICROFX_EVIDENCE scaling=yes
+MICROFX_EVIDENCE dmaBufImport=yes
+MICROFX_EVIDENCE ipuImageConverter=yes
+MICROFX_EVIDENCE atomicCommit=yes
+MICROFX_EVIDENCE pageFlipSync=yes
+MICROFX_EVIDENCE nativeOverlayAbove=yes
+MICROFX_EVIDENCE cpuCopyPrimary=no
+MICROFX_EVIDENCE globalAlpha=no

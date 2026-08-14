@@ -1,22 +1,28 @@
 #!/bin/sh
 
-runtime_config=/etc/canvas.conf
+runtime_config=${MICROFX_RUNTIME_CONFIG:-/etc/canvas.conf}
 [ -r "$runtime_config" ] && . "$runtime_config"
-product_config=/etc/microfx-product.conf
+product_config=${MICROFX_PRODUCT_CONFIG:-/etc/microfx-product.conf}
 [ -r "$product_config" ] && . "$product_config"
 CANVAS_DEBUG=${CANVAS_DEBUG:-0}
 CANVAS_PERSIST_LOGS=${CANVAS_PERSIST_LOGS:-0}
 MICROFX_SETUP_SSID=${MICROFX_SETUP_SSID:-graphics-setup}
+run_root=${MICROFX_RUN_ROOT:-/run}
+identity_library=${MICROFX_IDENTITY_LIBRARY:-/usr/lib/microfx/device-identity.sh}
+[ ! -r "$identity_library" ] || {
+  . "$identity_library"
+  microfx_load_device_identity
+}
 interface=${MICROFX_WIFI_INTERFACE:-wlan1}
 provision_interface=${MICROFX_PROVISION_INTERFACE:-wlan0}
 [ "$interface" != "$provision_interface" ] || {
   echo "Client and provisioning radios must use distinct interfaces" >&2
   exit 1
 }
-. /usr/lib/microfx/network-status.sh
+. "${MICROFX_NETWORK_STATUS_LIBRARY:-/usr/lib/microfx/network-status.sh}"
 
-config=/data/config/wpa_supplicant.conf
-[ -r "$config" ] || config=/etc/wpa_supplicant.conf
+config=${MICROFX_WIFI_CONFIG:-/data/config/wpa_supplicant.conf}
+[ -r "$config" ] || config=${MICROFX_WIFI_FALLBACK_CONFIG:-/etc/wpa_supplicant.conf}
 if [ "$CANVAS_PERSIST_LOGS" = "1" ]; then log_dir=/data/state; else log_dir=/tmp; fi
 mkdir -p "$log_dir"
 log="$log_dir/wifi.log"
@@ -25,7 +31,7 @@ exec >>"$log" 2>&1
 [ "$CANVAS_DEBUG" = "1" ] && set -x
 date
 
-lock=/run/wifi-connect.lock
+lock=$run_root/wifi-connect.lock
 if ! mkdir "$lock" 2>/dev/null; then
   echo "Wi-Fi connection attempt already active"
   exit 0
@@ -34,37 +40,73 @@ trap 'rmdir "$lock" 2>/dev/null || true' EXIT
 trap 'exit 0' INT TERM
 
 tries=0
-while [ ! -d "/sys/class/net/$interface" ] && [ "$tries" -lt 20 ]; do
+sys_class_net=${MICROFX_SYS_CLASS_NET:-/sys/class/net}
+while [ ! -d "$sys_class_net/$interface" ] && [ "$tries" -lt 20 ]; do
   tries=$((tries + 1)); sleep 1
 done
-[ -d "/sys/class/net/$interface" ] || { microfx_write_network_status radio-unavailable "client radio $interface unavailable" "$interface"; echo "Client radio $interface unavailable"; exit 1; }
+[ -d "$sys_class_net/$interface" ] || { microfx_write_network_status radio-unavailable "client radio $interface unavailable" "$interface"; echo "Client radio $interface unavailable"; exit 1; }
 [ -r "$config" ] || { microfx_write_network_status unconfigured "use setup network $MICROFX_SETUP_SSID"; echo "No saved Wi-Fi networks; use $MICROFX_SETUP_SSID"; exit 0; }
 
 iw reg set DK || true
 ip link set "$interface" up
 iw dev "$interface" set power_save off 2>/dev/null || true
-wpa_pid="/run/wpa_supplicant-${interface}.pid"
-dhcp_pid="/run/udhcpc-${interface}.pid"
-for pidfile in "$dhcp_pid" "$wpa_pid"; do
-  if [ -r "$pidfile" ]; then
-    kill "$(cat "$pidfile")" 2>/dev/null || true
-    rm -f "$pidfile"
-  fi
-done
+wpa_pid="$run_root/wpa_supplicant-${interface}.pid"
+dhcp_pid="$run_root/udhcpc-${interface}.pid"
+control_socket=$run_root/wpa_supplicant/$interface
+max_rounds=${MICROFX_WIFI_CONNECT_MAX_ROUNDS:-4}
+association_seconds=${MICROFX_WIFI_CONNECT_ASSOCIATION_SECONDS:-25}
+retry_delay=${MICROFX_WIFI_CONNECT_RETRY_DELAY:-5}
+
+stop_pidfile() {
+  pidfile=$1
+  [ -r "$pidfile" ] || return 0
+  pid=$(cat "$pidfile" 2>/dev/null || true)
+  case "$pid" in
+    ''|*[!0-9]*) ;;
+    *)
+      kill "$pid" 2>/dev/null || true
+      waited=0
+      while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 3 ]; do
+        waited=$((waited + 1))
+        sleep 1
+      done
+      kill -9 "$pid" 2>/dev/null || true
+      ;;
+  esac
+  rm -f "$pidfile"
+}
+
+stop_pidfile "$dhcp_pid"
 ip address flush dev "$interface" 2>/dev/null || true
 [ "$CANVAS_DEBUG" = "1" ] && wpa_debug=-dd || wpa_debug=
-wpa_supplicant -B $wpa_debug -t -f "$wpa_log" -P "$wpa_pid" -i "$interface" -c "$config"
 
-tries=0
+round=0
 state=
-while [ "$tries" -lt 30 ]; do
-  state=$(wpa_cli -i "$interface" status 2>/dev/null | sed -n 's/^wpa_state=//p')
-  echo "wpa_state=${state:-unknown}"
-  [ "$state" = "COMPLETED" ] && break
-  tries=$((tries + 1)); sleep 1
+while [ "$round" -lt "$max_rounds" ]; do
+  round=$((round + 1))
+  echo "association_round=$round/$max_rounds"
+  stop_pidfile "$wpa_pid"
+  rm -f "$control_socket"
+  if ! wpa_supplicant -B $wpa_debug -t -f "$wpa_log" -P "$wpa_pid" -i "$interface" -c "$config"; then
+    rm -f "$wpa_pid" "$control_socket"
+    echo "wpa_supplicant failed to start in round $round"
+  else
+    tries=0
+    while [ "$tries" -lt "$association_seconds" ]; do
+      state=$(wpa_cli -i "$interface" status 2>/dev/null | sed -n 's/^wpa_state=//p')
+      echo "wpa_state=${state:-unknown}"
+      [ "$state" = "COMPLETED" ] && break
+      tries=$((tries + 1)); sleep 1
+    done
+    [ "$state" = COMPLETED ] && break
+  fi
+  stop_pidfile "$wpa_pid"
+  rm -f "$control_socket"
+  [ "$round" -ge "$max_rounds" ] || sleep "$retry_delay"
 done
-wpa_cli -i "$interface" status || true
+
 if [ "$state" = "COMPLETED" ]; then
+  wpa_cli -i "$interface" status || true
   address=$(ip -4 address show dev "$interface" 2>/dev/null | sed -n 's/.*inet \([^ ]*\).*/\1/p' | head -n 1)
   if [ -z "$address" ]; then
     udhcpc -b -p "$dhcp_pid" -i "$interface" -x hostname:microfx
@@ -73,6 +115,9 @@ if [ "$state" = "COMPLETED" ]; then
   fi
   microfx_write_network_status connected "client associated" "$interface"
 else
-  microfx_write_network_status disconnected "no configured network associated" "$interface"
-  echo "No configured network associated; setup AP remains available"
+  stop_pidfile "$wpa_pid"
+  rm -f "$control_socket"
+  microfx_write_network_status disconnected "no configured network associated after $max_rounds rounds" "$interface"
+  echo "No configured network associated after $max_rounds rounds; setup AP remains available"
+  exit 1
 fi

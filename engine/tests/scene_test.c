@@ -7,11 +7,11 @@ int main(void)
     MicroFxScene scene;
     MicroFxSceneInit(&scene);
     assert(scene.camera.fovY == 48.0f);
-    assert(scene.runtime.targetFps == 30 && scene.runtime.debugBar);
+    assert(scene.runtime.targetFps == 30 && scene.runtime.debugBarUntilSeconds == 600.0f);
     assert(scene.runtime.durationSeconds == 0.0f);
     assert(!scene.runtime.profiling && scene.runtime.profileIntervalFrames == 120);
-    assert(scene.runtime.densitySampleFrames == 180);
-    assert(scene.runtime.densityStep == 0.025f);
+    assert(scene.runtime.densitySampleFrames == 60);
+    assert(scene.runtime.densityStep == 0.1f);
     assert(scene.runtime.densityDownThreshold == 1.08f);
     assert(scene.runtime.densityUpThreshold == 0.72f);
     assert(scene.runtime.densityUpSamples == 4);
@@ -84,19 +84,27 @@ int main(void)
     assert(scene.text[0].color==0x12345678);
 
     int image=MicroFxSceneAddImage(&scene,"/project/assets/icon.png",
-                                   100,200,320,180,0xffffffff);
+                                   100,200,1.5f,0xffffffff);
     assert((image&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_IMAGE);
     assert(strcmp(scene.image[0].assetPath,"/project/assets/icon.png")==0);
+    scene.imageDirty=false;
     assert(MicroFxSceneMove(&scene,image,300,400,0.75f));
     assert(scene.image[0].x==300 && scene.image[0].rotation==0.75f);
+    assert(!scene.imageDirty);
     assert(MicroFxSceneSetColor(&scene,image,0x89abcdef));
     assert(scene.image[0].tint==0x89abcdef);
+    assert(!scene.imageDirty);
     assert(MicroFxSceneSetOpacity(&scene,image,0.5f));
     assert(scene.image[0].opacity==0.5f);
+    assert(!scene.imageDirty);
+    assert(MicroFxSceneSetImageScale(&scene,image,2.0f));
+    assert(scene.image[0].scale==2.0f);
+    assert(scene.imageDirty);
+    scene.imageDirty=false;
     assert(MicroFxSceneSetVisible(&scene,image,false));
-    assert(!scene.image[0].visible && scene.imageDirty);
-    assert(MicroFxSceneAddImage(&scene,"",0,0,10,10,0xffffffff)<0);
-    assert(MicroFxSceneAddImage(&scene,"bad.png",0,0,0,10,0xffffffff)<0);
+    assert(!scene.image[0].visible && !scene.imageDirty);
+    assert(MicroFxSceneAddImage(&scene,"",0,0,1,0xffffffff)<0);
+    assert(MicroFxSceneAddImage(&scene,"bad.png",0,0,0,0xffffffff)<0);
 
     assert(!MicroFxSceneMove(&scene,cube,0,0,0));
     assert(!MicroFxSceneTransform(&scene,circle,0,0,0,0,0,0,1));

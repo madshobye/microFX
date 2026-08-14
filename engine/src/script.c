@@ -11,6 +11,8 @@ struct MicroFxScript {
     JSRuntime *runtime;
     JSContext *context;
     JSValue update;
+    JSValue beginFrame;
+    JSValue endFrame;
     MicroFxScene *scene;
     char projectRoot[MICROFX_MAX_ASSET_PATH];
 };
@@ -169,10 +171,10 @@ static JSValue AddImage(JSContext *ctx,JSValueConst thisValue,int argc,JSValueCo
 {
     (void)thisValue;
     MicroFxScript *script=JS_GetContextOpaque(ctx);
-    double x=0,y=0,width=0,height=0;
-    if(argc<6||JS_ToFloat64(ctx,&x,argv[1])||JS_ToFloat64(ctx,&y,argv[2])||
-       JS_ToFloat64(ctx,&width,argv[3])||JS_ToFloat64(ctx,&height,argv[4]))
-        return JS_ThrowTypeError(ctx,"image(asset,x,y,width,height,tint)");
+    double x=0,y=0,scale=0;
+    if(argc!=5||JS_ToFloat64(ctx,&x,argv[1])||JS_ToFloat64(ctx,&y,argv[2])||
+       JS_ToFloat64(ctx,&scale,argv[3]))
+        return JS_ThrowTypeError(ctx,"image(asset,x,y,scale,tint) requires exactly 5 arguments");
     const char *asset=JS_ToCString(ctx,argv[0]);
     if(!asset)return JS_EXCEPTION;
     char path[MICROFX_MAX_ASSET_PATH];
@@ -181,8 +183,16 @@ static JSValue AddImage(JSContext *ctx,JSValueConst thisValue,int argc,JSValueCo
                                      error,sizeof(error));
     JS_FreeCString(ctx,asset);
     if(!resolved)return JS_ThrowReferenceError(ctx,"image asset rejected: %s",error);
-    return Handle(ctx,MicroFxSceneAddImage(script->scene,path,x,y,width,height,
-                                          ColorArg(ctx,argv[5])));
+    return Handle(ctx,MicroFxSceneAddImage(script->scene,path,x,y,scale,
+                                          ColorArg(ctx,argv[4])));
+}
+
+static JSValue SetImageScale(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;double scale=0;
+    if(argc<2||JS_ToInt32(ctx,&handle,argv[0])||JS_ToFloat64(ctx,&scale,argv[1]))
+        return JS_ThrowTypeError(ctx,"imageScale(handle,scale)");
+    return JS_NewBool(ctx,MicroFxSceneSetImageScale(script->scene,handle,(float)scale));
 }
 
 static JSValue SetText(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
@@ -349,7 +359,17 @@ static JSValue Configure(JSContext *ctx,JSValueConst thisValue,int argc,JSValueC
     }
     JS_FreeValue(ctx,density);
     JSValue debug=JS_GetPropertyStr(ctx,argv[0],"debugBar");
-    if(!JS_IsUndefined(debug))settings.debugBar=JS_ToBool(ctx,debug)>0;
+    if(!JS_IsUndefined(debug)){
+        if(JS_IsBool(debug))settings.debugBarUntilSeconds=JS_ToBool(ctx,debug)>0?-1.0f:0.0f;
+        else{
+            double minutes=0;
+            if(JS_ToFloat64(ctx,&minutes,debug)||!isfinite(minutes)||minutes<0.0){
+                JS_FreeValue(ctx,debug);
+                return JS_ThrowRangeError(ctx,"debugBar must be a boolean or non-negative minutes");
+            }
+            settings.debugBarUntilSeconds=(float)(minutes*60.0);
+        }
+    }
     JS_FreeValue(ctx,debug);
     JSValue profiling=JS_GetPropertyStr(ctx,argv[0],"profiling");
     if(!JS_IsUndefined(profiling))settings.profiling=JS_ToBool(ctx,profiling)>0;
@@ -444,8 +464,16 @@ static JSValue ProjectData(JSContext *ctx,JSValueConst thisValue,int argc,
 static JSValue DebugBar(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
 {
     (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
-    if(argc<1)return JS_ThrowTypeError(ctx,"debugBar(visible)");
-    script->scene->runtime.debugBar=JS_ToBool(ctx,argv[0])>0;
+    if(argc<1)return JS_ThrowTypeError(ctx,"debugBar(booleanOrMinutes)");
+    if(JS_IsBool(argv[0])){
+        script->scene->runtime.debugBarUntilSeconds=JS_ToBool(ctx,argv[0])>0?-1.0f:0.0f;
+    }else{
+        double minutes=0;
+        if(JS_ToFloat64(ctx,&minutes,argv[0])||!isfinite(minutes)||minutes<0.0)
+            return JS_ThrowRangeError(ctx,"debugBar must be a boolean or non-negative minutes");
+        script->scene->runtime.debugBarUntilSeconds=minutes==0.0?0.0f:
+            script->scene->time+(float)(minutes*60.0);
+    }
     return JS_UNDEFINED;
 }
 
@@ -492,7 +520,15 @@ static void DumpException(JSContext *ctx)
 {
     JSValue exception = JS_GetException(ctx);
     const char *message = JS_ToCString(ctx, exception);
-    fprintf(stderr, "MICROFX_JS %s\n", message ? message : "unknown exception");
+    JSValue stackValue=JS_GetPropertyStr(ctx,exception,"stack");
+    const char *stack=JS_IsUndefined(stackValue)?NULL:JS_ToCString(ctx,stackValue);
+    const char *detail=stack&&stack[0]?stack:(message?message:"unknown exception");
+    fprintf(stderr,"MICROFX_JS_ERROR ");
+    for(const char *cursor=detail;*cursor;cursor++)
+        fputc((*cursor=='\n'||*cursor=='\r'||*cursor=='\t')?' ':*cursor,stderr);
+    fputc('\n',stderr);
+    if(stack)JS_FreeCString(ctx,stack);
+    JS_FreeValue(ctx,stackValue);
     JS_FreeCString(ctx, message);
     JS_FreeValue(ctx, exception);
 }
@@ -510,6 +546,8 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     MicroFxScript *script=calloc(1,sizeof(*script));
     if(!script){free(source);return NULL;}
     script->update=JS_UNDEFINED;
+    script->beginFrame=JS_UNDEFINED;
+    script->endFrame=JS_UNDEFINED;
     char rootError[128];
     if(!MicroFxProjectRoot(path,script->projectRoot,sizeof(script->projectRoot),
                           rootError,sizeof(rootError))){
@@ -536,7 +574,8 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_model",JS_NewCFunction(script->context,AddModel,"_model",6));
     JS_SetPropertyStr(script->context,fx,"_transform",JS_NewCFunction(script->context,Transform,"_transform",8));
     JS_SetPropertyStr(script->context,fx,"_text",JS_NewCFunction(script->context,AddText,"_text",5));
-    JS_SetPropertyStr(script->context,fx,"_image",JS_NewCFunction(script->context,AddImage,"_image",6));
+    JS_SetPropertyStr(script->context,fx,"_image",JS_NewCFunction(script->context,AddImage,"_image",5));
+    JS_SetPropertyStr(script->context,fx,"_imageScale",JS_NewCFunction(script->context,SetImageScale,"_imageScale",2));
     JS_SetPropertyStr(script->context,fx,"_setText",JS_NewCFunction(script->context,SetText,"_setText",2));
     JS_SetPropertyStr(script->context,fx,"_font",JS_NewCFunction(script->context,SetFont,"_font",2));
     JS_SetPropertyStr(script->context,fx,"_color",JS_NewCFunction(script->context,SetColor,"_color",2));
@@ -566,6 +605,10 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,effects,"noise",JS_NewInt32(script->context,2));
     JS_SetPropertyStr(script->context,effects,"bands",JS_NewInt32(script->context,3));
     JS_SetPropertyStr(script->context,fx,"effects",effects);
+    JS_SetPropertyStr(script->context,fx,"width",JS_NewInt32(script->context,MICROFX_DESIGN_WIDTH));
+    JS_SetPropertyStr(script->context,fx,"height",JS_NewInt32(script->context,MICROFX_DESIGN_HEIGHT));
+    JS_SetPropertyStr(script->context,global,"width",JS_NewInt32(script->context,MICROFX_DESIGN_WIDTH));
+    JS_SetPropertyStr(script->context,global,"height",JS_NewInt32(script->context,MICROFX_DESIGN_HEIGHT));
     JS_SetPropertyStr(script->context,global,"fx",fx);
     JS_FreeValue(script->context,global);
     JSValue runtimeResult=JS_Eval(script->context,MICROFX_RUNTIME_JS,strlen(MICROFX_RUNTIME_JS),
@@ -575,6 +618,12 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
         free(source);MicroFxScriptDestroy(script);return NULL;
     }
     JS_FreeValue(script->context,runtimeResult);
+    global=JS_GetGlobalObject(script->context);
+    JSValue runtimeFx=JS_GetPropertyStr(script->context,global,"fx");
+    script->beginFrame=JS_GetPropertyStr(script->context,runtimeFx,"_beginFrame");
+    script->endFrame=JS_GetPropertyStr(script->context,runtimeFx,"_endFrame");
+    JS_FreeValue(script->context,runtimeFx);
+    JS_FreeValue(script->context,global);
     JSValue result=JS_Eval(script->context,source,(size_t)size,path,JS_EVAL_TYPE_GLOBAL);
     free(source);
     if (JS_IsException(result)) { DumpException(script->context); JS_FreeValue(script->context,result); MicroFxScriptDestroy(script); return NULL; }
@@ -593,11 +642,17 @@ bool MicroFxScriptUpdate(MicroFxScript *script, double time, double delta)
 {
     if (!script) return false;
     script->scene->time=(float)time;
+    JSValue frameResult=JS_Call(script->context,script->beginFrame,JS_UNDEFINED,0,NULL);
+    if(JS_IsException(frameResult)){DumpException(script->context);JS_FreeValue(script->context,frameResult);return false;}
+    JS_FreeValue(script->context,frameResult);
     JSValue args[2]={JS_NewFloat64(script->context,time),JS_NewFloat64(script->context,delta)};
     JSValue result=JS_Call(script->context,script->update,JS_UNDEFINED,2,args);
     JS_FreeValue(script->context,args[0]); JS_FreeValue(script->context,args[1]);
     if (JS_IsException(result)) { DumpException(script->context); JS_FreeValue(script->context,result); return false; }
     JS_FreeValue(script->context,result);
+    frameResult=JS_Call(script->context,script->endFrame,JS_UNDEFINED,0,NULL);
+    if(JS_IsException(frameResult)){DumpException(script->context);JS_FreeValue(script->context,frameResult);return false;}
+    JS_FreeValue(script->context,frameResult);
     return true;
 }
 
@@ -605,6 +660,8 @@ void MicroFxScriptDestroy(MicroFxScript *script)
 {
     if (!script) return;
     if (script->context) JS_FreeValue(script->context,script->update);
+    if (script->context) JS_FreeValue(script->context,script->beginFrame);
+    if (script->context) JS_FreeValue(script->context,script->endFrame);
     if (script->context) JS_FreeContext(script->context);
     if (script->runtime) JS_FreeRuntime(script->runtime);
     free(script);

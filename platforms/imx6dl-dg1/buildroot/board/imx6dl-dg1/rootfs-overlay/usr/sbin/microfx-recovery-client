@@ -16,7 +16,7 @@ stored_config=${MICROFX_RECOVERY_CONFIG:-/data/config/wpa_supplicant.conf}
 [ -r "$stored_config" ] || stored_config=${MICROFX_RECOVERY_FALLBACK_CONFIG:-/etc/wpa_supplicant.conf}
 interface=${MICROFX_RECOVERY_INTERFACE:-wlan1}
 fallback_interface=${MICROFX_RECOVERY_FALLBACK_INTERFACE:-wlan0}
-max_rounds=${MICROFX_RECOVERY_MAX_ROUNDS:-0}
+max_rounds=${MICROFX_RECOVERY_MAX_ROUNDS:-3}
 retry_delay=${MICROFX_RECOVERY_RETRY_DELAY:-15}
 association_seconds=${MICROFX_RECOVERY_ASSOCIATION_SECONDS:-30}
 address_seconds=${MICROFX_RECOVERY_ADDRESS_SECONDS:-15}
@@ -24,6 +24,12 @@ ssh_service=${MICROFX_SSH_SERVICE:-/etc/init.d/S39dropbear-debug}
 flag=${MICROFX_RECOVERY_ACTIVE_FLAG:-$run_root/microfx-recovery-active}
 status=${MICROFX_RECOVERY_STATUS:-$run_root/microfx-recovery-status}
 log=${MICROFX_RECOVERY_LOG:-/tmp/microfx-recovery-client.log}
+connected=0
+
+cleanup() {
+  [ "$connected" = 1 ] || rm -f "$flag"
+}
+trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$run_root"
 if [ ! -r "$stored_config" ]; then
@@ -105,6 +111,7 @@ connect_stored_network() {
   "$ssh_service" start >>"$log" 2>&1 || true
   printf 'state\tconnected\ninterface\t%s\naddress\t%s\n' "$interface" "$address" >"$status"
   echo "$(date) recovery SSH ready on $interface at $address" >>"$log"
+  connected=1
   return 0
 }
 

@@ -14,6 +14,12 @@ printf '%s\n' 'CANVAS_SSH=1' >"$TEMP/canvas.conf"
 printf '%s\n' 'CANVAS_DEBUG=1' >>"$TEMP/canvas.conf"
 : >"$TEMP/actions"
 
+cat >"$TEMP/bin/wifi-service" <<'EOF'
+#!/bin/sh
+printf 'wifi-service %s\n' "$*" >>"$MOCK_ACTIONS"
+EOF
+chmod +x "$TEMP/bin/wifi-service"
+
 cat >"$TEMP/bin/recovery-mock" <<'EOF'
 #!/bin/sh
 name=${0##*/}
@@ -115,13 +121,48 @@ if [ -e "$TEMP/no-data-state" ]; then
 fi
 microfx_assert_file_contains 'boot-loop accounting is disabled' "$TEMP/no-data-guardian.log" "missing data partition was not reported"
 
-# Three consecutive pending boots activate recovery immediately on the next
-# boot, without waiting for the normal network grace period.
+# A failed bounded fallback returns ownership to the ordinary Wi-Fi service.
+mkdir -p "$TEMP/fallback-run"
+printf '%s\n' "$$" >"$TEMP/fallback-run/dropbear-debug.pid"
+: >"$TEMP/fallback-actions"
+cat >"$TEMP/bin/no-network-ip" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+cat >"$TEMP/bin/recovery-fails" <<'EOF'
+#!/bin/sh
+printf 'recovery attempted\n' >>"$MOCK_FALLBACK_ACTIONS"
+: >"$MICROFX_RUN_ROOT/microfx-recovery-active"
+exit 1
+EOF
+chmod +x "$TEMP/bin/no-network-ip" "$TEMP/bin/recovery-fails"
+ln -sf no-network-ip "$TEMP/bin/ip"
+PATH="$TEMP/bin:$PATH" \
+MOCK_FALLBACK_ACTIONS="$TEMP/fallback-actions" \
+MOCK_ACTIONS="$TEMP/fallback-actions" \
+MICROFX_RUNTIME_CONFIG="$TEMP/canvas.conf" \
+MICROFX_RUN_ROOT="$TEMP/fallback-run" \
+MICROFX_RECOVERY_DISABLE_BOOT_GUARD=1 \
+MICROFX_RECOVERY_INITIAL_DELAY=0 \
+MICROFX_RECOVERY_POLL_DELAY=0 \
+MICROFX_RECOVERY_FAILURE_LIMIT=1 \
+MICROFX_RECOVERY_MAX_CYCLES=1 \
+MICROFX_RECOVERY_CLIENT="$TEMP/bin/recovery-fails" \
+MICROFX_WIFI_SERVICE="$TEMP/bin/wifi-service" \
+MICROFX_RECOVERY_GUARDIAN_LOG="$TEMP/fallback.log" \
+  "$OVERLAY/usr/sbin/microfx-recovery-guardian"
+microfx_assert_file_contains '^recovery attempted$' "$TEMP/fallback-actions" "fallback recovery was not attempted"
+microfx_assert_file_contains '^wifi-service restart$' "$TEMP/fallback-actions" "normal Wi-Fi did not regain ownership"
+test ! -e "$TEMP/fallback-run/microfx-recovery-active" || microfx_test_fail "failed fallback retained radio ownership"
+
+# Three consecutive pending boots suppress graphics, but retain the normal
+# network grace period instead of immediately taking ownership of the radios.
 mkdir -p "$TEMP/boot-loop-run" "$TEMP/boot-loop-state"
+printf '%s\n' "$$" >"$TEMP/boot-loop-run/dropbear-debug.pid"
 printf '%s\n' 12 >"$TEMP/boot-loop-state/boot-count"
 printf '%s\n' 12 >"$TEMP/boot-loop-state/boot-pending"
 printf '%s\n' 11 >"$TEMP/boot-loop-state/boot-stable"
-printf '%s\n' 2 >"$TEMP/boot-loop-state/short-boot-count"
+printf '%s\n' 1 >"$TEMP/boot-loop-state/short-boot-count"
 : >"$TEMP/boot-loop-actions"
 cat >"$TEMP/bin/recovery-invoked" <<'EOF'
 #!/bin/sh
@@ -129,6 +170,7 @@ echo invoked >>"$MOCK_BOOT_LOOP_ACTIONS"
 exit 0
 EOF
 chmod +x "$TEMP/bin/recovery-invoked"
+ln -sf guardian-ip "$TEMP/bin/ip"
 
 PATH="$TEMP/bin:$PATH" \
 MOCK_BOOT_LOOP_ACTIONS="$TEMP/boot-loop-actions" \
@@ -139,11 +181,16 @@ MICROFX_RECOVERY_STATE_ROOT="$TEMP/boot-loop-state" \
 MICROFX_RECOVERY_REQUIRE_DATA_MOUNT=0 \
 MICROFX_RECOVERY_STABLE_SECONDS=600 \
 MICROFX_RECOVERY_DISABLE_STABLE_TIMER=1 \
+MICROFX_RECOVERY_INITIAL_DELAY=0 \
+MICROFX_RECOVERY_POLL_DELAY=0 \
+MICROFX_RECOVERY_MAX_CYCLES=1 \
 MICROFX_RECOVERY_CLIENT="$TEMP/bin/recovery-invoked" \
+MICROFX_SSH_SERVICE="$TEMP/bin/should-not-run" \
   "$OVERLAY/usr/sbin/microfx-recovery-guardian"
-microfx_assert_file_contains '^invoked$' "$TEMP/boot-loop-actions" "short-boot threshold did not invoke recovery"
+microfx_assert_file_empty "$TEMP/boot-loop-actions" "short-boot protection took over healthy normal Wi-Fi"
 microfx_assert_file_contains '^13$' "$TEMP/boot-loop-state/boot-count" "boot counter did not increment"
-microfx_assert_file_contains '^3$' "$TEMP/boot-loop-state/short-boot-count" "short-boot counter did not increment"
-microfx_assert_file_contains '^state[[:space:]]activating-boot-loop$' "$TEMP/boot-loop-run/microfx-recovery-status" "boot-loop status missing"
+microfx_assert_file_contains '^2$' "$TEMP/boot-loop-state/short-boot-count" "short-boot counter did not increment"
+test -e "$TEMP/boot-loop-run/microfx-graphics-safe-mode" || microfx_test_fail "short-boot protection did not suppress graphics"
+microfx_assert_file_contains '^state[[:space:]]normal$' "$TEMP/boot-loop-run/microfx-recovery-status" "normal network did not recover in graphics safe mode"
 
 microfx_test_finish "stored-network SSH recovery tests"

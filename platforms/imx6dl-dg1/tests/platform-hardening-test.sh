@@ -48,6 +48,20 @@ MICROFX_RUN_ROOT="$TEMP/run" MICROFX_SUPERVISOR="$TEMP/bin/supervisor" \
   "$OVERLAY/etc/init.d/S40canvas" start
 microfx_assert_eq "$supervisor_pid" "$(cat "$TEMP/run/canvas-supervisor.pid")" "graphics supervisor duplicate start"
 
+MICROFX_RUN_ROOT="$TEMP/run" MICROFX_SUPERVISOR="$TEMP/bin/supervisor" \
+  "$OVERLAY/etc/init.d/S40canvas" stop
+supervisor_pid=
+: >"$TEMP/run/microfx-graphics-safe-mode"
+MICROFX_RUN_ROOT="$TEMP/run" MICROFX_SUPERVISOR="$TEMP/bin/supervisor" \
+  "$OVERLAY/etc/init.d/S40canvas" start
+if [ -e "$TEMP/run/canvas-supervisor.pid" ]; then
+  microfx_test_fail "graphics safe mode started the supervisor"
+fi
+rm -f "$TEMP/run/microfx-graphics-safe-mode"
+MICROFX_RUN_ROOT="$TEMP/run" MICROFX_SUPERVISOR="$TEMP/bin/supervisor" \
+  "$OVERLAY/etc/init.d/S40canvas" start
+supervisor_pid=$(cat "$TEMP/run/canvas-supervisor.pid")
+
 printf 'root=/dev/mmcblk0p3 rw\n' >"$TEMP/cmdline"
 printf 'state\tconnected\n' >"$TEMP/run/microfx-network-status"
 printf 'state\tusable\n' >"$TEMP/run/microfx-time-sync.status"
