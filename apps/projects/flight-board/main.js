@@ -970,9 +970,12 @@ function requestTransit() {
     `&startTime=${start}&endTime=${end}&precision=4`;
   const metroEastUrl = `${TRANSIT_URL}?zoom=9&min=55.64,12.63&max=55.73,12.565` +
     `&startTime=${start}&endTime=${end}&precision=4`;
+  const airportRailUrl = `${TRANSIT_URL}?zoom=9&min=55.60,12.70&max=55.70,12.62` +
+    `&startTime=${start}&endTime=${end}&precision=4`;
   const headers = { "User-Agent": TRANSIT_USER_AGENT };
   Promise.all([fetch(trainWestUrl, { headers }), fetch(trainEastUrl, { headers }),
-    fetch(metroWestUrl, { headers }), fetch(metroEastUrl, { headers })])
+    fetch(metroWestUrl, { headers }), fetch(metroEastUrl, { headers }),
+    fetch(airportRailUrl, { headers })])
     .then(responses => Promise.all(responses.map(response => {
       if (!response.ok) throw new Error(`Transitous HTTP ${response.status}`);
       return response.json();
@@ -997,20 +1000,24 @@ function processTransitJob() {
   if (!transitJob) return;
   const job = transitJob;
   if (job.stage === 0) {
-    job.trains.push(normalizeTransit(job.payloads[2], job.now, TRANSIT_MODES, "train"));
+    job.metro.push(normalizeTransit(job.payloads[4], job.now, METRO_MODES, "metro"));
   } else if (job.stage === 1) {
-    job.trains.push(normalizeTransit(job.payloads[3], job.now, TRANSIT_MODES, "train"));
+    job.trains.push(normalizeTransit(job.payloads[4], job.now, TRANSIT_MODES, "train"));
   } else if (job.stage === 2) {
-    job.trains.push(normalizeTransit(job.payloads[0], job.now, TRANSIT_MODES, "train"));
+    job.trains.push(normalizeTransit(job.payloads[2], job.now, TRANSIT_MODES, "train"));
   } else if (job.stage === 3) {
-    job.trains.push(normalizeTransit(job.payloads[1], job.now, TRANSIT_MODES, "train"));
+    job.trains.push(normalizeTransit(job.payloads[3], job.now, TRANSIT_MODES, "train"));
   } else if (job.stage === 4) {
-    job.metro.push(normalizeTransit(job.payloads[2], job.now, METRO_MODES, "metro"));
+    job.trains.push(normalizeTransit(job.payloads[0], job.now, TRANSIT_MODES, "train"));
   } else if (job.stage === 5) {
-    job.metro.push(normalizeTransit(job.payloads[3], job.now, METRO_MODES, "metro"));
+    job.trains.push(normalizeTransit(job.payloads[1], job.now, TRANSIT_MODES, "train"));
   } else if (job.stage === 6) {
-    job.buses.push(normalizeTransit(job.payloads[2], job.now, BUS_MODES));
+    job.metro.push(normalizeTransit(job.payloads[2], job.now, METRO_MODES, "metro"));
   } else if (job.stage === 7) {
+    job.metro.push(normalizeTransit(job.payloads[3], job.now, METRO_MODES, "metro"));
+  } else if (job.stage === 8) {
+    job.buses.push(normalizeTransit(job.payloads[2], job.now, BUS_MODES));
+  } else if (job.stage === 9) {
     job.buses.push(normalizeTransit(job.payloads[3], job.now, BUS_MODES));
   } else {
     const rail = mergeTransit(...job.trains).concat(mergeTransit(...job.metro));
