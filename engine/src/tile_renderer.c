@@ -59,7 +59,7 @@ static unsigned char ColorByte(float value)
     return (unsigned char)(ClampUnit(value)*255.0f+0.5f);
 }
 
-static bool BakeFilter(Image *image,const MicroFxTileMap *map)
+static bool BakeFilter(Image *image,const MicroFxTileMap *map,bool neutralRgb565)
 {
     if(image->format!=PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
         ImageFormat(image,PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
@@ -81,6 +81,12 @@ static bool BakeFilter(Image *image,const MicroFxTileMap *map)
         r=((r-0.5f)*map->contrast+0.5f)*map->brightness*tintR;
         g=((g-0.5f)*map->contrast+0.5f)*map->brightness*tintG;
         b=((b-0.5f)*map->contrast+0.5f)*map->brightness*tintB;
+        if(neutralRgb565&&map->grayscale>=0.999f&&
+           map->tint==0xffffffffu){
+            const float neutral=(r+g+b)/3.0f;
+            const float quantized=roundf(ClampUnit(neutral)*31.0f)/31.0f;
+            r=quantized;g=quantized;b=quantized;
+        }
         pixels[i].r=ColorByte(r);pixels[i].g=ColorByte(g);pixels[i].b=ColorByte(b);
         pixels[i].a=255;
     }
@@ -117,8 +123,10 @@ bool MicroFxTileRendererUpdate(MicroFxTileRenderer *renderer,MicroFxScene *scene
             tile->consumed=true;state->decodedCount++;processed++;
         }
         if(state->decodedCount==map->tileCount&&IsImageValid(state->staging)){
-            if(!BakeFilter(&state->staging,map))return false;
-            ImageFormat(&state->staging,PIXELFORMAT_UNCOMPRESSED_R5G6B5);
+            const bool rgb565=scene->runtime.colorFormat==MICROFX_COLOR_RGB565;
+            if(!BakeFilter(&state->staging,map,rgb565))return false;
+            if(rgb565)
+                ImageFormat(&state->staging,PIXELFORMAT_UNCOMPRESSED_R5G6B5);
             Texture2D next=LoadTextureFromImage(state->staging);UnloadImage(state->staging);
             state->staging=(Image){0};
             if(!IsTextureValid(next))return false;
