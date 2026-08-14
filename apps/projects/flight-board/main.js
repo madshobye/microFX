@@ -7,21 +7,21 @@ fx.configure({
 
 // Change this block to move the entire sketch to another airport.
 const PLACE = {
-  label: "CORDOBA",
+  label: "NEW YORK",
   airport: {
-    iata: "COR",
-    icao: "SACO",
-    latitude: -31.3123,
-    longitude: -64.2083,
+    iata: "JFK",
+    icao: "KJFK",
+    latitude: 40.6413,
+    longitude: -73.7781,
     markerOffset: [-45, 35]
   },
   mapCenter: {
-    latitude: -31.365,
-    longitude: -64.205
+    latitude: 40.715,
+    longitude: -73.93
   },
-  mapZoom: 11.25,
-  searchRadiusNm: 35,
-  airportGroundRadiusKm: 3,
+  mapZoom: 10.65,
+  searchRadiusNm: 45,
+  airportGroundRadiusKm: 4,
   landmarks: [],
   transitEnabled: false,
   aisBounds: null
