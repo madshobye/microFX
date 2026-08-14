@@ -1,4 +1,4 @@
-fx.configure({ targetFps: 30, pixelDensity: "auto", minimumPixelDensity: 0.5, debugBar: 10 });
+fx.configure({ targetFps: 60, pixelDensity: 1, debugBar: 10 });
 
 const LON_MIN = 12.16;
 const LON_MAX = 13.11;
@@ -25,9 +25,10 @@ const mapY = latitude => (1 - clamp((latitude - LAT_MIN) / (LAT_MAX - LAT_MIN), 
 const flights = Array.from({ length: MAX_FLIGHTS }, () => {
   const marker = fx.group();
   const trail = Array.from({ length: 3 }, (_, segment) =>
-    marker.add(fx.line(-10, 0, 10, 0, 5 - segment, 0x38bce8ff)
+    marker.add(fx.sdfRoundedRect(0, 0, 20, 5 - segment,
+      (5 - segment) * 0.5, 0x38bce8ff)
       .opacity(0.8 - segment * 0.2)));
-  marker.add(fx.circle(0, 0, 10, 0xffd55aff));
+  marker.add(fx.sdfCircle(0, 0, 10, 0xffd55aff));
   const label = fx.text("---", 0, 0, 18, 0xffffffff);
   scene.add(marker);
   scene.add(label);
@@ -78,8 +79,8 @@ function routeDescription(origin, destination) {
     destination.icao_code === "EKCH";
   const from = placeName(origin);
   const to = placeName(destination);
-  if (destinationLocal && from) return `FROM ${from}`;
-  if (originLocal && to) return `TO ${to}`;
+  if (destinationLocal && from) return from;
+  if (originLocal && to) return to;
   return from && to ? `${from} > ${to}` : "";
 }
 
@@ -190,7 +191,8 @@ function normalizeFlights(payload) {
   if (!payload || !Array.isArray(payload.states)) throw new Error("missing flight states");
   const snapshotTime = Number(payload.time || 0);
   return payload.states
-    .filter(row => Array.isArray(row) && Number.isFinite(row[5]) && Number.isFinite(row[6]))
+    .filter(row => Array.isArray(row) && Number.isFinite(row[5]) &&
+      Number.isFinite(row[6]) && row[8] !== true)
     .slice(0, flights.length)
     .map((row, index) => {
       const velocity = Math.max(0, Number(row[9] || 0));
@@ -252,7 +254,7 @@ function update(time, delta) {
   requestNextRoute();
 
   const updateLabels = time >= nextLabelUpdate;
-  if (updateLabels) nextLabelUpdate = time + 0.2;
+  if (updateLabels) nextLabelUpdate = time + 1 / 15;
   flights.forEach(slot => {
     if (!slot.active) return;
     const step = clamp(delta, 0, 0.25);
