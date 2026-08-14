@@ -25,8 +25,9 @@ const MAX_FLIGHTS = 50;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
+const TRANSIT_WINDOW_SECONDS = 20;
 const TRANSIT_HOLD_SECONDS = 4 * 60;
-const TRANSIT_MAX_CORRECTION_PIXELS_PER_SECOND = 8;
+const TRANSIT_CORRECTION_SECONDS = 8;
 const MAX_RAIL_TRANSIT = 224;
 const MAX_BUSES = 128;
 const TRANSIT_MODES = new Set([
@@ -139,7 +140,11 @@ const transit = Array.from({ length: MAX_RAIL_TRANSIT }, () => {
     lastSeen: 0,
     path: [], cumulative: [], total: 0, pathIndex: 1,
     departure: 0, arrival: 0, parked: false,
-    positionInitialized: false, currentX: 0, currentY: 0
+    nextPath: null, nextCumulative: null, nextTotal: 0,
+    nextDeparture: 0, nextArrival: 0,
+    positionInitialized: false, currentX: 0, currentY: 0,
+    velocityX: 0, velocityY: 0,
+    correctionX: 0, correctionY: 0, correctionRemaining: 0
   };
 });
 
@@ -150,7 +155,11 @@ const busTransit = Array.from({ length: MAX_BUSES }, () => {
     lastSeen: 0,
     path: [], cumulative: [], total: 0, pathIndex: 1,
     departure: 0, arrival: 0, parked: false,
-    positionInitialized: false, currentX: 0, currentY: 0
+    nextPath: null, nextCumulative: null, nextTotal: 0,
+    nextDeparture: 0, nextArrival: 0,
+    positionInitialized: false, currentX: 0, currentY: 0,
+    velocityX: 0, velocityY: 0,
+    correctionX: 0, correctionY: 0, correctionRemaining: 0
   };
 });
 
@@ -624,12 +633,14 @@ function normalizeTransit(payload, now, modes) {
     let selected = segments.find(value => Date.parse(value.departure) <= now &&
       Date.parse(value.arrival) >= now);
     let parked = false;
+    let nextSegment = null;
     if (!selected) {
       for (let index = 1; index < segments.length; index++) {
         const previous = Date.parse(segments[index - 1].arrival);
         const next = Date.parse(segments[index].departure);
         if (previous <= now && next >= now && next - previous <= 10 * 60 * 1000) {
           selected = segments[index - 1];
+          nextSegment = segments[index];
           parked = true;
           break;
         }
@@ -638,11 +649,18 @@ function normalizeTransit(payload, now, modes) {
     if (!selected) return;
     const metrics = transitPath(selected);
     if (metrics.path.length < 2 || metrics.total < 0.1) return;
+    const nextMetrics = nextSegment ? transitPath(nextSegment) : null;
     result.push({
       id, mode: selected.mode, parked,
       departure: Date.parse(selected.departure),
       arrival: Date.parse(selected.arrival),
-      path: metrics.path, cumulative: metrics.cumulative, total: metrics.total
+      path: metrics.path, cumulative: metrics.cumulative, total: metrics.total,
+      nextPath: nextMetrics && nextMetrics.path.length >= 2 ? nextMetrics.path : null,
+      nextCumulative: nextMetrics && nextMetrics.path.length >= 2 ?
+        nextMetrics.cumulative : null,
+      nextTotal: nextMetrics && nextMetrics.path.length >= 2 ? nextMetrics.total : 0,
+      nextDeparture: nextSegment ? Date.parse(nextSegment.departure) : 0,
+      nextArrival: nextSegment ? Date.parse(nextSegment.arrival) : 0
     });
   });
   return result;
@@ -665,6 +683,24 @@ function styleTransit(slot, mode) {
   }
 }
 
+function transitPoint(value, now) {
+  const progress = value.parked ? 1 : clamp(
+    (now - value.departure) / Math.max(1, value.arrival - value.departure), 0, 1);
+  const target = value.total * progress;
+  let index = 1;
+  while (index < value.cumulative.length - 1 &&
+         value.cumulative[index] < target) index++;
+  const previous = value.path[index - 1];
+  const current = value.path[index];
+  const base = value.cumulative[index - 1];
+  const span = Math.max(0.001, value.cumulative[index] - base);
+  const amount = clamp((target - base) / span, 0, 1);
+  return {
+    x: previous.x + (current.x - previous.x) * amount,
+    y: previous.y + (current.y - previous.y) * amount
+  };
+}
+
 function applyTransit(slots, values, styleMarkers, holdSeconds) {
   const now = Date.now();
   const assigned = new Set();
@@ -678,6 +714,8 @@ function applyTransit(slots, values, styleMarkers, holdSeconds) {
     }
     if (!slot) return;
     const continuing = slot.active && slot.id === value.id;
+    const point = transitPoint(value, now);
+    const nextPoint = transitPoint(value, now + 1000);
     assigned.add(slot);
     slot.id = value.id;
     slot.active = true;
@@ -689,7 +727,25 @@ function applyTransit(slots, values, styleMarkers, holdSeconds) {
     slot.departure = value.departure;
     slot.arrival = value.arrival;
     slot.parked = value.parked;
-    if (!continuing) slot.positionInitialized = false;
+    slot.nextPath = value.nextPath;
+    slot.nextCumulative = value.nextCumulative;
+    slot.nextTotal = value.nextTotal;
+    slot.nextDeparture = value.nextDeparture;
+    slot.nextArrival = value.nextArrival;
+    slot.velocityX = nextPoint.x - point.x;
+    slot.velocityY = nextPoint.y - point.y;
+    if (continuing && slot.positionInitialized) {
+      slot.correctionX = point.x - slot.currentX;
+      slot.correctionY = point.y - slot.currentY;
+      slot.correctionRemaining = TRANSIT_CORRECTION_SECONDS;
+    } else {
+      slot.currentX = point.x;
+      slot.currentY = point.y;
+      slot.positionInitialized = true;
+      slot.correctionX = 0;
+      slot.correctionY = 0;
+      slot.correctionRemaining = 0;
+    }
     slot.mode = value.mode;
     if (styleMarkers) styleTransit(slot, value.mode);
     slot.marker.visible(true);
@@ -707,8 +763,10 @@ function requestTransit() {
   if (transitRequestInFlight) return;
   transitRequestInFlight = true;
   const now = Date.now();
-  const start = encodeURIComponent(new Date(now - 5000).toISOString());
-  const end = encodeURIComponent(new Date(now + 5000).toISOString());
+  const start = encodeURIComponent(new Date(
+    now - TRANSIT_WINDOW_SECONDS * 1000).toISOString());
+  const end = encodeURIComponent(new Date(
+    now + TRANSIT_WINDOW_SECONDS * 1000).toISOString());
   const trainUrl = `${TRANSIT_URL}?zoom=8&min=55.36,13.18&max=55.98,12.10` +
     `&startTime=${start}&endTime=${end}&precision=4`;
   const metroUrl = `${TRANSIT_URL}?zoom=9&min=55.64,12.63&max=55.73,12.50` +
@@ -750,35 +808,37 @@ function requestTransit() {
 }
 
 function positionTransit(slot, now, delta) {
-  const progress = slot.parked ? 1 : clamp(
-    (now - slot.departure) / Math.max(1, slot.arrival - slot.departure), 0, 1);
-  const target = slot.total * progress;
-  while (slot.pathIndex < slot.cumulative.length - 1 &&
-         slot.cumulative[slot.pathIndex] < target) slot.pathIndex++;
-  while (slot.pathIndex > 1 && slot.cumulative[slot.pathIndex - 1] > target) {
-    slot.pathIndex--;
+  if (slot.parked && slot.nextPath && now >= slot.nextDeparture) {
+    slot.path = slot.nextPath;
+    slot.cumulative = slot.nextCumulative;
+    slot.total = slot.nextTotal;
+    slot.departure = slot.nextDeparture;
+    slot.arrival = slot.nextArrival;
+    slot.parked = false;
+    slot.nextPath = null;
+    slot.nextCumulative = null;
+    const point = transitPoint(slot, now);
+    const nextPoint = transitPoint(slot, now + 1000);
+    slot.velocityX = nextPoint.x - point.x;
+    slot.velocityY = nextPoint.y - point.y;
+    slot.correctionX = point.x - slot.currentX;
+    slot.correctionY = point.y - slot.currentY;
+    slot.correctionRemaining = TRANSIT_CORRECTION_SECONDS;
   }
-  const index = slot.pathIndex;
-  const previous = slot.path[index - 1];
-  const current = slot.path[index];
-  const base = slot.cumulative[index - 1];
-  const span = Math.max(0.001, slot.cumulative[index] - base);
-  const amount = clamp((target - base) / span, 0, 1);
-  const x = previous.x + (current.x - previous.x) * amount;
-  const y = previous.y + (current.y - previous.y) * amount;
-  if (!slot.positionInitialized) {
-    slot.currentX = x;
-    slot.currentY = y;
-    slot.positionInitialized = true;
-  } else {
-    const dx = x - slot.currentX;
-    const dy = y - slot.currentY;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    const maximumStep = TRANSIT_MAX_CORRECTION_PIXELS_PER_SECOND *
-      clamp(delta, 0, 0.25);
-    const amount = distance > maximumStep ? maximumStep / distance : 1;
-    slot.currentX += dx * amount;
-    slot.currentY += dy * amount;
+  const step = clamp(delta, 0, 0.25);
+  if (now < slot.arrival) {
+    slot.currentX += slot.velocityX * step;
+    slot.currentY += slot.velocityY * step;
+  }
+  if (slot.correctionRemaining > 0) {
+    const correction = Math.min(1, step / slot.correctionRemaining);
+    const x = slot.correctionX * correction;
+    const y = slot.correctionY * correction;
+    slot.currentX += x;
+    slot.currentY += y;
+    slot.correctionX -= x;
+    slot.correctionY -= y;
+    slot.correctionRemaining = Math.max(0, slot.correctionRemaining - step);
   }
   const visible = slot.currentX >= -20 && slot.currentX <= 1940 &&
     slot.currentY >= -20 && slot.currentY <= 1100;
