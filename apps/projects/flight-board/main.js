@@ -26,6 +26,7 @@ const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
 const TRANSIT_HOLD_SECONDS = 4 * 60;
+const TRANSIT_MAX_CORRECTION_PIXELS_PER_SECOND = 8;
 const MAX_RAIL_TRANSIT = 224;
 const MAX_BUSES = 128;
 const TRANSIT_MODES = new Set([
@@ -770,9 +771,14 @@ function positionTransit(slot, now, delta) {
     slot.currentY = y;
     slot.positionInitialized = true;
   } else {
-    const correction = 1 - Math.exp(-3 * clamp(delta, 0, 0.25));
-    slot.currentX += (x - slot.currentX) * correction;
-    slot.currentY += (y - slot.currentY) * correction;
+    const dx = x - slot.currentX;
+    const dy = y - slot.currentY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const maximumStep = TRANSIT_MAX_CORRECTION_PIXELS_PER_SECOND *
+      clamp(delta, 0, 0.25);
+    const amount = distance > maximumStep ? maximumStep / distance : 1;
+    slot.currentX += dx * amount;
+    slot.currentY += dy * amount;
   }
   const visible = slot.currentX >= -20 && slot.currentX <= 1940 &&
     slot.currentY >= -20 && slot.currentY <= 1100;
