@@ -5,24 +5,11 @@ PLATFORM_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 REPO_DIR=$(CDPATH= cd -- "$PLATFORM_DIR/../.." && pwd)
 BUILDROOT_EXTERNAL="$PLATFORM_DIR/buildroot"
 ARTIFACTS="$PLATFORM_DIR/artifacts"
-BUILDROOT_VERSION=2025.02.16
 BUILD_STATE_VERSION=2
-VM_NAME_FILE="$PLATFORM_DIR/private/build-vm"
-
-# Keep host-specific VM names out of tracked configuration. VM_NAME remains
-# the highest-priority override; an ignored private/build-vm file makes the
-# normal command work with an existing local Buildroot cache.
-if [ -n "${VM_NAME:-}" ]; then
-  :
-elif [ -r "$VM_NAME_FILE" ]; then
-  IFS= read -r VM_NAME <"$VM_NAME_FILE"
-  [ -n "$VM_NAME" ] || {
-    echo "Empty build VM name in $VM_NAME_FILE" >&2
-    exit 1
-  }
-else
-  VM_NAME=microfx-build
-fi
+. "$PLATFORM_DIR/scripts/lib/build-vm-config.sh"
+microfx_resolve_build_vm "$PLATFORM_DIR"
+microfx_require_build_vm
+BUILDROOT_VERSION=$MICROFX_BUILDROOT_VERSION
 
 # The VM may predate a repository move and therefore have stale host mounts.
 # Stage the authoritative working tree explicitly for every build.
@@ -32,7 +19,19 @@ COPYFILE_DISABLE=1 COPY_EXTENDED_ATTRIBUTES_DISABLE=1 tar -C "$REPO_DIR" \
   --exclude=.git \
   --exclude='._*' \
   --exclude=platforms/imx6dl-dg1/artifacts \
+  --exclude=platforms/imx6dl-dg1/private \
   -cf "$SOURCE_ARCHIVE" .
+# Only these target inputs may leave the ignored private directory. Never copy
+# the SSH private key or the host-specific VM selector into the build guest.
+for private_input in \
+  platforms/imx6dl-dg1/private/wpa_supplicant.conf \
+  platforms/imx6dl-dg1/private/canvas_debug_ed25519.pub \
+  platforms/imx6dl-dg1/private/canvas-debug.conf; do
+  if [ -f "$REPO_DIR/$private_input" ]; then
+    COPYFILE_DISABLE=1 COPY_EXTENDED_ATTRIBUTES_DISABLE=1 \
+      tar -C "$REPO_DIR" -rf "$SOURCE_ARCHIVE" "$private_input"
+  fi
+done
 limactl copy --backend=scp "$SOURCE_ARCHIVE" "$VM_NAME:/tmp/microfx-build-source.tar"
 
 limactl shell "$VM_NAME" -- sh -lc "
@@ -40,6 +39,7 @@ limactl shell "$VM_NAME" -- sh -lc "
   BR=\"\$HOME/buildroot-${BUILDROOT_VERSION}\"
   OUT=\"\$HOME/microfx-imx6dl-output\"
   SRC=\"\$(mktemp -d \"\$HOME/microfx-src.XXXXXX\")\"
+  trap 'rm -rf \"\$SRC\" /tmp/microfx-build-source.tar' EXIT
   tar -xf /tmp/microfx-build-source.tar -C \"\$SRC\"
   EXTERNAL=\"\$SRC/platforms/imx6dl-dg1/buildroot\"
   PREVIOUS_CONFIG=\"\$(mktemp)\"

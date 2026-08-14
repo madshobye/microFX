@@ -21,12 +21,15 @@ from the microFX kernel configuration and `imx6dl-microfx-dg1.dts`.
 On macOS install `lima`, `e2fsprogs`, and `dtc`, then run:
 
 ```sh
+./scripts/setup-build-vm.sh
+./scripts/test-vm.sh
 ./scripts/build.sh
 ```
 
-The default `microfx-build` Lima VM uses Buildroot 2025.02.16. A development
-machine can reuse a differently named local VM by putting its name on one line
-in ignored `private/build-vm`, or by setting `VM_NAME` for one invocation.
+The mount-free Lima VM uses Buildroot 2025.02.16. `setup-build-vm.sh` creates
+and provisions it from pinned inputs. A development machine can reuse a
+differently named local VM by putting its name on one line in ignored
+`private/build-vm`, or by setting `VM_NAME` for one invocation.
 Generated files go in the ignored `artifacts/` directory. The main output,
 `microfx-imx6dl-dg1.rootfs`, fits either Linux root slot.
 
@@ -52,15 +55,15 @@ complete. The staged checks and acceptance criteria are recorded in
 
 ## SD installation
 
-Use a card containing the DG1 partition table and boot environment. After
-carefully confirming the removable disk identifier, write the image to root
-slot 2 and optionally slot 3:
+The generated root filesystem is a partition image, not a whole-card image.
+Use a prepared card containing the proven raw bootloader, DG1 partition table,
+and boot environment. A blank card is not currently supported. After carefully
+confirming the removable disk identifier, the supported installer validates
+the card and writes both root slots while preserving p1, p4, and the raw area:
 
 ```sh
-diskutil unmountDisk /dev/diskN
-sudo dd if=artifacts/microfx-imx6dl-dg1.rootfs of=/dev/rdiskNs2 bs=4m
-sync
-diskutil eject /dev/diskN
+diskutil list
+sudo ./scripts/install-full-sd.sh /dev/diskN
 ```
 
 Writing the wrong disk destroys data. UART is 3.3 V, 115200 8N1 on `ttymxc0`.
@@ -172,6 +175,9 @@ network/time/recovery state, boot-loop counters, and core service liveness.
 never writes routine status to the SD card.
 
 ## SSH deployment
+
+The complete setup, recovery decision tree, live checks, and script inventory
+are maintained in [`../../HANDOVER.md`](../../HANDOVER.md).
 
 Local development credentials belong in the ignored `private/` directory:
 `canvas-debug.conf`, `canvas_debug_ed25519`, and its public key. Connect, upload,

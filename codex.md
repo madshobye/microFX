@@ -100,11 +100,13 @@ back. SSH is independent so failures remain diagnosable. Root A/B firmware
 updates are separate and are not yet automated.
 
 Once per firmware boot, the supervisor first runs the firmware-owned engine with
-`apps/onboarding/scripts/main.js`. For 40 seconds it shows the setup AP, portal
-QR, current PeerJS ID and a countdown, then exits cleanly and starts the active
-project. The scene is regular JavaScript; only the supervisor's environment
-values are platform-specific. Restarting the canvas service does not replay it
-because `/run/microfx-onboarding-shown` survives until reboot.
+`apps/onboarding/scripts/main.js`. For 40 seconds it shows the current PeerJS ID
+and a countdown, then exits cleanly and starts the active project. Setup AP
+credentials and the portal QR are shown only when provisioning is enabled; the
+default development policy instead identifies stored-network mode. The scene is
+regular JavaScript; only the supervisor's environment values are
+platform-specific. Restarting the canvas service does not replay it because
+`/run/microfx-onboarding-shown` survives until reboot.
 
 Provisioning is an optional platform feature and is disabled by default in the
 development image until its radio path completes hardware validation. When
@@ -129,11 +131,19 @@ write endurance matters.
 
 ## Build and test workflow
 
-On macOS install `lima`, `e2fsprogs`, and `dtc`. The existing Lima VM is named
-`microfx-build` and uses Buildroot 2025.02.16.
+The tracked operational runbook is `HANDOVER.md`; it is the source of truth for
+host prerequisites, VM bootstrap, private inputs, partition layout, SSH access,
+update levels, recovery, and the script inventory. Do not rely on chat history.
+
+On macOS install `lima`, `e2fsprogs`, and `dtc`. The mount-free Lima VM uses
+Buildroot 2025.02.16 and is created reproducibly by `setup-build-vm.sh`. Its
+name is selected by `VM_NAME`, then ignored `private/build-vm`, then the
+`microfx-build` default. Every build stages the current checkout over SCP.
 
 ```sh
 cd platforms/imx6dl-dg1
+./scripts/setup-build-vm.sh
+./scripts/test-vm.sh
 ./scripts/build.sh
 ./scripts/canvas-upload.sh 192.168.3.109
 ./scripts/canvas-ssh.sh 192.168.3.109
@@ -151,6 +161,12 @@ The development-only active-root updater has a narrow, tested whitelist for
 init/configuration hardening. It must preserve the client Wi-Fi and SSH services,
 create a persistent backup, verify live health, and never be treated as an A/B
 firmware installer. Release images are still written to both root slots from SD.
+
+The root artifact is a partition image, not a whole-card image. The supported
+installer requires an already prepared card with the proven raw bootloader and
+four-partition MBR layout; it writes only p2 and p3. A blank card is not yet a
+supported install target. One-off ignored `debugfs` payloads are not an
+authoritative recovery mechanism.
 
 ## Device-side audit baseline
 

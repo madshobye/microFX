@@ -11,7 +11,6 @@ fail() {
 for path in \
   "$ROOT/scripts/build.sh" \
   "$ROOT/scripts/install-full-sd.sh" \
-  "$ROOT/scripts/install-development-sd.sh" \
   "$ROOT/buildroot/configs/imx6dl_dg1_defconfig" \
   "$ROOT/buildroot/board/imx6dl-dg1/post-build.sh"; do
   if grep -Eq 'bootloader/|layout\.json|validate-layout|genimage-prototype|imx6dl-dg1-ddr|engine/experimental|COMPOSITOR\.md' "$path"; then

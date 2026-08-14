@@ -31,6 +31,7 @@ The current i.MX6DL demo renders through DRM/KMS and OpenGL ES 2, supports
 native or FPS-managed HDMI modes, keeps routine logs in RAM, and can deploy
 applications transactionally over SSH.
 
+Start with [HANDOVER.md](HANDOVER.md) for a reproducible host/VM/device setup.
 Read [codex.md](codex.md) before changing architecture or deployment behavior.
 For the current firmware target, see
 [platforms/imx6dl-dg1/README.md](platforms/imx6dl-dg1/README.md).
