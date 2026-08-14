@@ -241,7 +241,7 @@ Font parsing and GPU upload happen once, after graphics initialization; a bad
 font or a fifth distinct face is a visible fatal asset error rather than an
 implicit fallback.
 
-Current limits are 256 SDF elements, 512 quad elements, 256 mesh elements, 32 text elements of 127
+Current limits are 384 SDF elements, 512 quad elements, 256 mesh elements, 32 text elements of 127
 bytes each, four font faces, 16 image elements/textures, a 32 MiB JS heap, and a 512 KiB JS stack. A script exception is fatal
 by design so a bad remote revision remains visible through independent SSH
 rather than silently changing behavior.
@@ -250,7 +250,7 @@ Mesh transforms use arrays of 16 objects because that is the safe GLES 2
 uniform budget on this GPU. Scenes are split automatically into adjacent
 16-object draw batches, including at shader boundaries, so that GPU constraint
 does not impose a 16-object JavaScript scene limit. Exceeding the explicit
-256-object scene capacity raises a clear JavaScript exception instead of
+explicit per-renderer scene capacity raises a clear JavaScript exception instead of
 partially loading or hanging.
 
 `data()` applies the same project boundary as `model()`, accepts at most 64 KiB,

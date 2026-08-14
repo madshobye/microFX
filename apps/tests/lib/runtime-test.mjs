@@ -4,7 +4,7 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 import { readFileSync } from "node:fs";
 
 export const defaultCapacities = Object.freeze({
-  sdf: 256,
+  sdf: 384,
   quad: 512,
   mesh: 256,
   text: 64,

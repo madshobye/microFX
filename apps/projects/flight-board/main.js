@@ -25,7 +25,8 @@ const MAX_FLIGHTS = 50;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
-const MAX_TRANSIT = 80;
+const MAX_TRANSIT = 120;
+const MAX_METRO = 40;
 const TRANSIT_MODES = new Set(["LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN"]);
 const METRO_MODES = new Set(["SUBWAY"]);
 const TRANSIT_URL = "https://api.transitous.org/api/v6/map/trips";
@@ -131,7 +132,8 @@ const transit = Array.from({ length: MAX_TRANSIT }, () => {
   return {
     id: "", mode: "", active: false, marker,
     path: [], cumulative: [], total: 0, pathIndex: 1,
-    departure: 0, arrival: 0, parked: false
+    departure: 0, arrival: 0, parked: false,
+    positionInitialized: false, currentX: 0, currentY: 0
   };
 });
 
@@ -630,23 +632,28 @@ function normalizeTransit(payload, now, modes) {
 function styleTransit(slot, mode) {
   slot.mode = mode;
   if (mode === "SUBWAY") {
-    slot.marker.shape("circle", 6, 6, 3).color(0xffd55aff);
-  } else if (mode === "LONG_DISTANCE") {
-    slot.marker.shape("rounded", 19, 5, 2.5).color(0x65e6ffff);
-  } else if (mode === "REGIONAL_RAIL") {
-    slot.marker.shape("rounded", 17, 5, 2.5).color(0x65e6ffff);
+    slot.marker.shape("circle", 5, 5, 2.5).color(0xffd55aff);
   } else {
-    slot.marker.shape("rounded", 14, 4, 2).color(0x65e6ffff);
+    slot.marker.shape("circle", 6, 6, 3).color(0x65e6ffff);
   }
 }
 
 function applyTransit(values) {
+  const incoming = new Set(values.map(value => value.id));
+  transit.forEach(slot => {
+    if (slot.active && !incoming.has(slot.id)) {
+      slot.active = false;
+      slot.id = "";
+      slot.marker.visible(false);
+    }
+  });
   const assigned = new Set();
   values.forEach(value => {
     let slot = transit.find(candidate => candidate.active && candidate.id === value.id &&
       !assigned.has(candidate));
     if (!slot) slot = transit.find(candidate => !candidate.active && !assigned.has(candidate));
     if (!slot) return;
+    const continuing = slot.active && slot.id === value.id;
     assigned.add(slot);
     slot.id = value.id;
     slot.active = true;
@@ -657,6 +664,7 @@ function applyTransit(values) {
     slot.departure = value.departure;
     slot.arrival = value.arrival;
     slot.parked = value.parked;
+    if (!continuing) slot.positionInitialized = false;
     styleTransit(slot, value.mode);
     slot.marker.visible(true);
   });
@@ -687,9 +695,11 @@ function requestTransit() {
     .then(payloads => {
       if (!payloads.every(Array.isArray)) throw new Error("invalid Transitous response");
       const now = Date.now();
-      const trains = normalizeTransit(payloads[0], now, TRANSIT_MODES);
-      const metro = normalizeTransit(payloads[1], now, METRO_MODES);
-      applyTransit(trains.concat(metro).slice(0, MAX_TRANSIT));
+      const trains = normalizeTransit(payloads[0], now, TRANSIT_MODES)
+        .slice(0, MAX_TRANSIT - MAX_METRO);
+      const metro = normalizeTransit(payloads[1], now, METRO_MODES)
+        .slice(0, MAX_METRO);
+      applyTransit(trains.concat(metro));
       transitRequestInFlight = false;
       nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
     })
@@ -700,7 +710,7 @@ function requestTransit() {
     });
 }
 
-function positionTransit(slot, now) {
+function positionTransit(slot, now, delta) {
   const progress = slot.parked ? 1 : clamp(
     (now - slot.departure) / Math.max(1, slot.arrival - slot.departure), 0, 1);
   const target = slot.total * progress;
@@ -717,11 +727,18 @@ function positionTransit(slot, now) {
   const amount = clamp((target - base) / span, 0, 1);
   const x = previous.x + (current.x - previous.x) * amount;
   const y = previous.y + (current.y - previous.y) * amount;
-  const visible = x >= -20 && x <= 1940 && y >= -20 && y <= 1100;
-  slot.marker.position(x, y)
-    .rotation(slot.mode === "SUBWAY" ? 0 :
-      Math.atan2(current.y - previous.y, current.x - previous.x))
-    .visible(visible);
+  if (!slot.positionInitialized) {
+    slot.currentX = x;
+    slot.currentY = y;
+    slot.positionInitialized = true;
+  } else {
+    const correction = 1 - Math.exp(-3 * clamp(delta, 0, 0.25));
+    slot.currentX += (x - slot.currentX) * correction;
+    slot.currentY += (y - slot.currentY) * correction;
+  }
+  const visible = slot.currentX >= -20 && slot.currentX <= 1940 &&
+    slot.currentY >= -20 && slot.currentY <= 1100;
+  slot.marker.position(slot.currentX, slot.currentY).rotation(0).visible(visible);
 }
 
 function requestFlights() {
@@ -778,7 +795,7 @@ function update(time, delta) {
 
   const now = Date.now();
   transit.forEach(slot => {
-    if (slot.active) positionTransit(slot, now);
+    if (slot.active) positionTransit(slot, now, delta);
   });
 
   ships.forEach(slot => {
