@@ -15,7 +15,8 @@
 
 enum { HTTP_LIMIT=8, SOCKET_LIMIT=16, WEBSOCKET_LIMIT=4,
        WEBSOCKET_QUEUE_LIMIT=32, WEBSOCKET_MESSAGES_PER_PUMP=8,
-       BODY_LIMIT=256*1024, IO_LIMIT=64*1024, WEBSOCKET_HANDLE_BASE=1000 };
+       HTTP_BODY_LIMIT=512*1024, WEBSOCKET_BODY_LIMIT=256*1024,
+       IO_LIMIT=64*1024, WEBSOCKET_HANDLE_BASE=1000 };
 typedef enum { NET_UNUSED, NET_UDP, NET_TCP_CONNECTING, NET_TCP, NET_TCP_LISTENER } NetKind;
 
 typedef struct {
@@ -106,7 +107,7 @@ static int WebSocketCallback(struct lws *wsi,enum lws_callback_reasons reason,
         if(socket&&!EmitWebSocket(socket,EVENT_OPEN,0,NULL))return -1;
         break;
     case LWS_CALLBACK_CLIENT_RECEIVE:
-        if(!socket||length>BODY_LIMIT-socket->incomingSize)return -1;
+        if(!socket||length>WEBSOCKET_BODY_LIMIT-socket->incomingSize)return -1;
         if(length){
             uint8_t *next=realloc(socket->incoming,socket->incomingSize+length);
             if(!next)return -1;
@@ -186,12 +187,12 @@ static size_t WriteBody(char *data,size_t size,size_t count,void *opaque)
 {
     HttpRequest *request=opaque;
     size_t bytes=size*count;
-    if(bytes>BODY_LIMIT-request->size){request->overflow=true;return 0;}
+    if(bytes>HTTP_BODY_LIMIT-request->size){request->overflow=true;return 0;}
     size_t needed=request->size+bytes+1;
     if(needed>request->capacity){
         size_t capacity=request->capacity?request->capacity*2:4096;
         while(capacity<needed)capacity*=2;
-        if(capacity>BODY_LIMIT+1)capacity=BODY_LIMIT+1;
+        if(capacity>HTTP_BODY_LIMIT+1)capacity=HTTP_BODY_LIMIT+1;
         char *body=realloc(request->body,capacity);
         if(!body)return 0;
         request->body=body;request->capacity=capacity;
@@ -543,7 +544,7 @@ static bool PumpHttp(MicroFxNetwork *network)
                     (const uint8_t *)(request->body?request->body:""),request->size));
             function=request->resolve;
         }else{
-            const char *detail=request->overflow?"HTTP response exceeds 256 KiB":
+            const char *detail=request->overflow?"HTTP response exceeds 512 KiB":
                                request->error[0]?request->error:curl_easy_strerror(message->data.result);
             fprintf(stderr,"MICROFX_NET fetch failed code=%d detail=%s\n",
                     (int)message->data.result,detail);

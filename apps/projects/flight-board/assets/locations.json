@@ -1,0 +1,77 @@
+{
+  "new-york": {
+    "label": "NEW YORK",
+    "airport": {
+      "iata": "JFK",
+      "icao": "KJFK",
+      "latitude": 40.6413,
+      "longitude": -73.7781,
+      "markerOffset": [-45, 35]
+    },
+    "mapCenter": { "latitude": 40.715, "longitude": -73.93 },
+    "mapZoom": 10.65,
+    "searchRadiusNm": 45,
+    "airportGroundRadiusKm": 4,
+    "localAirports": ["JFK", "KJFK", "LGA", "KLGA", "EWR", "KEWR", "TEB", "KTEB"],
+    "landmarks": [],
+    "transit": {
+      "windowSeconds": 10,
+      "regions": [
+        { "zoom": 8, "min": [40.52, -73.95], "max": [40.70, -74.20], "kinds": ["train", "metro"] },
+        { "zoom": 8, "min": [40.52, -73.68], "max": [40.70, -73.95], "kinds": ["train", "metro"] },
+        { "zoom": 8, "min": [40.70, -73.95], "max": [40.81, -74.20], "kinds": ["train", "metro"] },
+        { "zoom": 8, "min": [40.70, -73.68], "max": [40.81, -73.95], "kinds": ["train", "metro"] },
+        { "zoom": 8, "min": [40.81, -73.95], "max": [40.98, -74.20], "kinds": ["train", "metro"] },
+        { "zoom": 8, "min": [40.81, -73.68], "max": [40.98, -73.95], "kinds": ["train", "metro"] }
+      ]
+    },
+    "aisBounds": null
+  },
+  "copenhagen": {
+    "label": "COPENHAGEN",
+    "airport": {
+      "iata": "CPH",
+      "icao": "EKCH",
+      "latitude": 55.6181,
+      "longitude": 12.6561,
+      "markerOffset": [-55, 40]
+    },
+    "mapCenter": { "latitude": 55.67, "longitude": 12.635 },
+    "mapZoom": 11.45,
+    "searchRadiusNm": 25,
+    "airportGroundRadiusKm": 3,
+    "localAirports": ["CPH", "EKCH"],
+    "landmarks": [
+      { "latitude": 55.65211374559996, "longitude": 12.610871553308385, "radius": 3, "color": 4014224639 }
+    ],
+    "transit": {
+      "windowSeconds": 20,
+      "regions": [
+        { "zoom": 8, "min": [55.36, 12.64], "max": [55.98, 12.10], "kinds": ["train"] },
+        { "zoom": 8, "min": [55.36, 13.18], "max": [55.98, 12.64], "kinds": ["train"] },
+        { "zoom": 9, "min": [55.64, 12.565], "max": [55.73, 12.50], "kinds": ["train", "metro", "bus"] },
+        { "zoom": 9, "min": [55.64, 12.63], "max": [55.73, 12.565], "kinds": ["train", "metro", "bus"] },
+        { "zoom": 9, "min": [55.60, 12.70], "max": [55.70, 12.62], "kinds": ["train", "metro"] }
+      ]
+    },
+    "aisBounds": [[55.36, 12.10], [55.98, 13.18]]
+  },
+  "cordoba": {
+    "label": "CORDOBA",
+    "airport": {
+      "iata": "COR",
+      "icao": "SACO",
+      "latitude": -31.3123,
+      "longitude": -64.2083,
+      "markerOffset": [-45, 35]
+    },
+    "mapCenter": { "latitude": -31.365, "longitude": -64.205 },
+    "mapZoom": 11.25,
+    "searchRadiusNm": 35,
+    "airportGroundRadiusKm": 3,
+    "localAirports": ["COR", "SACO"],
+    "landmarks": [],
+    "transit": null,
+    "aisBounds": null
+  }
+}

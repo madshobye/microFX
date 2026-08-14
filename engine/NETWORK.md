@@ -8,8 +8,8 @@ shell command, helper process, daemon, or worker thread.
 
 `fetch()` and `fx.net.fetch()` currently implement bounded HTTP(S) GET. They
 follow at most five redirects, time out after 20 seconds, verify HTTPS against
-the system CA bundle, allow four concurrent requests, and reject bodies larger
-than 256 KiB.
+the system CA bundle, allow eight concurrent requests, and reject bodies larger
+than 512 KiB.
 
 ```js
 fetch("https://example.com/data.json")
@@ -22,7 +22,7 @@ fetch("https://example.com/data.json")
 ```
 
 Responses expose `ok`, `status`, `url`, `text()`, `json()`, and
-`arrayBuffer()`. The binary response is still subject to the same 256 KiB
+`arrayBuffer()`. The binary response is still subject to the same 512 KiB
 limit.
 
 ## WebSocket client

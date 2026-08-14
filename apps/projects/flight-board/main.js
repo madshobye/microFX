@@ -5,27 +5,15 @@ fx.configure({
   debugBarStyle: "compact"
 });
 
-// Change this block to move the entire sketch to another airport.
-const PLACE = {
-  label: "NEW YORK",
-  airport: {
-    iata: "JFK",
-    icao: "KJFK",
-    latitude: 40.6413,
-    longitude: -73.7781,
-    markerOffset: [-45, 35]
-  },
-  mapCenter: {
-    latitude: 40.715,
-    longitude: -73.93
-  },
-  mapZoom: 10.65,
-  searchRadiusNm: 45,
-  airportGroundRadiusKm: 4,
-  landmarks: [],
-  transitEnabled: false,
-  aisBounds: null
-};
+// Select a preset from assets/locations.json.
+const PLACE_NAME = "new-york";
+const LOCATIONS = fx.data("locations.json");
+const PLACE = LOCATIONS[PLACE_NAME];
+if (!PLACE) throw new Error(`Unknown location preset: ${PLACE_NAME}`);
+const HAS_TRANSIT = Boolean(PLACE.transit && PLACE.transit.regions &&
+  PLACE.transit.regions.length);
+const HAS_BUSES = HAS_TRANSIT && PLACE.transit.regions.some(region =>
+  region.kinds.includes("bus"));
 
 const POLL_SECONDS = 5;
 const CORRECTION_SECONDS = 8;
@@ -44,6 +32,7 @@ const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
 const TRANSIT_WINDOW_SECONDS = 20;
+const TRANSIT_REQUEST_CONCURRENCY = 2;
 const TRANSIT_HOLD_SECONDS = 4 * 60;
 const TRANSIT_CORRECTION_SECONDS = 8;
 const MAX_RAIL_TRANSIT = 224;
@@ -111,15 +100,15 @@ const map = scene.add(fx.tileMap({
   }
 }));
 scene.add(fx.text(PLACE.label, 55, 45, 28, 0x606060ff));
-scene.add(fx.text("OPENSTREETMAP + CARTO",
+scene.add(fx.text(HAS_TRANSIT ? "OPENSTREETMAP + TRANSITOUS" : "OPENSTREETMAP + CARTO",
   1690, 1040, 14, 0x708090ff).antialias(false));
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapPoint = (longitude, latitude) => map.project(longitude, latitude);
-const trainMapPaths = PLACE.transitEnabled ? Array.from({ length: MAX_TRAIN_MAP_PATHS }, () =>
+const trainMapPaths = HAS_TRANSIT ? Array.from({ length: MAX_TRAIN_MAP_PATHS }, () =>
   scene.add(fx.outline([[0, 0], [1, 0]], 0, 0, 1, 1,
     0x29434aff).opacity(0.58).visible(false))) : [];
-const metroMapPaths = PLACE.transitEnabled ? Array.from({ length: MAX_METRO_MAP_PATHS }, () =>
+const metroMapPaths = HAS_TRANSIT ? Array.from({ length: MAX_METRO_MAP_PATHS }, () =>
   scene.add(fx.outline([[0, 0], [1, 0]], 0, 0, 1, 1.25,
     0x6b5426ff).opacity(0.72).visible(false))) : [];
 const landmarks = PLACE.landmarks.map(landmark => {
@@ -175,7 +164,7 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
   };
 });
 
-const transit = PLACE.transitEnabled ? Array.from({ length: MAX_RAIL_TRANSIT }, () => {
+const transit = HAS_TRANSIT ? Array.from({ length: MAX_RAIL_TRANSIT }, () => {
   const marker = scene.add(fx.sdfRoundedRect(0, 0, 18, 6, 3,
     0x65e6ffff).visible(false));
   return {
@@ -191,7 +180,7 @@ const transit = PLACE.transitEnabled ? Array.from({ length: MAX_RAIL_TRANSIT }, 
   };
 }) : [];
 
-const busTransit = PLACE.transitEnabled ? Array.from({ length: MAX_BUSES }, () => {
+const busTransit = HAS_BUSES ? Array.from({ length: MAX_BUSES }, () => {
   const marker = scene.add(fx.rect(0, 0, 4, 4, 0xb9c3c9ff).visible(false));
   return {
     id: "", mode: "BUS", active: false, marker,
@@ -322,8 +311,10 @@ function placeName(airport) {
 }
 
 function isLocalAirport(airport) {
-  return String(airport.iata_code || "").toUpperCase() === PLACE.airport.iata ||
-    String(airport.icao_code || "").toUpperCase() === PLACE.airport.icao;
+  const codes = PLACE.localAirports || [PLACE.airport.iata, PLACE.airport.icao];
+  const iata = String(airport.iata_code || "").toUpperCase();
+  const icao = String(airport.icao_code || "").toUpperCase();
+  return codes.includes(iata) || codes.includes(icao);
 }
 
 function airportCoordinates(airport) {
@@ -1025,72 +1016,80 @@ function applyTransit(slots, values, styleMarkers, holdSeconds) {
   });
 }
 
-function requestTransit() {
-  if (!PLACE.transitEnabled || transitRequestInFlight || transitJob) return;
-  transitRequestInFlight = true;
-  const now = Date.now();
-  const start = encodeURIComponent(new Date(
-    now - TRANSIT_WINDOW_SECONDS * 1000).toISOString());
-  const end = encodeURIComponent(new Date(
-    now + TRANSIT_WINDOW_SECONDS * 1000).toISOString());
-  const trainWestUrl = `${TRANSIT_URL}?zoom=8&min=55.36,12.64&max=55.98,12.10` +
-    `&startTime=${start}&endTime=${end}&precision=4`;
-  const trainEastUrl = `${TRANSIT_URL}?zoom=8&min=55.36,13.18&max=55.98,12.64` +
-    `&startTime=${start}&endTime=${end}&precision=4`;
-  const metroWestUrl = `${TRANSIT_URL}?zoom=9&min=55.64,12.565&max=55.73,12.50` +
-    `&startTime=${start}&endTime=${end}&precision=4`;
-  const metroEastUrl = `${TRANSIT_URL}?zoom=9&min=55.64,12.63&max=55.73,12.565` +
-    `&startTime=${start}&endTime=${end}&precision=4`;
-  const airportRailUrl = `${TRANSIT_URL}?zoom=9&min=55.60,12.70&max=55.70,12.62` +
-    `&startTime=${start}&endTime=${end}&precision=4`;
-  const headers = { "User-Agent": TRANSIT_USER_AGENT };
-  Promise.all([fetch(trainWestUrl, { headers }), fetch(trainEastUrl, { headers }),
-    fetch(metroWestUrl, { headers }), fetch(metroEastUrl, { headers }),
-    fetch(airportRailUrl, { headers })])
-    .then(responses => Promise.all(responses.map(response => {
+function pumpTransitRequests(job) {
+  while (transitJob === job && job.active < TRANSIT_REQUEST_CONCURRENCY &&
+      job.nextRegion < PLACE.transit.regions.length) {
+    const region = PLACE.transit.regions[job.nextRegion++];
+    const url = `${TRANSIT_URL}?zoom=${region.zoom}` +
+      `&min=${region.min[0]},${region.min[1]}` +
+      `&max=${region.max[0]},${region.max[1]}` +
+      `&startTime=${job.start}&endTime=${job.end}&precision=${region.precision || 4}`;
+    job.active++;
+    fetch(url, { headers: job.headers }).then(response => {
       if (!response.ok) throw new Error(`Transitous HTTP ${response.status}`);
-      return response.json();
-    })))
-    .then(payloads => {
-      if (!payloads.every(Array.isArray)) throw new Error("invalid Transitous response");
-      transitJob = {
-        payloads, now: Date.now(), stage: 0,
-        trains: [], metro: [], buses: []
-      };
-      transitRequestInFlight = false;
+      return response.text();
+    }).then(body => {
+      if (transitJob !== job) return;
+      job.tasks.push({ body, kinds: region.kinds });
+      job.active--;
+      job.pending--;
+      if (job.pending === 0) transitRequestInFlight = false;
+      pumpTransitRequests(job);
     })
     .catch(error => {
       fx.log(`TRANSITOUS ${error.message || error}`);
-      transitJob = null;
-      transitRequestInFlight = false;
-      nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
+      if (transitJob !== job) return;
+      job.active--;
+      job.pending--;
+      if (job.pending === 0) transitRequestInFlight = false;
+      pumpTransitRequests(job);
     });
+  }
+}
+
+function requestTransit() {
+  if (!HAS_TRANSIT || transitRequestInFlight || transitJob) return;
+  transitRequestInFlight = true;
+  const now = Date.now();
+  const windowSeconds = PLACE.transit.windowSeconds || TRANSIT_WINDOW_SECONDS;
+  const job = {
+    pending: PLACE.transit.regions.length,
+    active: 0,
+    nextRegion: 0,
+    start: encodeURIComponent(new Date(now - windowSeconds * 1000).toISOString()),
+    end: encodeURIComponent(new Date(now + windowSeconds * 1000).toISOString()),
+    headers: { "User-Agent": TRANSIT_USER_AGENT },
+    tasks: [], now, trains: [], metro: [], buses: []
+  };
+  transitJob = job;
+  pumpTransitRequests(job);
 }
 
 function processTransitJob() {
   if (!transitJob) return;
   const job = transitJob;
-  if (job.stage === 0) {
-    job.metro.push(normalizeTransit(job.payloads[4], job.now, METRO_MODES, "metro"));
-  } else if (job.stage === 1) {
-    job.trains.push(normalizeTransit(job.payloads[4], job.now, TRANSIT_MODES, "train"));
-  } else if (job.stage === 2) {
-    job.trains.push(normalizeTransit(job.payloads[2], job.now, TRANSIT_MODES, "train"));
-  } else if (job.stage === 3) {
-    job.trains.push(normalizeTransit(job.payloads[3], job.now, TRANSIT_MODES, "train"));
-  } else if (job.stage === 4) {
-    job.trains.push(normalizeTransit(job.payloads[0], job.now, TRANSIT_MODES, "train"));
-  } else if (job.stage === 5) {
-    job.trains.push(normalizeTransit(job.payloads[1], job.now, TRANSIT_MODES, "train"));
-  } else if (job.stage === 6) {
-    job.metro.push(normalizeTransit(job.payloads[2], job.now, METRO_MODES, "metro"));
-  } else if (job.stage === 7) {
-    job.metro.push(normalizeTransit(job.payloads[3], job.now, METRO_MODES, "metro"));
-  } else if (job.stage === 8) {
-    job.buses.push(normalizeTransit(job.payloads[2], job.now, BUS_MODES));
-  } else if (job.stage === 9) {
-    job.buses.push(normalizeTransit(job.payloads[3], job.now, BUS_MODES));
-  } else {
+  if (job.tasks.length) {
+    const task = job.tasks.shift();
+    if (task.body !== undefined) {
+      try {
+        const payload = JSON.parse(task.body);
+        if (!Array.isArray(payload)) throw new Error("invalid Transitous response");
+        task.kinds.forEach(kind => job.tasks.push({ payload, kind }));
+      } catch (error) {
+        fx.log(`TRANSITOUS ${error.message || error}`);
+      }
+      return;
+    }
+    if (task.kind === "train") {
+      job.trains.push(normalizeTransit(task.payload, job.now, TRANSIT_MODES, "train"));
+    } else if (task.kind === "metro") {
+      job.metro.push(normalizeTransit(task.payload, job.now, METRO_MODES, "metro"));
+    } else if (task.kind === "bus") {
+      job.buses.push(normalizeTransit(task.payload, job.now, BUS_MODES));
+    }
+    return;
+  }
+  if (job.pending === 0) {
     const rail = mergeTransit(...job.trains).concat(mergeTransit(...job.metro));
     applyTransit(transit, rail.slice(0, MAX_RAIL_TRANSIT), true,
       TRANSIT_HOLD_SECONDS);
@@ -1105,9 +1104,7 @@ function processTransitJob() {
     }
     transitJob = null;
     nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
-    return;
   }
-  job.stage++;
 }
 
 function positionTransit(slot, now, delta) {
@@ -1179,7 +1176,7 @@ function update(time, delta) {
   processTransitJob();
   processRailwayQueue();
   if (!requestInFlight && time >= nextRequestTime) requestFlights();
-  if (PLACE.transitEnabled && !transitRequestInFlight && !transitJob &&
+  if (HAS_TRANSIT && !transitRequestInFlight && !transitJob &&
       time >= nextTransitRequestTime) {
     requestTransit();
   }

@@ -9,7 +9,7 @@ export const defaultCapacities = Object.freeze({
   mesh: 256,
   text: 64,
   image: 16,
-  outline: 96
+  outline: 256
 });
 
 function finite(label, values) {
@@ -125,6 +125,7 @@ function instrumentedNativeFx(root, capacities) {
     _text: add("text"),
     _image: add("image"),
     _outline: add("outline"),
+    _polygon: add("outline"),
     _backgroundImage: add("image"),
     _imageScale(handle, scale) {
       return mutation("transform", handle, [scale]);
