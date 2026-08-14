@@ -39,7 +39,7 @@ const map = scene.add(fx.tileMap({
     invert: 1,
     contrast: 1.35,
     brightness: 0.95,
-    tint: 0x405a75ff
+    tint: 0x505a64ff
   }
 }));
 scene.add(fx.text(`${PLACE.label} AIRSPACE`, 55, 45, 28, 0x7ee5ffff));
