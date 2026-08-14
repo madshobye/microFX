@@ -27,12 +27,8 @@ bool MicroFxTileRendererInit(MicroFxTileRenderer *renderer)
         "void main(){gl_Position=vec4(aPosition,0.0,1.0);vUv=aUv;}\n";
     static const char *fs=
         "#version 100\nprecision mediump float;varying mediump vec2 vUv;"
-        "uniform sampler2D uTexture;uniform float uGrayscale;"
-        "uniform float uContrast;uniform float uBrightness;uniform float uInvert;"
-        "uniform vec3 uTint;void main(){vec3 c=texture2D(uTexture,vUv).rgb;"
-        "float l=dot(c,vec3(0.299,0.587,0.114));c=mix(c,vec3(l),uGrayscale);"
-        "c=mix(c,vec3(1.0)-c,uInvert);c=(c-0.5)*uContrast+0.5;"
-        "c=clamp(c*uBrightness*uTint,0.0,1.0);gl_FragColor=vec4(c,1.0);}\n";
+        "uniform sampler2D uTexture;"
+        "void main(){gl_FragColor=texture2D(uTexture,vUv);}\n";
     GLuint vertex=Compile(GL_VERTEX_SHADER,vs),fragment=Compile(GL_FRAGMENT_SHADER,fs);
     if(!vertex||!fragment)return false;
     renderer->program=glCreateProgram();glAttachShader(renderer->program,vertex);
@@ -42,11 +38,6 @@ bool MicroFxTileRendererInit(MicroFxTileRenderer *renderer)
     glDeleteShader(vertex);glDeleteShader(fragment);GLint linked=GL_FALSE;
     glGetProgramiv(renderer->program,GL_LINK_STATUS,&linked);if(!linked)return false;
     renderer->textureLocation=glGetUniformLocation(renderer->program,"uTexture");
-    renderer->grayscaleLocation=glGetUniformLocation(renderer->program,"uGrayscale");
-    renderer->contrastLocation=glGetUniformLocation(renderer->program,"uContrast");
-    renderer->brightnessLocation=glGetUniformLocation(renderer->program,"uBrightness");
-    renderer->invertLocation=glGetUniformLocation(renderer->program,"uInvert");
-    renderer->tintLocation=glGetUniformLocation(renderer->program,"uTint");
     const TileVertex vertices[6]={
         {{-1,1},{0,0}},{{1,1},{1,0}},{{1,-1},{1,1}},
         {{-1,1},{0,0}},{{1,-1},{1,1}},{{-1,-1},{0,1}}
@@ -54,6 +45,46 @@ bool MicroFxTileRendererInit(MicroFxTileRenderer *renderer)
     glGenBuffers(1,&renderer->vertexBuffer);glBindBuffer(GL_ARRAY_BUFFER,renderer->vertexBuffer);
     glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_STATIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER,0);return renderer->vertexBuffer!=0;
+}
+
+static float ClampUnit(float value)
+{
+    if(value<0.0f)return 0.0f;
+    if(value>1.0f)return 1.0f;
+    return value;
+}
+
+static unsigned char ColorByte(float value)
+{
+    return (unsigned char)(ClampUnit(value)*255.0f+0.5f);
+}
+
+static bool BakeFilter(Image *image,const MicroFxTileMap *map)
+{
+    if(image->format!=PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
+        ImageFormat(image,PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    if(!IsImageValid(*image)||!image->data)return false;
+    const float tintR=((map->tint>>24)&255)/255.0f;
+    const float tintG=((map->tint>>16)&255)/255.0f;
+    const float tintB=((map->tint>>8)&255)/255.0f;
+    Color *pixels=(Color *)image->data;
+    const int count=image->width*image->height;
+    for(int i=0;i<count;i++){
+        float r=pixels[i].r/255.0f,g=pixels[i].g/255.0f,b=pixels[i].b/255.0f;
+        const float l=r*0.299f+g*0.587f+b*0.114f;
+        r=r+(l-r)*map->grayscale;
+        g=g+(l-g)*map->grayscale;
+        b=b+(l-b)*map->grayscale;
+        r=r+(1.0f-2.0f*r)*map->invert;
+        g=g+(1.0f-2.0f*g)*map->invert;
+        b=b+(1.0f-2.0f*b)*map->invert;
+        r=((r-0.5f)*map->contrast+0.5f)*map->brightness*tintR;
+        g=((g-0.5f)*map->contrast+0.5f)*map->brightness*tintG;
+        b=((b-0.5f)*map->contrast+0.5f)*map->brightness*tintB;
+        pixels[i].r=ColorByte(r);pixels[i].g=ColorByte(g);pixels[i].b=ColorByte(b);
+        pixels[i].a=255;
+    }
+    return true;
 }
 
 bool MicroFxTileRendererUpdate(MicroFxTileRenderer *renderer,MicroFxScene *scene)
@@ -86,6 +117,7 @@ bool MicroFxTileRendererUpdate(MicroFxTileRenderer *renderer,MicroFxScene *scene
             tile->consumed=true;state->decodedCount++;processed++;
         }
         if(state->decodedCount==map->tileCount&&IsImageValid(state->staging)){
+            if(!BakeFilter(&state->staging,map))return false;
             ImageFormat(&state->staging,PIXELFORMAT_UNCOMPRESSED_R5G6B5);
             Texture2D next=LoadTextureFromImage(state->staging);UnloadImage(state->staging);
             state->staging=(Image){0};
@@ -120,12 +152,6 @@ void MicroFxTileRendererDraw(MicroFxTileRenderer *renderer,const MicroFxScene *s
         const MicroFxTileMap *map=&scene->tileMap[i];
         Texture2D texture=renderer->maps[i].active;
         if(!map->visible||!IsTextureValid(texture))continue;
-        glUniform1f(renderer->grayscaleLocation,map->grayscale);
-        glUniform1f(renderer->contrastLocation,map->contrast);
-        glUniform1f(renderer->brightnessLocation,map->brightness);
-        glUniform1f(renderer->invertLocation,map->invert);
-        glUniform3f(renderer->tintLocation,((map->tint>>24)&255)/255.0f,
-                    ((map->tint>>16)&255)/255.0f,((map->tint>>8)&255)/255.0f);
         glBindTexture(GL_TEXTURE_2D,texture.id);glDrawArrays(GL_TRIANGLES,0,6);
     }
     glBindTexture(GL_TEXTURE_2D,0);glDisableVertexAttribArray(0);

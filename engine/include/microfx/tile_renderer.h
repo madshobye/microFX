@@ -16,11 +16,6 @@ typedef struct {
     GLuint program;
     GLuint vertexBuffer;
     GLint textureLocation;
-    GLint grayscaleLocation;
-    GLint contrastLocation;
-    GLint brightnessLocation;
-    GLint invertLocation;
-    GLint tintLocation;
     MicroFxTileMapRenderState maps[MICROFX_MAX_TILE_MAPS];
 } MicroFxTileRenderer;
 
