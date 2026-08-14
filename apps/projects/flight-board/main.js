@@ -7,26 +7,24 @@ fx.configure({
 
 // Change this block to move the entire sketch to another airport.
 const PLACE = {
-  label: "COPENHAGEN",
+  label: "CORDOBA",
   airport: {
-    iata: "CPH",
-    icao: "EKCH",
-    latitude: 55.6181,
-    longitude: 12.6561,
-    markerOffset: [-55, 40]
+    iata: "COR",
+    icao: "SACO",
+    latitude: -31.3123,
+    longitude: -64.2083,
+    markerOffset: [-45, 35]
   },
   mapCenter: {
-    latitude: 55.67,
-    longitude: 12.635
+    latitude: -31.365,
+    longitude: -64.205
   },
-  mapZoom: 11.45,
-  searchRadiusNm: 25,
+  mapZoom: 11.25,
+  searchRadiusNm: 35,
   airportGroundRadiusKm: 3,
-  landmarks: [
-    { latitude: 55.65211374559996, longitude: 12.610871553308385,
-      radius: 3, color: 0xef4444ff }
-  ],
-  aisBounds: [[55.36, 12.10], [55.98, 13.18]]
+  landmarks: [],
+  transitEnabled: false,
+  aisBounds: null
 };
 
 const POLL_SECONDS = 5;
@@ -118,12 +116,12 @@ scene.add(fx.text("OPENSTREETMAP + CARTO",
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapPoint = (longitude, latitude) => map.project(longitude, latitude);
-const trainMapPaths = Array.from({ length: MAX_TRAIN_MAP_PATHS }, () =>
+const trainMapPaths = PLACE.transitEnabled ? Array.from({ length: MAX_TRAIN_MAP_PATHS }, () =>
   scene.add(fx.outline([[0, 0], [1, 0]], 0, 0, 1, 1,
-    0x29434aff).opacity(0.58).visible(false)));
-const metroMapPaths = Array.from({ length: MAX_METRO_MAP_PATHS }, () =>
+    0x29434aff).opacity(0.58).visible(false))) : [];
+const metroMapPaths = PLACE.transitEnabled ? Array.from({ length: MAX_METRO_MAP_PATHS }, () =>
   scene.add(fx.outline([[0, 0], [1, 0]], 0, 0, 1, 1.25,
-    0x6b5426ff).opacity(0.72).visible(false)));
+    0x6b5426ff).opacity(0.72).visible(false))) : [];
 const landmarks = PLACE.landmarks.map(landmark => {
   const point = mapPoint(landmark.longitude, landmark.latitude);
   return {
@@ -177,7 +175,7 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
   };
 });
 
-const transit = Array.from({ length: MAX_RAIL_TRANSIT }, () => {
+const transit = PLACE.transitEnabled ? Array.from({ length: MAX_RAIL_TRANSIT }, () => {
   const marker = scene.add(fx.sdfRoundedRect(0, 0, 18, 6, 3,
     0x65e6ffff).visible(false));
   return {
@@ -191,9 +189,9 @@ const transit = Array.from({ length: MAX_RAIL_TRANSIT }, () => {
     velocityX: 0, velocityY: 0,
     correctionX: 0, correctionY: 0, correctionRemaining: 0
   };
-});
+}) : [];
 
-const busTransit = Array.from({ length: MAX_BUSES }, () => {
+const busTransit = PLACE.transitEnabled ? Array.from({ length: MAX_BUSES }, () => {
   const marker = scene.add(fx.rect(0, 0, 4, 4, 0xb9c3c9ff).visible(false));
   return {
     id: "", mode: "BUS", active: false, marker,
@@ -206,11 +204,11 @@ const busTransit = Array.from({ length: MAX_BUSES }, () => {
     velocityX: 0, velocityY: 0,
     correctionX: 0, correctionY: 0, correctionRemaining: 0
   };
-});
+}) : [];
 
 const movingTransit = transit.concat(busTransit);
 
-const ships = AIS_API_KEY ? Array.from({ length: MAX_SHIPS }, () => {
+const ships = AIS_API_KEY && PLACE.aisBounds ? Array.from({ length: MAX_SHIPS }, () => {
   const outline = scene.add(fx.outline(SHIP_SHAPE, 0, 0, 12, 1.5,
     0x7ee5ffff, { closed: true }).visible(false));
   return {
@@ -730,7 +728,8 @@ function receiveAis(text) {
 }
 
 function connectAis() {
-  if (!AIS_API_KEY || aisSocket || clockTime < nextAisConnectTime) return;
+  if (!AIS_API_KEY || !PLACE.aisBounds || aisSocket ||
+      clockTime < nextAisConnectTime) return;
   const socket = fx.net.websocket.connect(AIS_URL);
   aisSocket = socket;
   socket.onOpen(() => socket.send(JSON.stringify({
@@ -1027,7 +1026,7 @@ function applyTransit(slots, values, styleMarkers, holdSeconds) {
 }
 
 function requestTransit() {
-  if (transitRequestInFlight || transitJob) return;
+  if (!PLACE.transitEnabled || transitRequestInFlight || transitJob) return;
   transitRequestInFlight = true;
   const now = Date.now();
   const start = encodeURIComponent(new Date(
@@ -1180,7 +1179,8 @@ function update(time, delta) {
   processTransitJob();
   processRailwayQueue();
   if (!requestInFlight && time >= nextRequestTime) requestFlights();
-  if (!transitRequestInFlight && !transitJob && time >= nextTransitRequestTime) {
+  if (PLACE.transitEnabled && !transitRequestInFlight && !transitJob &&
+      time >= nextTransitRequestTime) {
     requestTransit();
   }
   requestNextRoute();
