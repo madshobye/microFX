@@ -155,7 +155,7 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
       .opacity(0.8 - segment * 0.2).visible(false)));
   const trailState = trail.map(() => ({ x: 0, y: 0, spacing: 0 }));
   const shadow = scene.add(fx.polygon(AIRCRAFT_SHAPES.small,
-    0, 0, 16, 0x8b98a1ff).opacity(0.60).visible(false));
+    0, 0, 16, 0x020406ff).opacity(0.78).visible(false));
   const outline = marker.add(fx.outline(AIRCRAFT_SHAPES.small,
     0, 0, 16, 1.6, 0xffd55aff, { closed: true }));
   const label = fx.text("---", 0, 0, 18, 0xffffffff).antialias(false);
