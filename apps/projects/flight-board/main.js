@@ -25,12 +25,13 @@ const MAX_FLIGHTS = 50;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
-const MAX_TRANSIT = 200;
-const MAX_METRO = 40;
-const MAX_BUSES = 80;
-const TRANSIT_MODES = new Set(["LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN"]);
+const MAX_RAIL_TRANSIT = 224;
+const MAX_BUSES = 128;
+const TRANSIT_MODES = new Set([
+  "HIGHSPEED_RAIL", "LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN"
+]);
 const METRO_MODES = new Set(["SUBWAY"]);
-const BUS_MODES = new Set(["BUS"]);
+const BUS_MODES = new Set(["BUS", "COACH"]);
 const TRANSIT_URL = "https://api.transitous.org/api/v6/map/trips";
 const TRANSIT_USER_AGENT =
   "microFX-copenhagen-map/0.1 (+https://github.com/madshobye/microFX)";
@@ -128,7 +129,7 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
   };
 });
 
-const transit = Array.from({ length: MAX_TRANSIT }, () => {
+const transit = Array.from({ length: MAX_RAIL_TRANSIT }, () => {
   const marker = scene.add(fx.sdfRoundedRect(0, 0, 18, 6, 3,
     0x65e6ffff).visible(false));
   return {
@@ -138,6 +139,18 @@ const transit = Array.from({ length: MAX_TRANSIT }, () => {
     positionInitialized: false, currentX: 0, currentY: 0
   };
 });
+
+const busTransit = Array.from({ length: MAX_BUSES }, () => {
+  const marker = scene.add(fx.rect(0, 0, 4, 4, 0xb9c3c9ff).visible(false));
+  return {
+    id: "", mode: "BUS", active: false, marker,
+    path: [], cumulative: [], total: 0, pathIndex: 1,
+    departure: 0, arrival: 0, parked: false,
+    positionInitialized: false, currentX: 0, currentY: 0
+  };
+});
+
+const movingTransit = transit.concat(busTransit);
 
 const ships = AIS_API_KEY ? Array.from({ length: MAX_SHIPS }, () => {
   const outline = scene.add(fx.outline(SHIP_SHAPE, 0, 0, 12, 1.5,
@@ -628,23 +641,29 @@ function normalizeTransit(payload, now, modes) {
       path: metrics.path, cumulative: metrics.cumulative, total: metrics.total
     });
   });
-  return result.slice(0, MAX_TRANSIT);
+  return result;
+}
+
+function mergeTransit(...groups) {
+  const merged = new Map();
+  groups.forEach(group => group.forEach(value => {
+    if (!merged.has(value.id)) merged.set(value.id, value);
+  }));
+  return Array.from(merged.values());
 }
 
 function styleTransit(slot, mode) {
   slot.mode = mode;
   if (mode === "SUBWAY") {
     slot.marker.shape("circle", 5, 5, 2.5).color(0xffd55aff);
-  } else if (mode === "BUS") {
-    slot.marker.shape("circle", 3, 3, 1.5).color(0x7f8d96ff);
   } else {
     slot.marker.shape("circle", 6, 6, 3).color(0x65e6ffff);
   }
 }
 
-function applyTransit(values) {
+function applyTransit(slots, values) {
   const incoming = new Set(values.map(value => value.id));
-  transit.forEach(slot => {
+  slots.forEach(slot => {
     if (slot.active && !incoming.has(slot.id)) {
       slot.active = false;
       slot.id = "";
@@ -653,9 +672,9 @@ function applyTransit(values) {
   });
   const assigned = new Set();
   values.forEach(value => {
-    let slot = transit.find(candidate => candidate.active && candidate.id === value.id &&
+    let slot = slots.find(candidate => candidate.active && candidate.id === value.id &&
       !assigned.has(candidate));
-    if (!slot) slot = transit.find(candidate => !candidate.active && !assigned.has(candidate));
+    if (!slot) slot = slots.find(candidate => !candidate.active && !assigned.has(candidate));
     if (!slot) return;
     const continuing = slot.active && slot.id === value.id;
     assigned.add(slot);
@@ -669,10 +688,11 @@ function applyTransit(values) {
     slot.arrival = value.arrival;
     slot.parked = value.parked;
     if (!continuing) slot.positionInitialized = false;
-    styleTransit(slot, value.mode);
+    slot.mode = value.mode;
+    if (value.mode !== "BUS") styleTransit(slot, value.mode);
     slot.marker.visible(true);
   });
-  transit.forEach(slot => {
+  slots.forEach(slot => {
     if (assigned.has(slot)) return;
     slot.active = false;
     slot.id = "";
@@ -699,13 +719,23 @@ function requestTransit() {
     .then(payloads => {
       if (!payloads.every(Array.isArray)) throw new Error("invalid Transitous response");
       const now = Date.now();
-      const trains = normalizeTransit(payloads[0], now, TRANSIT_MODES)
-        .slice(0, MAX_TRANSIT - MAX_METRO - MAX_BUSES);
-      const metro = normalizeTransit(payloads[1], now, METRO_MODES)
-        .slice(0, MAX_METRO);
-      const buses = normalizeTransit(payloads[1], now, BUS_MODES)
-        .slice(0, MAX_BUSES);
-      applyTransit(trains.concat(metro, buses));
+      const trains = mergeTransit(
+        normalizeTransit(payloads[1], now, TRANSIT_MODES),
+        normalizeTransit(payloads[0], now, TRANSIT_MODES)
+      );
+      const metro = normalizeTransit(payloads[1], now, METRO_MODES);
+      const rail = trains.concat(metro);
+      if (rail.length > MAX_RAIL_TRANSIT) {
+        throw new Error(`rail marker capacity ${rail.length}/${MAX_RAIL_TRANSIT}`);
+      }
+      applyTransit(transit, rail);
+      const buses = normalizeTransit(payloads[1], now, BUS_MODES);
+      if (buses.length <= MAX_BUSES) {
+        applyTransit(busTransit, buses);
+      } else {
+        applyTransit(busTransit, []);
+        fx.log(`TRANSITOUS BUS SET HIDDEN ${buses.length}/${MAX_BUSES}`);
+      }
       transitRequestInFlight = false;
       nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
     })
@@ -800,7 +830,7 @@ function update(time, delta) {
   });
 
   const now = Date.now();
-  transit.forEach(slot => {
+  movingTransit.forEach(slot => {
     if (slot.active) positionTransit(slot, now, delta);
   });
 
