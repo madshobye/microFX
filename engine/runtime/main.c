@@ -375,6 +375,34 @@ static void ReportAndResetProfile(FrameProfile *profile,
     memset(profile, 0, sizeof(*profile));
 }
 
+static int DebugTabularCellWidth(int fontSize)
+{
+    const char *characters = "0123456789.UPFPSsmhdy";
+    int width = 0;
+    char glyph[2] = { 0, 0 };
+    for (const char *character = characters; *character; character++) {
+        glyph[0] = *character;
+        int glyphWidth = MeasureText(glyph, fontSize);
+        if (glyphWidth > width) width = glyphWidth;
+    }
+    return width + 1;
+}
+
+static int DebugTabularTextWidth(const char *text, int cellWidth)
+{
+    return (int)strlen(text)*cellWidth;
+}
+
+static void DrawDebugTabularText(const char *text, int x, int y, int fontSize,
+                                 int cellWidth, Color color)
+{
+    char glyph[2] = { 0, 0 };
+    for (int column = 0; text[column]; column++) {
+        glyph[0] = text[column];
+        DrawText(glyph, x + column*cellWidth, y, fontSize, color);
+    }
+}
+
 static void DrawInterface(float fps, float time,
                           float cpuAverageMs, float gpuAverageMs,
                           bool automaticDensity, float pixelDensity,
@@ -387,6 +415,7 @@ static void DrawInterface(float fps, float time,
     const int padding = 10;
     const int gap = 12;
     const int fontSize = 16;
+    const int tabularCellWidth = DebugTabularCellWidth(fontSize);
     const int meterWidth = 21;
     const int meterHeight = fontSize;
     const int meterY = barY + (barHeight - meterHeight)/2;
@@ -400,8 +429,8 @@ static void DrawInterface(float fps, float time,
     else if(time>=hour){uptime=time/hour;unit="h";}
     else if(time>=minute){uptime=time/minute;unit="m";}
     char up[32],fpsText[24],mode[24],resolution[32];
-    // Fixed-width numeric fields prevent the bar from shifting as the final
-    // digit changes. The leading padding also keeps zero as an explicit 0.0.
+    // Fixed character counts and tabular cells keep both fields stationary
+    // even though the built-in font gives digits such as 1 and 6 different widths.
     snprintf(up,sizeof(up),"UP %5.1f%s",uptime,unit);
     snprintf(fpsText,sizeof(fpsText),"%5.1f FPS",(double)fps);
     if (GetScreenWidth() == outputWidth && GetScreenHeight() == outputHeight) {
@@ -412,7 +441,8 @@ static void DrawInterface(float fps, float time,
     }
     snprintf(mode,sizeof(mode),"%s %.2f",automaticDensity?"AUTO":"FIXED",
              pixelDensity);
-    int width=padding*2+MeasureText(up,fontSize)+MeasureText(fpsText,fontSize)+
+    int width=padding*2+DebugTabularTextWidth(up,tabularCellWidth)+
+      DebugTabularTextWidth(fpsText,tabularCellWidth)+
       MeasureText(resolution,fontSize)+MeasureText(mode,fontSize)+
       MeasureText(internetState,fontSize)+MeasureText("CPU",fontSize)+
       MeasureText("GPU",fontSize)+meterWidth*2+gap*8;
@@ -423,8 +453,10 @@ static void DrawInterface(float fps, float time,
     DrawText((value),x,y,fontSize,(Color){red,green,blue,255}); \
     x+=MeasureText((value),fontSize)+gap; \
 } while(0)
-    DRAW_FIELD(up,180,205,235);
-    DRAW_FIELD(fpsText,255,210,70);
+    DrawDebugTabularText(up,x,y,fontSize,tabularCellWidth,(Color){180,205,235,255});
+    x+=DebugTabularTextWidth(up,tabularCellWidth)+gap;
+    DrawDebugTabularText(fpsText,x,y,fontSize,tabularCellWidth,(Color){255,210,70,255});
+    x+=DebugTabularTextWidth(fpsText,tabularCellWidth)+gap;
     DRAW_FIELD(resolution,245,245,245);
     DRAW_FIELD(mode,180,205,235);
     if (strcmp(internetState, "NET ON ") == 0) {
