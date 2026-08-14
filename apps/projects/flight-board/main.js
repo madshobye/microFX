@@ -31,6 +31,9 @@ const PLACE = {
 
 const POLL_SECONDS = 5;
 const CORRECTION_SECONDS = 8;
+const ROUTE_CACHE_SECONDS = 15 * 60;
+const ROUTE_MAX_CROSS_TRACK_KM = 220;
+const ROUTE_MAX_HEADING_ERROR = 80;
 const MAX_FLIGHTS = 50;
 const MAX_AIRPORT_DOTS = 50;
 const AIRPORT_CLUSTER_MIN_RADIUS = 9;
@@ -167,6 +170,7 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
     marker, trail, trailState, trailInitialized: false, headingAngle: 0,
     shadow, outline, label,
     labelX: NaN, labelY: NaN,
+    longitude: 0, latitude: 0, headingDegrees: 0,
     positionTime: 0,
     currentX: 0, currentY: 0, velocityX: 0, velocityY: 0,
     correctionX: 0, correctionY: 0, correctionRemaining: 0
@@ -258,7 +262,7 @@ function updateLandmarks(time) {
 
 function labelText(slot) {
   const route = routeCache.get(slot.callsign);
-  return route || "";
+  return route && route.expiresAt > clockTime ? route.text : "";
 }
 
 function updateAirportCount(payload) {
@@ -295,12 +299,18 @@ function positionLabel(slot) {
 }
 
 function queueRoute(callsign) {
-  if (!callsign || routeCache.has(callsign) || routeQueue.includes(callsign)) return;
+  if (!callsign || routeQueue.includes(callsign)) return;
+  const cached = routeCache.get(callsign);
+  if (cached && cached.expiresAt > clockTime) return;
+  routeCache.delete(callsign);
   routeQueue.push(callsign);
 }
 
 function finishRouteRequest(callsign, route) {
-  routeCache.set(callsign, route || "");
+  routeCache.set(callsign, {
+    text: route || "",
+    expiresAt: clockTime + ROUTE_CACHE_SECONDS
+  });
   flights.forEach(slot => {
     if (slot.active && slot.callsign === callsign) slot.label.text(labelText(slot));
   });
@@ -316,6 +326,63 @@ function placeName(airport) {
 function isLocalAirport(airport) {
   return String(airport.iata_code || "").toUpperCase() === PLACE.airport.iata ||
     String(airport.icao_code || "").toUpperCase() === PLACE.airport.icao;
+}
+
+function airportCoordinates(airport) {
+  const latitude = Number(airport && airport.latitude);
+  const longitude = Number(airport && airport.longitude);
+  return Number.isFinite(latitude) && Number.isFinite(longitude) ?
+    { latitude, longitude } : null;
+}
+
+function radians(value) {
+  return value * Math.PI / 180;
+}
+
+function angularDistance(from, to) {
+  const latitudeA = radians(from.latitude);
+  const latitudeB = radians(to.latitude);
+  const latitudeDelta = latitudeB - latitudeA;
+  const longitudeDelta = radians(to.longitude - from.longitude);
+  const haversine = Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(latitudeA) * Math.cos(latitudeB) * Math.sin(longitudeDelta / 2) ** 2;
+  return 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(Math.max(0, 1 - haversine)));
+}
+
+function bearingDegrees(from, to) {
+  const latitudeA = radians(from.latitude);
+  const latitudeB = radians(to.latitude);
+  const longitudeDelta = radians(to.longitude - from.longitude);
+  const y = Math.sin(longitudeDelta) * Math.cos(latitudeB);
+  const x = Math.cos(latitudeA) * Math.sin(latitudeB) -
+    Math.sin(latitudeA) * Math.cos(latitudeB) * Math.cos(longitudeDelta);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function headingDifference(first, second) {
+  const difference = Math.abs(first - second) % 360;
+  return Math.min(difference, 360 - difference);
+}
+
+function routeMatchesAircraft(slot, origin, destination) {
+  const from = airportCoordinates(origin);
+  const to = airportCoordinates(destination);
+  if (!slot || !from || !to) return false;
+  const aircraft = { latitude: slot.latitude, longitude: slot.longitude };
+  const routeDistance = angularDistance(from, to);
+  if (routeDistance < 0.0001) return false;
+  if (!isLocalAirport(origin) && !isLocalAirport(destination)) {
+    const fromAircraft = angularDistance(from, aircraft);
+    const routeBearing = radians(bearingDegrees(from, to));
+    const aircraftBearing = radians(bearingDegrees(from, aircraft));
+    const crossTrack = Math.abs(Math.asin(clamp(
+      Math.sin(fromAircraft) * Math.sin(aircraftBearing - routeBearing), -1, 1))) * 6371;
+    if (crossTrack > ROUTE_MAX_CROSS_TRACK_KM) return false;
+  }
+  const destinationDistance = angularDistance(aircraft, to) * 6371;
+  if (destinationDistance > 20 && headingDifference(slot.headingDegrees,
+    bearingDegrees(aircraft, to)) > ROUTE_MAX_HEADING_ERROR) return false;
+  return true;
 }
 
 function routeDescription(origin, destination) {
@@ -345,7 +412,9 @@ function requestNextRoute() {
         finishRouteRequest(callsign, "");
         return;
       }
-      finishRouteRequest(callsign, routeDescription(origin, destination));
+      const slot = flights.find(value => value.active && value.callsign === callsign);
+      finishRouteRequest(callsign, routeMatchesAircraft(slot, origin, destination) ?
+        routeDescription(origin, destination) : "");
     })
     .catch(() => finishRouteRequest(callsign, ""));
 }
@@ -492,6 +561,9 @@ function applyFlights(values, live) {
     slot.callsign = item.callsign || `AIRCRAFT ${index + 1}`;
     slot.onGround = Boolean(item.onGround);
     slot.altitudeFeet = item.altitudeFeet;
+    slot.longitude = item.longitude;
+    slot.latitude = item.latitude;
+    slot.headingDegrees = item.heading;
     styleMarker(slot, item);
     if (sameAircraft && hasFreshPosition) {
       slot.correctionX = x - slot.currentX;
