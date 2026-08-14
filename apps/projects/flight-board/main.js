@@ -23,6 +23,31 @@ const CORRECTION_SECONDS = 8;
 const MAX_FLIGHTS = 50;
 const DATA_URL = `https://opendata.adsb.fi/api/v3/lat/${PLACE.airport.latitude}` +
   `/lon/${PLACE.airport.longitude}/dist/${PLACE.searchRadiusNm}`;
+
+const mirrorVertical = left => left.concat(
+  left.slice(1, -1).reverse().map(point => [-point[0], point[1]]));
+const AIRCRAFT_SHAPES = {
+  helicopter: mirrorVertical([[0, .947], [-.044, .863], [-.363, .961], [-.348, .902],
+    [-.029, .765], [-.083, .304], [-.235, .103], [-.647, .554], [-.779, .417],
+    [-.275, -.034], [-.284, -.412], [-.775, -.868], [-.632, -.995], [-.206, -.52],
+    [-.069, -.667], [0, -.669]]),
+  fighter: mirrorVertical([[0, .913], [-.053, .911], [-.18, .997], [-.457, .993],
+    [-.453, .853], [-.193, .61], [-.771, .61], [-.761, .422], [-.176, -.184],
+    [-.101, -.772], [0, -1]]),
+  cargo: mirrorVertical([[0, .83], [-.011, .827], [-.363, .937], [-.394, .774],
+    [-.143, .594], [-.183, .142], [-1, .26], [-.996, .01], [-.185, -.335],
+    [-.185, -.687], [-.127, -.873], [0, -.931]]),
+  propeller: mirrorVertical([[0, -.753], [-.279, -.751], [-.282, -.688],
+    [-.077, -.683], [-.155, -.459], [-.924, -.447], [-1, -.394], [-.994, -.183],
+    [-.935, -.13], [-.15, -.13], [-.091, .474], [-.39, .591], [-.367, .755],
+    [0, .752]]),
+  small: mirrorVertical([[0, -.988], [-.05, -.991], [-.185, -.698], [-.191, -.399],
+    [-.982, -.194], [-1, .065], [-.167, .094], [-.132, .657], [-.431, .815],
+    [-.431, .991], [0, .991]]),
+  big: mirrorVertical([[0, -.998], [-.095, -.94], [-.151, -.789], [-.158, -.248],
+    [-.798, .241], [-.805, .392], [-.766, .413], [-.151, .22], [-.134, .68],
+    [-.376, .863], [-.373, .982], [-.337, .996], [0, .871]])
+};
 const scene = fx.scenes.add(fx.scene({ name: "flight-board" }));
 
 const map = scene.add(fx.tileMap({
@@ -66,16 +91,15 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
     marker.add(fx.sdfRoundedRect(0, 0, 20, 5 - segment,
       (5 - segment) * 0.5, 0x38bce8ff)
       .opacity(0.8 - segment * 0.2)));
-  const dot = marker.add(fx.sdfCircle(0, 0, 10, 0xffd55aff));
-  const rotor = marker.add(fx.sdfRoundedRect(0, 0, 27, 4, 2, 0x7ee5ffff)
-    .visible(false));
+  const outline = marker.add(fx.outline(AIRCRAFT_SHAPES.small,
+    0, 0, 16, 1.6, 0xffd55aff, { closed: true }));
   const label = fx.text("---", 0, 0, 18, 0xffffffff).antialias(false);
   scene.add(marker);
   scene.add(label);
   return {
     id: "", callsign: "", active: false, onGround: false,
     aircraftKind: "small", markerRadius: 7,
-    marker, trail, dot, rotor, label,
+    marker, trail, outline, label,
     labelX: NaN, labelY: NaN,
     positionTime: 0,
     currentX: 0, currentY: 0, velocityX: 0, velocityY: 0,
@@ -206,8 +230,7 @@ function setHeading(slot, heading, speed) {
                        Math.cos(angle) * distance).rotation(trailAngle)
         .visible(slot.aircraftKind !== "helicopter" && speed >= speedThreshold);
     });
-    slot.dot.rotation(trailAngle);
-    slot.rotor.rotation(trailAngle + Math.PI / 2);
+    slot.outline.rotation(angle);
     slot.marker.position(slot.currentX, slot.currentY);
 }
 
@@ -239,22 +262,19 @@ function styleMarker(slot, item) {
   const radius = item.markerRadius;
   const kind = item.aircraftKind;
   const styles = {
-    small: ["circle", 2, 2, 1, 0xffd55aff, 0, 0],
-    propeller: ["circle", 2, 2, 1, 0xffc766ff, 2.8, 2],
-    big: ["rounded", 2.2, 1.35, 0.55, 0xffd55aff, 3.0, 4],
-    cargo: ["rounded", 2.35, 1.55, 0.28, 0xe8a83eff, 3.2, 6],
-    helicopter: ["circle", 1.75, 1.75, 0.875, 0x143347ff, 3.2, 3],
-    fighter: ["rounded", 2.5, 0.8, 0.3, 0xfff1b8ff, 2.3, 3]
+    helicopter: [AIRCRAFT_SHAPES.helicopter, 0x7ee5ffff, 2.3],
+    fighter: [AIRCRAFT_SHAPES.fighter, 0xfff1b8ff, 2.4],
+    cargo: [AIRCRAFT_SHAPES.cargo, 0xe8a83eff, 2.5],
+    propeller: [AIRCRAFT_SHAPES.propeller, 0xffc766ff, 2.4],
+    small: [AIRCRAFT_SHAPES.small, 0xffd55aff, 2.3],
+    big: [AIRCRAFT_SHAPES.big, 0xffd55aff, 2.5]
   };
   const style = styles[kind] || styles.small;
+  const kindChanged = slot.aircraftKind !== kind;
   slot.aircraftKind = kind;
   slot.markerRadius = radius;
-  slot.dot.shape(style[0], radius * style[1], radius * style[2],
-                 radius * style[3]).color(style[4]);
-  const hasWings = style[5] > 0;
-  slot.rotor.shape("rounded", radius * (style[5] || 1), style[6] || 1,
-                   Math.min((style[6] || 1) * 0.5, 2))
-    .color(kind === "helicopter" ? 0x7ee5ffff : style[4]).visible(hasWings);
+  if (kindChanged) slot.outline.points(style[0]);
+  slot.outline.scale(radius * style[2]).color(style[1]);
 }
 
 function applyFlights(values, live) {
@@ -308,7 +328,7 @@ function applyFlights(values, live) {
     slot.id = "";
     slot.callsign = "";
     slot.onGround = false;
-    slot.aircraftKind = "small";
+    slot.aircraftKind = "";
     slot.positionTime = 0;
     slot.marker.visible(false);
     slot.label.visible(false);

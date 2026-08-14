@@ -426,6 +426,65 @@ static JSValue AddImage(JSContext *ctx,JSValueConst thisValue,int argc,JSValueCo
                                           ColorArg(ctx,argv[4])));
 }
 
+static bool ReadOutlinePoints(JSContext *ctx,JSValueConst value,
+                              float points[MICROFX_MAX_OUTLINE_POINTS][2],
+                              int *pointCount)
+{
+    if(!JS_IsArray(ctx,value))return false;
+    JSValue lengthValue=JS_GetPropertyStr(ctx,value,"length");
+    uint32_t length=0;
+    if(JS_IsException(lengthValue)||JS_ToUint32(ctx,&length,lengthValue)){
+        JS_FreeValue(ctx,lengthValue);return false;
+    }
+    JS_FreeValue(ctx,lengthValue);
+    if(length<4||(length&1u)||length>MICROFX_MAX_OUTLINE_POINTS*2u)return false;
+    for(uint32_t i=0;i<length;i++){
+        JSValue item=JS_GetPropertyUint32(ctx,value,i);double number=0;
+        int failed=JS_IsException(item)||JS_ToFloat64(ctx,&number,item);
+        JS_FreeValue(ctx,item);if(failed||!isfinite(number))return false;
+        points[i/2][i&1u]=(float)number;
+    }
+    *pointCount=(int)(length/2u);return true;
+}
+
+static JSValue AddOutline(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    float points[MICROFX_MAX_OUTLINE_POINTS][2];int count=0;
+    double x=0,y=0,scale=0,width=0;int closed=0;
+    if(argc!=7||!ReadOutlinePoints(ctx,argv[0],points,&count)||
+       JS_ToFloat64(ctx,&x,argv[1])||JS_ToFloat64(ctx,&y,argv[2])||
+       JS_ToFloat64(ctx,&scale,argv[3])||JS_ToFloat64(ctx,&width,argv[4])||
+       JS_ToBool(ctx,argv[6])<0)
+        return JS_ThrowTypeError(ctx,
+            "outline(points,x,y,scale,width,color,closed)");
+    closed=JS_ToBool(ctx,argv[6]);
+    return Handle(ctx,MicroFxSceneAddOutline(script->scene,points,count,x,y,scale,
+                                              width,ColorArg(ctx,argv[5]),closed));
+}
+
+static JSValue SetOutlinePoints(JSContext *ctx,JSValueConst thisValue,
+                                int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    float points[MICROFX_MAX_OUTLINE_POINTS][2];int count=0;
+    if(argc!=2||JS_ToInt32(ctx,&handle,argv[0])||
+       !ReadOutlinePoints(ctx,argv[1],points,&count))
+        return JS_ThrowTypeError(ctx,"outlinePoints(handle,points)");
+    return JS_NewBool(ctx,MicroFxSceneSetOutlinePoints(script->scene,handle,
+                                                        points,count));
+}
+
+static JSValue SetOutlineScale(JSContext *ctx,JSValueConst thisValue,
+                               int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0;double scale=0;
+    if(argc!=2||JS_ToInt32(ctx,&handle,argv[0])||JS_ToFloat64(ctx,&scale,argv[1]))
+        return JS_ThrowTypeError(ctx,"outlineScale(handle,scale)");
+    return JS_NewBool(ctx,MicroFxSceneSetOutlineScale(script->scene,handle,scale));
+}
+
 static JSValue AddBackgroundImage(JSContext *ctx,JSValueConst thisValue,
                                   int argc,JSValueConst *argv)
 {
@@ -852,6 +911,9 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_shader",JS_NewCFunction(script->context,SetMeshShader,"_shader",3));
     JS_SetPropertyStr(script->context,fx,"_text",JS_NewCFunction(script->context,AddText,"_text",5));
     JS_SetPropertyStr(script->context,fx,"_image",JS_NewCFunction(script->context,AddImage,"_image",5));
+    JS_SetPropertyStr(script->context,fx,"_outline",JS_NewCFunction(script->context,AddOutline,"_outline",7));
+    JS_SetPropertyStr(script->context,fx,"_outlinePoints",JS_NewCFunction(script->context,SetOutlinePoints,"_outlinePoints",2));
+    JS_SetPropertyStr(script->context,fx,"_outlineScale",JS_NewCFunction(script->context,SetOutlineScale,"_outlineScale",2));
     JS_SetPropertyStr(script->context,fx,"_backgroundImage",JS_NewCFunction(script->context,AddBackgroundImage,"_backgroundImage",2));
     JS_SetPropertyStr(script->context,fx,"_imageScale",JS_NewCFunction(script->context,SetImageScale,"_imageScale",2));
     JS_SetPropertyStr(script->context,fx,"_setText",JS_NewCFunction(script->context,SetText,"_setText",2));
@@ -917,9 +979,9 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     script->update=JS_GetPropertyStr(script->context,global,"update");
     JS_FreeValue(script->context,global);
     if (!JS_IsFunction(script->context,script->update)) { fprintf(stderr,"MICROFX_JS update(time,delta) missing\n"); MicroFxScriptDestroy(script); return NULL; }
-    printf("MICROFX_JS loaded=%s sdf=%d quads=%d mesh=%d text=%d image=%d\n", path,
+    printf("MICROFX_JS loaded=%s sdf=%d quads=%d mesh=%d text=%d image=%d outline=%d\n", path,
            scene->sdfCount, scene->quadCount, scene->meshCount, scene->textCount,
-           scene->imageCount);
+           scene->imageCount,scene->outlineCount);
     return script;
 }
 

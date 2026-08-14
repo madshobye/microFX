@@ -11,6 +11,7 @@
 #include "microfx/mesh_renderer.h"
 #include "microfx/text_renderer.h"
 #include "microfx/image_renderer.h"
+#include "microfx/outline_renderer.h"
 #include "microfx/tile_renderer.h"
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
@@ -604,6 +605,11 @@ int main(void)
         fprintf(stderr, "MICROFX_IMAGE fatal initialization failure\n");
         exit(EXIT_FAILURE);
     }
+    MicroFxOutlineRenderer outlineRenderer;
+    if (!MicroFxOutlineRendererInit(&outlineRenderer)) {
+        fprintf(stderr, "MICROFX_OUTLINE fatal initialization failure\n");
+        exit(EXIT_FAILURE);
+    }
     MicroFxTileRenderer tileRenderer;
     if (!MicroFxTileRendererInit(&tileRenderer)) {
         fprintf(stderr, "MICROFX_TILE fatal initialization failure\n");
@@ -693,6 +699,8 @@ int main(void)
         double overlayQuadsEnd = GetTime();
         MicroFxSdfRendererDraw(&sdfRenderer, &scriptScene,
                               DESIGN_WIDTH, DESIGN_HEIGHT);
+        MicroFxOutlineRendererDraw(&outlineRenderer,&scriptScene,
+                                   DESIGN_WIDTH,DESIGN_HEIGHT);
         if (synchronizedProfiling) glFinish();
         double sdfEnd = GetTime();
         if (!MicroFxImageRendererDraw(&imageRenderer, &scriptScene,
@@ -817,6 +825,7 @@ int main(void)
     MicroFxQuadRendererDestroy(&quadRenderer);
     MicroFxMeshRendererDestroy(&meshRenderer);
     MicroFxImageRendererDestroy(&imageRenderer);
+    MicroFxOutlineRendererDestroy(&outlineRenderer);
     MicroFxTileRendererDestroy(&tileRenderer, &scriptScene);
     MicroFxTextRendererDestroy(&textRenderer);
     CloseWindow();

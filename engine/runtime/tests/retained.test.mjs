@@ -11,7 +11,8 @@ function runtime() {
   const fx = { data: (path, fallback) => ({ path, fallback }) };
   for (const name of [
     "circle", "sdfCircle", "sdfRoundedRect", "rect", "gradientRect",
-    "background", "cube", "sphere", "wireCube", "grid", "model", "text", "image"
+    "background", "cube", "sphere", "wireCube", "grid", "model", "text", "image",
+    "outline"
   ]) {
     fx[`_${name}`] = (...args) => {
       calls.push([`_${name}`, ...args]);
@@ -26,6 +27,14 @@ function runtime() {
   }
   fx._imageScale = (...args) => {
     calls.push(["_imageScale", ...args]);
+    return true;
+  };
+  fx._outlinePoints = (...args) => {
+    calls.push(["_outlinePoints", ...args]);
+    return true;
+  };
+  fx._outlineScale = (...args) => {
+    calls.push(["_outlineScale", ...args]);
     return true;
   };
   fx._qrMatrix = () => "111\n101\n111\n";
@@ -82,6 +91,19 @@ test("polyline validates first and constructs one retained quad batch path", () 
                 /finite/);
   assert.throws(() => fx.polyline([[0, 0], [0, 0]], 2, 0xffffffff),
                 /non-zero/);
+});
+
+test("outlines retain point arrays as one native cached element", () => {
+  const { fx, calls } = runtime();
+  const outline = fx.outline([[-1, 1], [0, -1], [1, 1]], 20, 30, 12, 2,
+                             0xffffffff, { closed: true });
+  outline.points([[-2, 1], [0, -2], [2, 1]]).scale(15).rotation(0.5);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["_outline", [-1, 1, 0, -1, 1, 1], 20, 30, 12, 2, 0xffffffff, true],
+    ["_outlinePoints", 1, [-2, 1, 0, -2, 2, 1]],
+    ["_outlineScale", 1, 15],
+    ["_move", 1, 20, 30, 0.5]
+  ]);
 });
 
 test("groups translate mixed retained elements without changing renderer ownership", () => {

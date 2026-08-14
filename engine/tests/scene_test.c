@@ -141,6 +141,20 @@ int main(void)
     assert(backgroundImage>=0 && scene.image[1].background);
     assert(MicroFxSceneAddImage(&scene,"bad.png",0,0,0,0xffffffff)<0);
 
+    const float outlinePoints[][2]={{-1,1},{0,-1},{1,1}};
+    int outline=MicroFxSceneAddOutline(&scene,outlinePoints,3,20,30,12,2,
+                                       0xffffffff,true);
+    assert((outline&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_OUTLINE);
+    assert(MicroFxSceneMove(&scene,outline,40,50,0.25f));
+    assert(scene.outline[0].x==40 && scene.outlineDirty);
+    assert(MicroFxSceneSetOutlineScale(&scene,outline,15));
+    assert(scene.outline[0].scale==15);
+    assert(MicroFxSceneSetOutlinePoints(&scene,outline,outlinePoints,3));
+    assert(MicroFxSceneSetColor(&scene,outline,0xabcdef12));
+    assert(MicroFxSceneSetOpacity(&scene,outline,0.5f));
+    assert(MicroFxSceneSetVisible(&scene,outline,false));
+    assert(!scene.outline[0].visible);
+
     assert(!MicroFxSceneMove(&scene,cube,0,0,0));
     assert(!MicroFxSceneTransform(&scene,circle,0,0,0,0,0,0,1));
     assert(!MicroFxSceneSetEffect(&scene,cube,99,1,1));

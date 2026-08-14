@@ -13,6 +13,8 @@
 #define MICROFX_MAX_MESH_ELEMENTS 256
 #define MICROFX_MAX_TEXT_ELEMENTS 64
 #define MICROFX_MAX_IMAGE_ELEMENTS 16
+#define MICROFX_MAX_OUTLINE_ELEMENTS 64
+#define MICROFX_MAX_OUTLINE_POINTS 64
 #define MICROFX_MAX_TEXT_BYTES 128
 #define MICROFX_MAX_ASSET_PATH 256
 #define MICROFX_MAX_MESH_SHADERS 8
@@ -24,6 +26,7 @@
 #define MICROFX_HANDLE_TEXT 0x03000000
 #define MICROFX_HANDLE_QUAD 0x04000000
 #define MICROFX_HANDLE_IMAGE 0x05000000
+#define MICROFX_HANDLE_OUTLINE 0x06000000
 #define MICROFX_HANDLE_KIND_MASK 0xff000000
 #define MICROFX_HANDLE_INDEX_MASK 0x00ffffff
 
@@ -116,6 +119,20 @@ typedef struct {
 } MicroFxImageElement;
 
 typedef struct {
+    float points[MICROFX_MAX_OUTLINE_POINTS][2];
+    int pointCount;
+    float x;
+    float y;
+    float scale;
+    float rotation;
+    float width;
+    uint32_t color;
+    float opacity;
+    bool visible;
+    bool closed;
+} MicroFxOutlineElement;
+
+typedef struct {
     float x;
     float y;
     float size;
@@ -199,6 +216,9 @@ typedef struct {
     MicroFxImageElement image[MICROFX_MAX_IMAGE_ELEMENTS];
     int imageCount;
     bool imageDirty;
+    MicroFxOutlineElement outline[MICROFX_MAX_OUTLINE_ELEMENTS];
+    int outlineCount;
+    bool outlineDirty;
     MicroFxTileMap tileMap[MICROFX_MAX_TILE_MAPS];
     int tileMapCount;
     MicroFxCamera camera;
@@ -248,6 +268,12 @@ int MicroFxSceneAddImage(MicroFxScene *scene, const char *assetPath,
 int MicroFxSceneAddBackgroundImage(MicroFxScene *scene, const char *assetPath,
                                   uint32_t tint);
 bool MicroFxSceneSetImageScale(MicroFxScene *scene, int handle, float scale);
+int MicroFxSceneAddOutline(MicroFxScene *scene, const float points[][2],
+                           int pointCount, float x, float y, float scale,
+                           float width, uint32_t color, bool closed);
+bool MicroFxSceneSetOutlinePoints(MicroFxScene *scene, int handle,
+                                  const float points[][2], int pointCount);
+bool MicroFxSceneSetOutlineScale(MicroFxScene *scene, int handle, float scale);
 int MicroFxSceneAddTileMap(MicroFxScene *scene, float grayscale,
                            float contrast, float brightness, float invert,
                            uint32_t tint);

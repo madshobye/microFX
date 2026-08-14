@@ -8,7 +8,8 @@ export const defaultCapacities = Object.freeze({
   quad: 512,
   mesh: 256,
   text: 64,
-  image: 16
+  image: 16,
+  outline: 64
 });
 
 function finite(label, values) {
@@ -36,7 +37,7 @@ function instrumentedNativeFx(root, capacities) {
   let maximumFrameCalls = 0;
   let totalUpdateCalls = 0;
   const handles = new Map();
-  const counts = { sdf: 0, quad: 0, mesh: 0, text: 0, image: 0 };
+  const counts = { sdf: 0, quad: 0, mesh: 0, text: 0, image: 0, outline: 0 };
   const mutations = {
     move: 0, transform: 0, text: 0, font: 0, textAntialias: 0, color: 0,
     sdfGeometry: 0, effect: 0, visible: 0, opacity: 0
@@ -114,8 +115,17 @@ function instrumentedNativeFx(root, capacities) {
     _sdfRoundedRect: add("sdf"),
     _text: add("text"),
     _image: add("image"),
+    _outline: add("outline"),
     _backgroundImage: add("image"),
     _imageScale(handle, scale) {
+      return mutation("transform", handle, [scale]);
+    },
+    _outlinePoints(handle, points) {
+      knownHandle(handle, "outline points");
+      assert.ok(Array.isArray(points));
+      return mutation("transform", handle, points);
+    },
+    _outlineScale(handle, scale) {
       return mutation("transform", handle, [scale]);
     },
     _cube: add("mesh"),

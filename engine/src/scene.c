@@ -163,6 +163,12 @@ bool MicroFxSceneMove(MicroFxScene *scene, int handle, float x, float y,
         element->x = x; element->y = y; element->rotation = rotation;
         return true;
     }
+    if (kind == MICROFX_HANDLE_OUTLINE && index >= 0 && index < scene->outlineCount) {
+        MicroFxOutlineElement *element = &scene->outline[index];
+        element->x = x; element->y = y; element->rotation = rotation;
+        scene->outlineDirty = true;
+        return true;
+    }
     return false;
 }
 
@@ -293,6 +299,44 @@ bool MicroFxSceneSetImageScale(MicroFxScene *scene, int handle, float scale)
     scene->image[index].scale=scale;scene->imageDirty=true;return true;
 }
 
+int MicroFxSceneAddOutline(MicroFxScene *scene, const float points[][2],
+                           int pointCount, float x, float y, float scale,
+                           float width, uint32_t color, bool closed)
+{
+    if(!points||pointCount<2||pointCount>MICROFX_MAX_OUTLINE_POINTS||
+       scale<=0.0f||width<=0.0f||scene->outlineCount>=MICROFX_MAX_OUTLINE_ELEMENTS)
+        return -1;
+    int index=scene->outlineCount++;
+    MicroFxOutlineElement *element=&scene->outline[index];
+    memcpy(element->points,points,(size_t)pointCount*sizeof(element->points[0]));
+    element->pointCount=pointCount;element->x=x;element->y=y;element->scale=scale;
+    element->width=width;element->color=color;element->opacity=1.0f;
+    element->visible=true;element->closed=closed;scene->outlineDirty=true;
+    return MICROFX_HANDLE_OUTLINE|index;
+}
+
+bool MicroFxSceneSetOutlinePoints(MicroFxScene *scene, int handle,
+                                  const float points[][2], int pointCount)
+{
+    if((handle&MICROFX_HANDLE_KIND_MASK)!=MICROFX_HANDLE_OUTLINE||!points||
+       pointCount<2||pointCount>MICROFX_MAX_OUTLINE_POINTS)return false;
+    int index=handle&MICROFX_HANDLE_INDEX_MASK;
+    if(index<0||index>=scene->outlineCount)return false;
+    MicroFxOutlineElement *element=&scene->outline[index];
+    memcpy(element->points,points,(size_t)pointCount*sizeof(element->points[0]));
+    element->pointCount=pointCount;scene->outlineDirty=true;return true;
+}
+
+bool MicroFxSceneSetOutlineScale(MicroFxScene *scene, int handle, float scale)
+{
+    if((handle&MICROFX_HANDLE_KIND_MASK)!=MICROFX_HANDLE_OUTLINE||scale<=0.0f)
+        return false;
+    int index=handle&MICROFX_HANDLE_INDEX_MASK;
+    if(index<0||index>=scene->outlineCount)return false;
+    if(scene->outline[index].scale==scale)return true;
+    scene->outline[index].scale=scale;scene->outlineDirty=true;return true;
+}
+
 int MicroFxSceneAddTileMap(MicroFxScene *scene, float grayscale,
                            float contrast, float brightness, float invert,
                            uint32_t tint)
@@ -404,6 +448,9 @@ bool MicroFxSceneSetColor(MicroFxScene *scene, int handle, uint32_t color)
     if (kind == MICROFX_HANDLE_IMAGE && index < scene->imageCount) {
         scene->image[index].tint = color; return true;
     }
+    if (kind == MICROFX_HANDLE_OUTLINE && index < scene->outlineCount) {
+        scene->outline[index].color = color; scene->outlineDirty = true; return true;
+    }
     return false;
 }
 
@@ -424,6 +471,9 @@ bool MicroFxSceneSetOpacity(MicroFxScene *scene, int handle, float opacity)
     case MICROFX_HANDLE_IMAGE:
         if (index < 0 || index >= scene->imageCount) return false;
         scene->image[index].opacity = opacity; return true;
+    case MICROFX_HANDLE_OUTLINE:
+        if (index < 0 || index >= scene->outlineCount) return false;
+        scene->outline[index].opacity = opacity; scene->outlineDirty = true; return true;
     default:
         return false;
     }
@@ -456,6 +506,10 @@ bool MicroFxSceneSetVisible(MicroFxScene *scene, int handle, bool visible)
         if (index < 0 || index >= scene->imageCount) return false;
         if (scene->image[index].visible == visible) return true;
         scene->image[index].visible = visible; return true;
+    case MICROFX_HANDLE_OUTLINE:
+        if (index < 0 || index >= scene->outlineCount) return false;
+        if (scene->outline[index].visible == visible) return true;
+        scene->outline[index].visible = visible; scene->outlineDirty = true; return true;
     default: return false;
     }
 }

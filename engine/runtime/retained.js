@@ -73,12 +73,19 @@
       },
 
       scale(value) {
-        if (dimension !== 3 && state.kind !== "image") {
-          throw new TypeError("scale() is available on 3D and image elements");
+        if (dimension !== 3 && state.kind !== "image" && state.kind !== "outline") {
+          throw new TypeError("scale() is available on 3D, image, and outline elements");
         }
         state.scale = value;
         if (state.kind === "image") fx._imageScale(handle, value);
+        else if (state.kind === "outline") fx._outlineScale(handle, value);
         else applyTransform();
+        return object;
+      },
+
+      points(value) {
+        if (state.kind !== "outline") throw new TypeError("points() is available on outlines");
+        fx._outlinePoints(handle, normalizePath(value));
         return object;
       },
 
@@ -290,6 +297,31 @@
     pairs.forEach(pair => path.add(
       fx.line(pair[0].x, pair[0].y, pair[1].x, pair[1].y, width, color)));
     return path;
+  };
+  function normalizePath(points) {
+    if (!Array.isArray(points) || points.length < 2 || points.length > 64) {
+      throw new TypeError("outline points require an array of 2 to 64 points");
+    }
+    const flat = [];
+    points.forEach(point => {
+      const x = Number(Array.isArray(point) ? point[0] : point && point.x);
+      const y = Number(Array.isArray(point) ? point[1] : point && point.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        throw new TypeError("outline points require finite x and y coordinates");
+      }
+      flat.push(x, y);
+    });
+    return flat;
+  }
+  fx.outline = function outline(points, x, y, scale, width, color, options) {
+    if (arguments.length < 6 || arguments.length > 7 || !Number.isFinite(x) ||
+        !Number.isFinite(y) || !Number.isFinite(scale) || scale <= 0 ||
+        !Number.isFinite(width) || width <= 0) {
+      throw new TypeError("outline(points,x,y,scale,width,color[,options])");
+    }
+    const closed = options === true || Boolean(options && options.closed);
+    return element(fx._outline(normalizePath(points), x, y, scale, width, color, closed),
+                   2, { x, y, scale, kind: "outline" });
   };
   fx.gradientRect = function gradientRect(x, y, width, height, top, bottom) {
     return make2d(fx._gradientRect, arguments, { x, y });

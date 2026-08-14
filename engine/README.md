@@ -75,6 +75,7 @@ relative offset. Both are fluent and return the same object.
 | `rect(x,y,w,h,color)` | Add a cheap solid GPU quad |
 | `line(x1,y1,x2,y2,width,color)` | Add a cheap retained line as a rotated quad |
 | `polyline(points,width,color[,options])` | Build an open/closed retained path from the same quad batch |
+| `outline(points,x,y,scale,width,color[,options])` | Cache one 2D point array as a native batched outline |
 | `gradientRect(x,y,w,h,top,bottom)` | Add a cheap vertical-gradient quad |
 | `background(top,bottom)` | Add a gradient rendered before the 3D scene |
 | `circle(x,y,r,color)` | Add a fast retained triangle-fan circle |
@@ -84,6 +85,7 @@ relative offset. Both are fluent and return the same object.
 | `element.move(dx,dy[,dz])` | Move an element relative to its current position |
 | `element.rotation(...)` / `rotate(...)` | Set/add retained rotation |
 | `element.scale(size)` | Set a 3D or image element's retained scale |
+| `outline.points(points)` | Replace a cached outline without allocating another element |
 | `element.color(color)` | Change an element's color |
 | `element.opacity(value)` | Set 2D/text/image opacity from 0 to 1 |
 | `element.visible(value)` | Set retained visibility without reallocating |
