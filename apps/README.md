@@ -8,11 +8,10 @@ project library on first boot. Each project consists of `main.js`,
 The gallery deliberately spans typography, 2D composition, particles,
 wireframe and solid 3D, diagnostic gradients, clocks, and data-visualization
 concepts. `scene-switcher` demonstrates per-frame `scene.show()` selection and
-disabled-element culling. `flight-board` and `energy-clock` read bounded live
-snapshots through the experimental `fx.feed()` file helper. These two feeds are
-examples rather than the networking architecture. Applications can use the
-runtime-owned `fetch()` and `fx.net` HTTP, TCP, UDP, and JavaScript web-server
-APIs directly.
+disabled-element culling. `flight-board` and `energy-clock` request bounded live
+data directly with the runtime-owned `fetch()` API and retain their bundled JSON
+only as an offline startup fallback. Applications can also use `fx.net` for
+HTTP, TCP, UDP, and JavaScript web-server APIs directly.
 
 Run `apps/tests/run.sh` to verify project count, JavaScript syntax, metadata,
 the public/private API boundary, and the retained runtime contract without

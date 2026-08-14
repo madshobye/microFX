@@ -73,6 +73,23 @@ function instrumentedNativeFx(root, capacities) {
     _rect: add("quad"),
     _gradientRect: add("quad"),
     _background: add("quad"),
+    _netFetch(url) {
+      const body = url.includes("energidataservice")
+        ? JSON.stringify({ records: [
+            { TimeUTC: "2026-08-14T00:00:00", DayAheadPriceDKK: 320 },
+            { TimeUTC: "2026-08-14T00:15:00", DayAheadPriceDKK: 280 }
+          ] })
+        : JSON.stringify({ time: 1786700000, states: [
+            ["abc", "TEST123", null, null, null, 12.5, 55.7, 1000, false, 90, 45]
+          ] });
+      return Promise.resolve({ status: 200, url, body });
+    },
+    _netUdpOpen() { return 1; },
+    _netTcpConnect() { return 1; },
+    _netTcpListen() { return 1; },
+    _netOn() {},
+    _netSend() { return 0; },
+    _netClose() {},
     _qrMatrix(value) {
       assert.equal(typeof value, "string");
       assert.ok(value.length > 0);

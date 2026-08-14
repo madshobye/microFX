@@ -1,1 +1,1 @@
-{"title":"Energy Clock","description":"24-hour DK2 electricity-price clock with an SD-safe fallback snapshot","bundled":true,"category":"data","dataSource":"Energinet Elspotprices through the platform data adapter"}
+{"title":"Energy Clock","description":"24-hour DK2 electricity-price clock with an SD-safe fallback snapshot","bundled":true,"category":"data","dataSource":"Energinet DayAheadPrices through direct JavaScript fetch"}
