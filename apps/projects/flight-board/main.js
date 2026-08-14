@@ -38,7 +38,7 @@ const map = scene.add(fx.tileMap({
     grayscale: 1,
     invert: 1,
     contrast: 1.35,
-    brightness: 0.95,
+    brightness: 0.84,
     tint: 0x505a64ff
   }
 }));
