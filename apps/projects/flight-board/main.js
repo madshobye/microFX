@@ -28,13 +28,17 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
     marker.add(fx.sdfRoundedRect(0, 0, 20, 5 - segment,
       (5 - segment) * 0.5, 0x38bce8ff)
       .opacity(0.8 - segment * 0.2)));
-  marker.add(fx.sdfCircle(0, 0, 10, 0xffd55aff));
+  const dot = marker.add(fx.sdfCircle(0, 0, 10, 0xffd55aff));
+  const rotor = marker.add(fx.sdfRoundedRect(0, 0, 27, 4, 2, 0x7ee5ffff)
+    .visible(false));
   const label = fx.text("---", 0, 0, 18, 0xffffffff).antialias(false);
   scene.add(marker);
   scene.add(label);
   return {
-    id: "", callsign: "", active: false, onGround: false, marker, trail, label,
+    id: "", callsign: "", active: false, onGround: false, rotorcraft: false,
+    marker, trail, dot, rotor, label,
     labelX: NaN, labelY: NaN,
+    positionTime: 0,
     currentX: 0, currentY: 0, velocityX: 0, velocityY: 0,
     correctionX: 0, correctionY: 0, correctionRemaining: 0
   };
@@ -126,17 +130,21 @@ function screenVelocity(item) {
   };
 }
 
-function setHeading(slot, heading) {
+function setHeading(slot, heading, speed) {
     const angle = heading * Math.PI / 180;
     const trailAngle = angle - Math.PI / 2;
+    const trailScale = clamp(speed / 130, 0.3, 1.5);
     // Group children use absolute retained coordinates. Return the group to
     // its local origin before rebuilding its heading-relative trail layout.
     slot.marker.position(0, 0);
     slot.trail.forEach((segment, index) => {
-    const distance = 45 + index * 27;
-    segment.position(-Math.sin(angle) * distance,
-                     Math.cos(angle) * distance).rotation(trailAngle);
+      const distance = (34 + index * 25) * trailScale;
+      const speedThreshold = 15 + index * 45;
+      segment.position(-Math.sin(angle) * distance,
+                       Math.cos(angle) * distance).rotation(trailAngle)
+        .visible(!slot.rotorcraft && speed >= speedThreshold);
     });
+    slot.rotor.rotation(trailAngle);
     slot.marker.position(slot.currentX, slot.currentY);
 }
 
@@ -155,30 +163,35 @@ function applyFlights(values, live) {
     const x = mapX(item.longitude);
     const y = mapY(item.latitude);
     const velocity = screenVelocity(item);
-    const wasActive = slot.active;
+    const sameAircraft = slot.active && slot.id === item.id;
+    const positionTime = Number(item.positionTime || 0);
+    const hasFreshPosition = !sameAircraft || positionTime > slot.positionTime;
     slot.id = item.id;
     slot.callsign = item.callsign || `AIRCRAFT ${index + 1}`;
     slot.onGround = Boolean(item.onGround);
-    if (wasActive) {
+    slot.rotorcraft = Boolean(item.rotorcraft);
+    if (sameAircraft && hasFreshPosition) {
       slot.correctionX = x - slot.currentX;
       slot.correctionY = y - slot.currentY;
       slot.correctionRemaining = CORRECTION_SECONDS;
-    } else {
+    } else if (!sameAircraft) {
       slot.currentX = x;
       slot.currentY = y;
       slot.correctionX = 0;
       slot.correctionY = 0;
       slot.correctionRemaining = 0;
     }
+    if (hasFreshPosition) slot.positionTime = positionTime;
     slot.velocityX = velocity.x;
     slot.velocityY = velocity.y;
     slot.active = true;
     slot.marker.visible(true).position(slot.currentX, slot.currentY);
-    slot.trail.forEach(segment => segment.visible(!slot.onGround));
+    slot.dot.color(slot.rotorcraft ? 0x143347ff : 0xffd55aff);
+    slot.rotor.visible(slot.rotorcraft);
     slot.label.visible(!slot.onGround).text(labelText(slot));
     positionLabel(slot);
     if (!slot.onGround) queueRoute(slot.callsign);
-    setHeading(slot, item.heading);
+    setHeading(slot, item.heading, item.velocity);
   });
 
   flights.forEach(slot => {
@@ -187,6 +200,8 @@ function applyFlights(values, live) {
     slot.id = "";
     slot.callsign = "";
     slot.onGround = false;
+    slot.rotorcraft = false;
+    slot.positionTime = 0;
     slot.marker.visible(false);
     slot.label.visible(false);
   });
@@ -217,8 +232,10 @@ function normalizeFlights(payload) {
         longitude: Number(row[5]) + eastMetres /
           (111320 * Math.max(0.2, Math.cos(latitude * Math.PI / 180))),
         latitude: latitude + northMetres / 111320,
+        positionTime: Number(row[3] || snapshotTime),
         velocity,
         heading,
+        rotorcraft: Number(row[17]) === 8,
         onGround: Boolean(row[8])
       };
     });
@@ -252,6 +269,8 @@ applyFlights(fallback.flights.map((item, index) => ({
   latitude: Number(item.latitude),
   velocity: Math.max(0, Number(item.speed || 0)),
   heading: Number(item.heading || 0),
+  positionTime: 0,
+  rotorcraft: false,
   onGround: false
 })), false);
 requestFlights();
