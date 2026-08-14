@@ -534,8 +534,26 @@
       if (method !== "GET") {
         return Promise.reject(new TypeError("microFX fetch currently supports GET only"));
       }
+      const sourceHeaders = options && options.headers;
+      const entries = !sourceHeaders ? [] : Array.isArray(sourceHeaders) ?
+        sourceHeaders : Object.entries(sourceHeaders);
+      if (entries.length > 32) {
+        return Promise.reject(new RangeError("microFX fetch supports at most 32 headers"));
+      }
+      const headerLines = [];
+      for (const entry of entries) {
+        if (!Array.isArray(entry) || entry.length !== 2) {
+          return Promise.reject(new TypeError("fetch headers must contain name/value pairs"));
+        }
+        const name = String(entry[0]);
+        const value = String(entry[1]);
+        if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || /[\r\n]/.test(value)) {
+          return Promise.reject(new TypeError("fetch header name or value is invalid"));
+        }
+        headerLines.push(`${name}: ${value}`);
+      }
       return Promise.resolve()
-        .then(() => fx._netFetch(String(input)))
+        .then(() => fx._netFetch(String(input), headerLines.join("\n")))
         .then(raw => new MicroFxResponse(raw));
     }
 

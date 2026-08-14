@@ -28,9 +28,9 @@ function summary(name, report) {
 
 const projects = readdirSync(join(apps, "projects"), { withFileTypes: true })
   .filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
-assert.equal(projects.length, 11, "expected eleven selectable project folders");
+assert.equal(projects.length, 12, "expected twelve selectable project folders");
 
-for (const name of ["energy-clock", "flight-board"]) {
+for (const name of ["energy-clock", "flight-board", "train-board"]) {
   const source = readFileSync(join(apps, "projects", name, "main.js"), "utf8");
   assert.match(source, /\bfetch\s*\(/, `${name}: direct fetch missing`);
   assert.doesNotMatch(source, /fx\.feed\s*\(/, `${name}: legacy snapshot feed remains`);

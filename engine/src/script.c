@@ -920,7 +920,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
         free(source);free(script);return NULL;
     }
     script->scene=scene; script->runtime=JS_NewRuntime(); script->context=JS_NewContext(script->runtime);
-    JS_SetMemoryLimit(script->runtime, 16*1024*1024);
+    JS_SetMemoryLimit(script->runtime, 32*1024*1024);
     JS_SetMaxStackSize(script->runtime, 512*1024);
     JS_SetContextOpaque(script->context,script);
     JSValue global=JS_GetGlobalObject(script->context);

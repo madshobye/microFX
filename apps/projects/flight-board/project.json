@@ -1,1 +1,1 @@
-{"title":"Copenhagen Flight Board","description":"Live Copenhagen airspace over a georeferenced city map with cached route labels","bundled":true,"category":"data","dataSource":"OpenSky state vectors and ADSBDB callsign routes through direct JavaScript fetch"}
+{"title":"Copenhagen Movement Map","description":"Planes and trains moving across Copenhagen using live and scheduled public data","bundled":true,"category":"data","dataSource":"ADSB.fi, Transitous, Rejseplanen, OpenStreetMap and optional AISStream data"}

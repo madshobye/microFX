@@ -86,6 +86,15 @@ function instrumentedNativeFx(root, capacities) {
             alt_baro: 1000, gs: 90, track: 45, seen_pos: 0.2,
             category: "A1", t: "C172", desc: "CESSNA 172 Skyhawk"
           }] })
+        : url.includes("api.transitous.org")
+        ? JSON.stringify([{
+            trips: [{ tripId: "test-train", displayName: "A" }],
+            mode: "SUBURBAN", realTime: true,
+            departure: new Date(Date.now() - 60000).toISOString(),
+            arrival: new Date(Date.now() + 60000).toISOString(),
+            from: { name: "Nørreport" }, to: { name: "Østerport" },
+            polyline: "{qhaI_p`vAq@o@q@o@"
+          }])
         : "tile";
       const bodyBytes = new TextEncoder().encode(body).buffer;
       return Promise.resolve({ status: 200, url, body, bodyBytes });

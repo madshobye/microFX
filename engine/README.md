@@ -113,7 +113,7 @@ relative offset. Both are fluent and return the same object.
 | `scene.add(elementOrGroup)` | Record explicit membership and return the element or group |
 | `scene.show()` | Select a scene for the current frame |
 | `configure(settings)` | Set startup output/FPS policy from the application |
-| `fetch(url)` / `fx.net.fetch(url)` | Non-blocking HTTP(S) GET with text, JSON, and ArrayBuffer responses |
+| `fetch(url, { headers })` / `fx.net.fetch(url, { headers })` | Non-blocking HTTP(S) GET with optional request headers and text, JSON, and ArrayBuffer responses |
 | `tileMap(options)` | Cached XYZ raster map with Mercator projection and a GPU color filter |
 | `tileMap.project(lon,lat)` | Project geographic coordinates into the design canvas |
 | `tileMap.center(...)` / `zoom(...)` | Atomically prepare a replacement map texture |
@@ -242,7 +242,7 @@ font or a fifth distinct face is a visible fatal asset error rather than an
 implicit fallback.
 
 Current limits are 256 SDF elements, 512 quad elements, 256 mesh elements, 32 text elements of 127
-bytes each, four font faces, 16 image elements/textures, a 16 MiB JS heap, and a 512 KiB JS stack. A script exception is fatal
+bytes each, four font faces, 16 image elements/textures, a 32 MiB JS heap, and a 512 KiB JS stack. A script exception is fatal
 by design so a bad remote revision remains visible through independent SSH
 rather than silently changing behavior.
 

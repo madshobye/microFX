@@ -50,7 +50,7 @@ Cube outlines are baked into the same VBO. Per-fragment procedural outlines,
 separate line passes and full-screen layered effects have all exceeded the frame
 budget on this GPU.
 
-QuickJS is statically embedded with a 16 MiB heap limit and 512 KiB stack. The
+QuickJS is statically embedded with a 32 MiB heap limit and 512 KiB stack. The
 implemented JS API uses a cheap retained quad/geometry batch for ordinary
 rectangles, gradients and circles. Experimental SDF circles and rounded
 rectangles remain an explicit second batch. Elements update by handle; each

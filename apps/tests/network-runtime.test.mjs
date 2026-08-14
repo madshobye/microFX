@@ -12,12 +12,16 @@ function networkContext() {
   const callbacks = new Map();
   const sends = [];
   const tiles = [];
+  const requests = [];
   let nextHandle = 1;
   const fx = {
     width: 1920,
     height: 1080,
-    _netFetch: async url => ({ status: 200, url, body: '{"answer":42}',
-      bodyBytes: Uint8Array.from([1, 2, 3]).buffer }),
+    _netFetch: async (url, headers) => {
+      requests.push({ url, headers });
+      return { status: 200, url, body: '{"answer":42}',
+        bodyBytes: Uint8Array.from([1, 2, 3]).buffer };
+    },
     _netUdpOpen: () => nextHandle++,
     _netTcpConnect: () => nextHandle++,
     _netTcpListen: () => nextHandle++,
@@ -44,13 +48,15 @@ function networkContext() {
   };
   const context = vm.createContext({ fx, console });
   vm.runInContext(runtime, context, { filename: "retained.js" });
-  return { context, callbacks, sends, tiles };
+  return { context, callbacks, sends, tiles, requests };
 }
 
 test("fetch exposes a standard response surface", async () => {
-  const { context } = networkContext();
+  const { context, requests } = networkContext();
   const result = await vm.runInContext(`
-    fetch("https://example.test/data").then(async response => ({
+    fetch("https://example.test/data", {
+      headers: { "User-Agent": "microFX-test/1 (+https://example.test)" }
+    }).then(async response => ({
       ok: response.ok,
       status: response.status,
       body: await response.json(),
@@ -61,6 +67,8 @@ test("fetch exposes a standard response surface", async () => {
   assert.equal(result.status, 200);
   assert.equal(result.body.answer, 42);
   assert.deepEqual(Array.from(result.bytes), [1, 2, 3]);
+  assert.equal(requests[0].headers,
+    "User-Agent: microFX-test/1 (+https://example.test)");
 });
 
 test("UDP and TCP wrappers carry bytes and peer metadata", () => {

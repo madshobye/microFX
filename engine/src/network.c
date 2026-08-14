@@ -20,6 +20,7 @@ typedef enum { NET_UNUSED, NET_UDP, NET_TCP_CONNECTING, NET_TCP, NET_TCP_LISTENE
 
 typedef struct {
     CURL *easy;
+    struct curl_slist *headers;
     char *body;
     size_t size;
     size_t capacity;
@@ -205,25 +206,53 @@ static JSValue Fetch(JSContext *ctx,JSValueConst thisValue,int argc,
 {
     (void)thisValue;(void)magic;
     MicroFxNetwork *network=FromData(ctx,data);
-    if(!network||argc!=1)return JS_ThrowTypeError(ctx,"fetch(url) requires one URL");
+    if(!network||argc<1||argc>2)return JS_ThrowTypeError(ctx,"fetch(url, headers) requires a URL and optional headers");
     const char *url=JS_ToCString(ctx,argv[0]);
     if(!url)return JS_EXCEPTION;
     if(strncmp(url,"http://",7)!=0&&strncmp(url,"https://",8)!=0){
         JS_FreeCString(ctx,url);
         return JS_ThrowTypeError(ctx,"fetch URL must use http:// or https://");
     }
+    struct curl_slist *headers=NULL;
+    if(argc==2&&!JS_IsUndefined(argv[1])){
+        const char *lines=JS_ToCString(ctx,argv[1]);
+        if(!lines){JS_FreeCString(ctx,url);return JS_EXCEPTION;}
+        size_t length=strlen(lines);
+        if(length>8192||strchr(lines,'\r')){
+            JS_FreeCString(ctx,lines);JS_FreeCString(ctx,url);
+            return JS_ThrowRangeError(ctx,"fetch headers exceed 8 KiB or contain a carriage return");
+        }
+        char *copy=strdup(lines);JS_FreeCString(ctx,lines);
+        if(!copy){JS_FreeCString(ctx,url);return JS_ThrowOutOfMemory(ctx);}
+        char *cursor=NULL;char *line=strtok_r(copy,"\n",&cursor);int count=0;
+        while(line){
+            if(++count>32||line[0]=='\0'||line[0]==':'||!strchr(line,':')){
+                free(copy);curl_slist_free_all(headers);JS_FreeCString(ctx,url);
+                return JS_ThrowTypeError(ctx,"fetch headers are invalid or exceed 32 fields");
+            }
+            struct curl_slist *next=curl_slist_append(headers,line);
+            if(!next){
+                free(copy);curl_slist_free_all(headers);JS_FreeCString(ctx,url);
+                return JS_ThrowOutOfMemory(ctx);
+            }
+            headers=next;line=strtok_r(NULL,"\n",&cursor);
+        }
+        free(copy);
+    }
     HttpRequest *request=NULL;
     for(int i=0;i<HTTP_LIMIT;i++)if(!network->http[i].easy){request=&network->http[i];break;}
-    if(!request){JS_FreeCString(ctx,url);return JS_ThrowRangeError(ctx,"maximum 4 HTTP requests in flight");}
+    if(!request){curl_slist_free_all(headers);JS_FreeCString(ctx,url);return JS_ThrowRangeError(ctx,"maximum 4 HTTP requests in flight");}
     JSValue functions[2];
     JSValue promise=JS_NewPromiseCapability(ctx,functions);
-    if(JS_IsException(promise)){JS_FreeCString(ctx,url);return promise;}
+    if(JS_IsException(promise)){curl_slist_free_all(headers);JS_FreeCString(ctx,url);return promise;}
     request->easy=curl_easy_init();
     if(!request->easy){
         JS_FreeValue(ctx,functions[0]);JS_FreeValue(ctx,functions[1]);JS_FreeValue(ctx,promise);
-        JS_FreeCString(ctx,url);return JS_ThrowInternalError(ctx,"HTTP initialization failed");
+        curl_slist_free_all(headers);JS_FreeCString(ctx,url);
+        return JS_ThrowInternalError(ctx,"HTTP initialization failed");
     }
     request->resolve=functions[0];request->reject=functions[1];
+    request->headers=headers;
     curl_easy_setopt(request->easy,CURLOPT_URL,url);
     curl_easy_setopt(request->easy,CURLOPT_FOLLOWLOCATION,1L);
     curl_easy_setopt(request->easy,CURLOPT_MAXREDIRS,5L);
@@ -233,6 +262,7 @@ static JSValue Fetch(JSContext *ctx,JSValueConst thisValue,int argc,
     curl_easy_setopt(request->easy,CURLOPT_PROTOCOLS_STR,"http,https");
     curl_easy_setopt(request->easy,CURLOPT_REDIR_PROTOCOLS_STR,"http,https");
     curl_easy_setopt(request->easy,CURLOPT_USERAGENT,"microFX/1");
+    if(request->headers)curl_easy_setopt(request->easy,CURLOPT_HTTPHEADER,request->headers);
     curl_easy_setopt(request->easy,CURLOPT_CAINFO,"/etc/ssl/certs/ca-certificates.crt");
     curl_easy_setopt(request->easy,CURLOPT_WRITEFUNCTION,WriteBody);
     curl_easy_setopt(request->easy,CURLOPT_WRITEDATA,request);
@@ -243,6 +273,7 @@ static JSValue Fetch(JSContext *ctx,JSValueConst thisValue,int argc,
     JS_FreeCString(ctx,url);
     if(added!=CURLM_OK){
         curl_easy_cleanup(request->easy);request->easy=NULL;
+        curl_slist_free_all(request->headers);request->headers=NULL;
         JS_FreeValue(ctx,request->resolve);JS_FreeValue(ctx,request->reject);
         JS_FreeValue(ctx,promise);
         return JS_ThrowInternalError(ctx,"HTTP request could not be queued");
@@ -525,7 +556,8 @@ static bool PumpHttp(MicroFxNetwork *network)
         JS_FreeValue(network->context,argument);
         bool ok=!JS_IsException(result);JS_FreeValue(network->context,result);
         curl_multi_remove_handle(network->multi,request->easy);curl_easy_cleanup(request->easy);
-        request->easy=NULL;free(request->body);request->body=NULL;request->size=0;request->capacity=0;request->overflow=false;request->error[0]='\0';
+        request->easy=NULL;curl_slist_free_all(request->headers);request->headers=NULL;
+        free(request->body);request->body=NULL;request->size=0;request->capacity=0;request->overflow=false;request->error[0]='\0';
         JS_FreeValue(network->context,request->resolve);JS_FreeValue(network->context,request->reject);request->resolve=JS_UNDEFINED;request->reject=JS_UNDEFINED;
         if(!ok)return false;
     }
@@ -611,7 +643,7 @@ MicroFxNetwork *MicroFxNetworkCreate(JSContext *context,JSValueConst fx)
     if(curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK||(network->multi=curl_multi_init())==NULL){free(network);return NULL;}
     network->websocketContext=lws_create_context(&websocketInfo);
     if(!network->websocketContext){curl_multi_cleanup(network->multi);curl_global_cleanup();free(network);return NULL;}
-    JS_SetPropertyStr(context,(JSValue)fx,"_netFetch",Bind(network,Fetch,1));
+    JS_SetPropertyStr(context,(JSValue)fx,"_netFetch",Bind(network,Fetch,2));
     JS_SetPropertyStr(context,(JSValue)fx,"_netUdpOpen",Bind(network,UdpOpen,2));
     JS_SetPropertyStr(context,(JSValue)fx,"_netTcpConnect",Bind(network,TcpOpen,2));
     JS_SetPropertyStr(context,(JSValue)fx,"_netWebSocketConnect",Bind(network,WebSocketConnect,1));
@@ -638,7 +670,7 @@ void MicroFxNetworkDestroy(MicroFxNetwork *network)
 {
     if(!network)return;
     network->destroying=true;
-    for(int i=0;i<HTTP_LIMIT;i++)if(network->http[i].easy){curl_multi_remove_handle(network->multi,network->http[i].easy);curl_easy_cleanup(network->http[i].easy);free(network->http[i].body);JS_FreeValue(network->context,network->http[i].resolve);JS_FreeValue(network->context,network->http[i].reject);}
+    for(int i=0;i<HTTP_LIMIT;i++)if(network->http[i].easy){curl_multi_remove_handle(network->multi,network->http[i].easy);curl_easy_cleanup(network->http[i].easy);curl_slist_free_all(network->http[i].headers);free(network->http[i].body);JS_FreeValue(network->context,network->http[i].resolve);JS_FreeValue(network->context,network->http[i].reject);}
     for(int i=0;i<SOCKET_LIMIT;i++)if(network->sockets[i].kind!=NET_UNUSED)CloseSocket(network,&network->sockets[i]);
     lws_context_destroy(network->websocketContext);
     for(int i=0;i<WEBSOCKET_LIMIT;i++)ResetWebSocket(&network->websockets[i]);

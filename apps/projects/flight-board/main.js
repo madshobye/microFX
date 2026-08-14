@@ -24,6 +24,13 @@ const CORRECTION_SECONDS = 8;
 const MAX_FLIGHTS = 50;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
+const TRANSIT_POLL_SECONDS = 30;
+const MAX_TRANSIT = 80;
+const TRANSIT_MODES = new Set(["LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN"]);
+const METRO_MODES = new Set(["SUBWAY"]);
+const TRANSIT_URL = "https://api.transitous.org/api/v6/map/trips";
+const TRANSIT_USER_AGENT =
+  "microFX-copenhagen-map/0.1 (+https://github.com/madshobye/microFX)";
 const AIS_API_KEY = fx.secret("AISSTREAM_API_KEY", "");
 const AIS_URL = "wss://stream.aisstream.io/v0/stream";
 const DATA_URL = `https://opendata.adsb.fi/api/v3/lat/${PLACE.airport.latitude}` +
@@ -74,8 +81,9 @@ const map = scene.add(fx.tileMap({
     tint: 0xffffffff
   }
 }));
-scene.add(fx.text(`${PLACE.label} AIRSPACE`, 55, 45, 28, 0x7ee5ffff));
-scene.add(fx.text(AIS_API_KEY ? "ADSB.FI · AISSTREAM.IO" : "ADSB.FI",
+scene.add(fx.text(PLACE.label, 55, 45, 28, 0x7ee5ffff));
+scene.add(fx.text(AIS_API_KEY ? "ADSB.FI · TRANSITOUS · AISSTREAM.IO" :
+  "ADSB.FI · TRANSITOUS",
   55, 1044, 11, 0x35495eff)
   .antialias(false));
 scene.add(fx.text("© OPENSTREETMAP CONTRIBUTORS · © CARTO",
@@ -117,6 +125,16 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
   };
 });
 
+const transit = Array.from({ length: MAX_TRANSIT }, () => {
+  const marker = scene.add(fx.sdfRoundedRect(0, 0, 18, 6, 3,
+    0x65e6ffff).visible(false));
+  return {
+    id: "", mode: "", active: false, marker,
+    path: [], cumulative: [], total: 0, pathIndex: 1,
+    departure: 0, arrival: 0, parked: false
+  };
+});
+
 const ships = AIS_API_KEY ? Array.from({ length: MAX_SHIPS }, () => {
   const outline = scene.add(fx.outline(SHIP_SHAPE, 0, 0, 12, 1.5,
     0x7ee5ffff, { closed: true }).visible(false));
@@ -137,6 +155,8 @@ let nextRouteRequestTime = 0;
 let aisSocket = null;
 let nextAisConnectTime = 0;
 const shipDetails = new Map();
+let transitRequestInFlight = false;
+let nextTransitRequestTime = 0;
 
 function labelText(slot) {
   const route = routeCache.get(slot.callsign);
@@ -527,6 +547,183 @@ function connectAis() {
   socket.onError(disconnected);
 }
 
+function decodeTransitPath(value) {
+  const points = [];
+  let index = 0;
+  let latitude = 0;
+  let longitude = 0;
+  while (index < value.length) {
+    let result = 0;
+    let shift = 0;
+    let byte = 0;
+    do {
+      byte = value.charCodeAt(index++) - 63;
+      result |= (byte & 31) << shift;
+      shift += 5;
+    } while (byte >= 32 && index < value.length);
+    latitude += result & 1 ? ~(result >> 1) : result >> 1;
+    result = 0;
+    shift = 0;
+    do {
+      byte = value.charCodeAt(index++) - 63;
+      result |= (byte & 31) << shift;
+      shift += 5;
+    } while (byte >= 32 && index < value.length);
+    longitude += result & 1 ? ~(result >> 1) : result >> 1;
+    points.push(mapPoint(longitude / 10000, latitude / 10000));
+  }
+  return points;
+}
+
+function transitPath(segment) {
+  const path = decodeTransitPath(segment.polyline);
+  const cumulative = [0];
+  let total = 0;
+  for (let index = 1; index < path.length; index++) {
+    const dx = path[index].x - path[index - 1].x;
+    const dy = path[index].y - path[index - 1].y;
+    total += Math.sqrt(dx * dx + dy * dy);
+    cumulative.push(total);
+  }
+  return { path, cumulative, total };
+}
+
+function normalizeTransit(payload, now, modes) {
+  const grouped = new Map();
+  payload.forEach(segment => {
+    const trip = segment && segment.trips && segment.trips[0];
+    if (!trip || !trip.tripId || !segment.polyline ||
+        !modes.has(segment.mode)) return;
+    if (!grouped.has(trip.tripId)) grouped.set(trip.tripId, []);
+    grouped.get(trip.tripId).push(segment);
+  });
+  const result = [];
+  grouped.forEach((segments, id) => {
+    segments.sort((a, b) => Date.parse(a.departure) - Date.parse(b.departure));
+    let selected = segments.find(value => Date.parse(value.departure) <= now &&
+      Date.parse(value.arrival) >= now);
+    let parked = false;
+    if (!selected) {
+      for (let index = 1; index < segments.length; index++) {
+        const previous = Date.parse(segments[index - 1].arrival);
+        const next = Date.parse(segments[index].departure);
+        if (previous <= now && next >= now && next - previous <= 10 * 60 * 1000) {
+          selected = segments[index - 1];
+          parked = true;
+          break;
+        }
+      }
+    }
+    if (!selected) return;
+    const metrics = transitPath(selected);
+    if (metrics.path.length < 2 || metrics.total < 0.1) return;
+    result.push({
+      id, mode: selected.mode, parked,
+      departure: Date.parse(selected.departure),
+      arrival: Date.parse(selected.arrival),
+      path: metrics.path, cumulative: metrics.cumulative, total: metrics.total
+    });
+  });
+  return result.slice(0, MAX_TRANSIT);
+}
+
+function styleTransit(slot, mode) {
+  slot.mode = mode;
+  if (mode === "SUBWAY") {
+    slot.marker.shape("circle", 6, 6, 3).color(0xffd55aff);
+  } else if (mode === "LONG_DISTANCE") {
+    slot.marker.shape("rounded", 19, 5, 2.5).color(0x65e6ffff);
+  } else if (mode === "REGIONAL_RAIL") {
+    slot.marker.shape("rounded", 17, 5, 2.5).color(0x65e6ffff);
+  } else {
+    slot.marker.shape("rounded", 14, 4, 2).color(0x65e6ffff);
+  }
+}
+
+function applyTransit(values) {
+  const assigned = new Set();
+  values.forEach(value => {
+    let slot = transit.find(candidate => candidate.active && candidate.id === value.id &&
+      !assigned.has(candidate));
+    if (!slot) slot = transit.find(candidate => !candidate.active && !assigned.has(candidate));
+    if (!slot) return;
+    assigned.add(slot);
+    slot.id = value.id;
+    slot.active = true;
+    slot.path = value.path;
+    slot.cumulative = value.cumulative;
+    slot.total = value.total;
+    slot.pathIndex = 1;
+    slot.departure = value.departure;
+    slot.arrival = value.arrival;
+    slot.parked = value.parked;
+    styleTransit(slot, value.mode);
+    slot.marker.visible(true);
+  });
+  transit.forEach(slot => {
+    if (assigned.has(slot)) return;
+    slot.active = false;
+    slot.id = "";
+    slot.marker.visible(false);
+  });
+}
+
+function requestTransit() {
+  if (transitRequestInFlight) return;
+  transitRequestInFlight = true;
+  const now = Date.now();
+  const start = encodeURIComponent(new Date(now - 5000).toISOString());
+  const end = encodeURIComponent(new Date(now + 5000).toISOString());
+  const trainUrl = `${TRANSIT_URL}?zoom=8&min=55.36,13.18&max=55.98,12.10` +
+    `&startTime=${start}&endTime=${end}&precision=4`;
+  const metroUrl = `${TRANSIT_URL}?zoom=9&min=55.64,12.63&max=55.73,12.50` +
+    `&startTime=${start}&endTime=${end}&precision=4`;
+  const headers = { "User-Agent": TRANSIT_USER_AGENT };
+  Promise.all([fetch(trainUrl, { headers }), fetch(metroUrl, { headers })])
+    .then(responses => Promise.all(responses.map(response => {
+      if (!response.ok) throw new Error(`Transitous HTTP ${response.status}`);
+      return response.json();
+    })))
+    .then(payloads => {
+      if (!payloads.every(Array.isArray)) throw new Error("invalid Transitous response");
+      const now = Date.now();
+      const trains = normalizeTransit(payloads[0], now, TRANSIT_MODES);
+      const metro = normalizeTransit(payloads[1], now, METRO_MODES);
+      applyTransit(trains.concat(metro).slice(0, MAX_TRANSIT));
+      transitRequestInFlight = false;
+      nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
+    })
+    .catch(error => {
+      fx.log(`TRANSITOUS ${error.message || error}`);
+      transitRequestInFlight = false;
+      nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
+    });
+}
+
+function positionTransit(slot, now) {
+  const progress = slot.parked ? 1 : clamp(
+    (now - slot.departure) / Math.max(1, slot.arrival - slot.departure), 0, 1);
+  const target = slot.total * progress;
+  while (slot.pathIndex < slot.cumulative.length - 1 &&
+         slot.cumulative[slot.pathIndex] < target) slot.pathIndex++;
+  while (slot.pathIndex > 1 && slot.cumulative[slot.pathIndex - 1] > target) {
+    slot.pathIndex--;
+  }
+  const index = slot.pathIndex;
+  const previous = slot.path[index - 1];
+  const current = slot.path[index];
+  const base = slot.cumulative[index - 1];
+  const span = Math.max(0.001, slot.cumulative[index] - base);
+  const amount = clamp((target - base) / span, 0, 1);
+  const x = previous.x + (current.x - previous.x) * amount;
+  const y = previous.y + (current.y - previous.y) * amount;
+  const visible = x >= -20 && x <= 1940 && y >= -20 && y <= 1100;
+  slot.marker.position(x, y)
+    .rotation(slot.mode === "SUBWAY" ? 0 :
+      Math.atan2(current.y - previous.y, current.x - previous.x))
+    .visible(visible);
+}
+
 function requestFlights() {
   if (requestInFlight) return;
   requestInFlight = true;
@@ -549,11 +746,13 @@ function requestFlights() {
 }
 
 requestFlights();
+requestTransit();
 
 function update(time, delta) {
   clockTime = time;
   scene.show();
   if (!requestInFlight && time >= nextRequestTime) requestFlights();
+  if (!transitRequestInFlight && time >= nextTransitRequestTime) requestTransit();
   requestNextRoute();
   connectAis();
 
@@ -575,6 +774,11 @@ function update(time, delta) {
     slot.marker.position(slot.currentX, slot.currentY);
     updateTrail(slot);
     positionLabel(slot);
+  });
+
+  const now = Date.now();
+  transit.forEach(slot => {
+    if (slot.active) positionTransit(slot, now);
   });
 
   ships.forEach(slot => {
