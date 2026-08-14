@@ -333,6 +333,13 @@
     }
     return make2d(fx._image, arguments, { x, y, scale, kind: "image" });
   };
+  fx.backgroundImage = function backgroundImage(path, tint) {
+    if (arguments.length !== 2) {
+      throw new TypeError("backgroundImage(path, tint) requires exactly 2 arguments");
+    }
+    return make2d(fx._backgroundImage, arguments,
+                  { x: fx.width * 0.5, y: fx.height * 0.5, scale: 1, kind: "image" });
+  };
 
   fx.group = function group() {
     const result = retainedGroup();

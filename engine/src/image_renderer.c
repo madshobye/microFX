@@ -131,7 +131,10 @@ static void Rebuild(MicroFxImageRenderer *renderer,MicroFxScene *scene)
     for(int i=0;i<scene->imageCount;i++){
         const MicroFxImageElement *e=&scene->image[i];
         const Texture2D texture=renderer->textures[renderer->textureIndex[i]];
-        float width=texture.width*e->scale,height=texture.height*e->scale;
+        float scale=e->background?
+            fmaxf((float)MICROFX_DESIGN_WIDTH/texture.width,
+                  (float)MICROFX_DESIGN_HEIGHT/texture.height):e->scale;
+        float width=texture.width*scale,height=texture.height*scale;
         float left=-width*0.5f,right=width*0.5f;
         float top=-height*0.5f,bottom=height*0.5f;
         ImageVertex *v=&vertices[i*6];
@@ -166,7 +169,8 @@ static bool TextureFormatHasAlpha(int format)
 }
 
 bool MicroFxImageRendererDraw(MicroFxImageRenderer *renderer,
-                              MicroFxScene *scene,int width,int height)
+                              MicroFxScene *scene,int width,int height,
+                              bool background)
 {
     if(!renderer->program||scene->imageCount==0)return true;
     if(!ResolveTextures(renderer,scene))return false;
@@ -183,7 +187,7 @@ bool MicroFxImageRendererDraw(MicroFxImageRenderer *renderer,
     glActiveTexture(GL_TEXTURE0);
     for(int i=0;i<scene->imageCount;i++){
         const MicroFxImageElement *element=&scene->image[i];
-        if(!element->visible)continue;
+        if(!element->visible||element->background!=background)continue;
         const Texture2D texture=renderer->textures[renderer->textureIndex[i]];
         bool opaque=!TextureFormatHasAlpha(texture.format)&&
                     (element->tint&255)==255&&element->opacity>=0.999f;

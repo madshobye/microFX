@@ -75,6 +75,10 @@ int main(void)
     assert(MicroFxSceneSetText(&scene,text,"updated"));
     assert(strcmp(scene.text[0].text,"updated")==0 && scene.textDirty);
     scene.textDirty=false;
+    assert(MicroFxSceneMove(&scene,text,30,40,0.25f));
+    assert(scene.text[0].x==30 && scene.text[0].y==40 &&
+           scene.text[0].rotation==0.25f && scene.textDirty);
+    scene.textDirty=false;
     assert(MicroFxSceneSetTextFont(&scene,text,"/project/assets/display.ttf"));
     assert(strcmp(scene.text[0].fontPath,"/project/assets/display.ttf")==0);
     assert(scene.textDirty);
@@ -115,6 +119,9 @@ int main(void)
     assert(MicroFxSceneSetVisible(&scene,image,false));
     assert(!scene.image[0].visible && !scene.imageDirty);
     assert(MicroFxSceneAddImage(&scene,"",0,0,1,0xffffffff)<0);
+    int backgroundImage=MicroFxSceneAddBackgroundImage(
+        &scene,"/project/assets/map.png",0xffffffff);
+    assert(backgroundImage>=0 && scene.image[1].background);
     assert(MicroFxSceneAddImage(&scene,"bad.png",0,0,0,0xffffffff)<0);
 
     assert(!MicroFxSceneMove(&scene,cube,0,0,0));

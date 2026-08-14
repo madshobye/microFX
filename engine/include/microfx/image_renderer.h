@@ -20,7 +20,8 @@ typedef struct {
 
 bool MicroFxImageRendererInit(MicroFxImageRenderer *renderer);
 bool MicroFxImageRendererDraw(MicroFxImageRenderer *renderer,
-                              MicroFxScene *scene, int width, int height);
+                              MicroFxScene *scene, int width, int height,
+                              bool background);
 void MicroFxImageRendererDestroy(MicroFxImageRenderer *renderer);
 
 #endif

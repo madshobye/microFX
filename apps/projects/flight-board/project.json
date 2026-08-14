@@ -1,1 +1,1 @@
-{"title":"Copenhagen Flight Board","description":"Live regional airspace with an SD-safe fallback snapshot","bundled":true,"category":"data","dataSource":"OpenSky regional state vectors through direct JavaScript fetch"}
+{"title":"Copenhagen Flight Board","description":"Live Copenhagen airspace over a georeferenced city map with cached route labels","bundled":true,"category":"data","dataSource":"OpenSky state vectors and ADSBDB callsign routes through direct JavaScript fetch"}

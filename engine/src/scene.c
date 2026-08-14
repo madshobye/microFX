@@ -151,6 +151,12 @@ bool MicroFxSceneMove(MicroFxScene *scene, int handle, float x, float y,
         scene->quadDirty = true;
         return true;
     }
+    if (kind == MICROFX_HANDLE_TEXT && index >= 0 && index < scene->textCount) {
+        MicroFxTextElement *element = &scene->text[index];
+        element->x = x; element->y = y; element->rotation = rotation;
+        scene->textDirty = true;
+        return true;
+    }
     if (kind == MICROFX_HANDLE_IMAGE && index >= 0 && index < scene->imageCount) {
         MicroFxImageElement *element = &scene->image[index];
         element->x = x; element->y = y; element->rotation = rotation;
@@ -250,6 +256,16 @@ int MicroFxSceneAddImage(MicroFxScene *scene, const char *assetPath,
     element->tint = tint; element->opacity = 1.0f; element->visible = true;
     scene->imageDirty = true;
     return MICROFX_HANDLE_IMAGE | index;
+}
+
+int MicroFxSceneAddBackgroundImage(MicroFxScene *scene, const char *assetPath,
+                                   uint32_t tint)
+{
+    int handle=MicroFxSceneAddImage(scene,assetPath,
+                                    MICROFX_DESIGN_WIDTH*0.5f,
+                                    MICROFX_DESIGN_HEIGHT*0.5f,1.0f,tint);
+    if(handle>=0)scene->image[handle&MICROFX_HANDLE_INDEX_MASK].background=true;
+    return handle;
 }
 
 bool MicroFxSceneSetImageScale(MicroFxScene *scene, int handle, float scale)

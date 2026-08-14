@@ -10,7 +10,7 @@
 #define MICROFX_MAX_SDF_ELEMENTS 256
 #define MICROFX_MAX_QUAD_ELEMENTS 512
 #define MICROFX_MAX_MESH_ELEMENTS 256
-#define MICROFX_MAX_TEXT_ELEMENTS 32
+#define MICROFX_MAX_TEXT_ELEMENTS 64
 #define MICROFX_MAX_IMAGE_ELEMENTS 16
 #define MICROFX_MAX_TEXT_BYTES 128
 #define MICROFX_MAX_ASSET_PATH 256
@@ -93,6 +93,7 @@ typedef struct {
     float x;
     float y;
     float size;
+    float rotation;
     uint32_t color;
     float opacity;
     bool visible;
@@ -107,6 +108,7 @@ typedef struct {
     uint32_t tint;
     float opacity;
     bool visible;
+    bool background;
 } MicroFxImageElement;
 
 typedef struct {
@@ -210,6 +212,8 @@ int MicroFxSceneAddText(MicroFxScene *scene, const char *text, float x, float y,
                        float size, uint32_t color);
 int MicroFxSceneAddImage(MicroFxScene *scene, const char *assetPath,
                         float x, float y, float scale, uint32_t tint);
+int MicroFxSceneAddBackgroundImage(MicroFxScene *scene, const char *assetPath,
+                                  uint32_t tint);
 bool MicroFxSceneSetImageScale(MicroFxScene *scene, int handle, float scale);
 bool MicroFxSceneSetText(MicroFxScene *scene, int handle, const char *text);
 bool MicroFxSceneSetTextFont(MicroFxScene *scene, int handle,

@@ -12,7 +12,7 @@ for (const entry of readdirSync(join(apps, "projects"), { withFileTypes: true })
 for (const root of roots) {
   const script = root.endsWith("demo") ? join(root, "scripts", "main.js") : join(root, "main.js");
   const source = readFileSync(script, "utf8");
-  for (const match of source.matchAll(/fx\.(?:model|image|shader)\(\s*["']([^"']+)["']/g)) {
+  for (const match of source.matchAll(/fx\.(?:model|image|backgroundImage|shader)\(\s*["']([^"']+)["']/g)) {
     const requested = normalize(match[1]);
     assert.equal(requested.startsWith("assets/") && !requested.includes(".."), true,
       `${script}: unsafe asset path ${match[1]}`);

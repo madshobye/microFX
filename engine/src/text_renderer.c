@@ -1,4 +1,5 @@
 #include "microfx/text_renderer.h"
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,6 +65,13 @@ static void Vertex(TextVertex *out,float x,float y,float u,float v,const float *
     for(int i=0;i<4;i++)out->color[i]=color[i];
 }
 
+static void RotatedVertex(TextVertex *out,float x,float y,float originX,float originY,
+                          float cosine,float sine,float u,float v,const float *color)
+{
+    float dx=x-originX,dy=y-originY;
+    Vertex(out,originX+cosine*dx-sine*dy,originY+sine*dx+cosine*dy,u,v,color);
+}
+
 static bool ResolveFonts(MicroFxTextRenderer *renderer,MicroFxScene *scene)
 {
     for(int i=0;i<scene->textCount;i++){
@@ -107,6 +115,7 @@ static bool Rebuild(MicroFxTextRenderer *renderer,MicroFxScene *scene)
         Font font=renderer->fonts[renderer->fontIndex[t]];
         float scale=e->size/font.baseSize;
         float originX=e->x,x=originX,y=e->y,color[4];DecodeColor(color,e->color);
+        float cosine=cosf(e->rotation),sine=sinf(e->rotation);
         color[3]*=e->opacity;
         for(const unsigned char *p=(const unsigned char *)e->text;*p;p++){
             if(*p=='\n'){x=originX;y+=e->size*1.25f;continue;}
@@ -118,9 +127,12 @@ static bool Rebuild(MicroFxTextRenderer *renderer,MicroFxScene *scene)
             float u1=(rec.x+rec.width)/font.texture.width;
             float v1=(rec.y+rec.height)/font.texture.height;
             TextVertex *q=&vertices[cursor];
-            Vertex(&q[0],x0,y0,u0,v0,color);Vertex(&q[1],x1,y0,u1,v0,color);
-            Vertex(&q[2],x1,y1,u1,v1,color);Vertex(&q[3],x0,y0,u0,v0,color);
-            Vertex(&q[4],x1,y1,u1,v1,color);Vertex(&q[5],x0,y1,u0,v1,color);cursor+=6;
+            RotatedVertex(&q[0],x0,y0,originX,e->y,cosine,sine,u0,v0,color);
+            RotatedVertex(&q[1],x1,y0,originX,e->y,cosine,sine,u1,v0,color);
+            RotatedVertex(&q[2],x1,y1,originX,e->y,cosine,sine,u1,v1,color);
+            RotatedVertex(&q[3],x0,y0,originX,e->y,cosine,sine,u0,v0,color);
+            RotatedVertex(&q[4],x1,y1,originX,e->y,cosine,sine,u1,v1,color);
+            RotatedVertex(&q[5],x0,y1,originX,e->y,cosine,sine,u0,v1,color);cursor+=6;
             x+=(info.advanceX?info.advanceX:rec.width)*scale+e->size*.08f;
         }
         renderer->vertexCounts[t]=cursor-renderer->firstVertex[t];

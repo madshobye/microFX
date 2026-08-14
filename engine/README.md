@@ -100,6 +100,7 @@ relative offset. Both are fluent and return the same object.
 | `model.shader(fragmentPath)` | Select a project fragment shader with the built-in mesh vertex shader |
 | `model.shader(vertexPath,fragmentPath)` | Select project-local vertex and fragment shaders for this model |
 | `image(path,x,y,scale,tint)` | Load a bilinear-filtered image at native aspect ratio and uniform scale; other argument counts fail |
+| `backgroundImage(path,tint)` | Cover the 1920×1080 design canvas behind geometry while preserving the source aspect ratio |
 | `qr(value,x,y,size[,foreground,background])` | Add a retained QR code using ordinary quad geometry |
 | `camera(x,y,z,tx,ty,tz,fovY)` | Set retained perspective camera |
 | `text(value,x,y,size,color[,fontPath])` | Add retained atlas text with an optional project font |

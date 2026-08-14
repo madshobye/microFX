@@ -7,7 +7,7 @@ export const defaultCapacities = Object.freeze({
   sdf: 256,
   quad: 512,
   mesh: 256,
-  text: 32,
+  text: 64,
   image: 16
 });
 
@@ -100,6 +100,7 @@ function instrumentedNativeFx(root, capacities) {
     _sdfRoundedRect: add("sdf"),
     _text: add("text"),
     _image: add("image"),
+    _backgroundImage: add("image"),
     _imageScale(handle, scale) {
       return mutation("transform", handle, [scale]);
     },

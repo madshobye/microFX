@@ -638,6 +638,11 @@ int main(void)
         double beginEnd = GetTime();
         MicroFxQuadRendererDraw(&quadRenderer,&scriptScene,
                                DESIGN_WIDTH,DESIGN_HEIGHT,true);
+        if (!MicroFxImageRendererDraw(&imageRenderer, &scriptScene,
+                                      DESIGN_WIDTH, DESIGN_HEIGHT, true)) {
+            fprintf(stderr, "MICROFX_IMAGE fatal background asset or renderer failure\n");
+            break;
+        }
         if (synchronizedProfiling) glFinish();
         double backgroundEnd = GetTime();
         Matrix scriptView = { 0 };
@@ -680,7 +685,7 @@ int main(void)
         if (synchronizedProfiling) glFinish();
         double sdfEnd = GetTime();
         if (!MicroFxImageRendererDraw(&imageRenderer, &scriptScene,
-                                      DESIGN_WIDTH, DESIGN_HEIGHT)) {
+                                      DESIGN_WIDTH, DESIGN_HEIGHT, false)) {
             fprintf(stderr, "MICROFX_IMAGE fatal asset or renderer failure\n");
             break;
         }

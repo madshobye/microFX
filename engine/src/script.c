@@ -245,6 +245,23 @@ static JSValue AddImage(JSContext *ctx,JSValueConst thisValue,int argc,JSValueCo
                                           ColorArg(ctx,argv[4])));
 }
 
+static JSValue AddBackgroundImage(JSContext *ctx,JSValueConst thisValue,
+                                  int argc,JSValueConst *argv)
+{
+    (void)thisValue;
+    MicroFxScript *script=JS_GetContextOpaque(ctx);
+    if(argc!=2)return JS_ThrowTypeError(ctx,"backgroundImage(asset,tint) requires exactly 2 arguments");
+    const char *asset=JS_ToCString(ctx,argv[0]);
+    if(!asset)return JS_EXCEPTION;
+    char path[MICROFX_MAX_ASSET_PATH],error[128];
+    bool resolved=MicroFxResolveAsset(script->projectRoot,asset,path,sizeof(path),
+                                     error,sizeof(error));
+    JS_FreeCString(ctx,asset);
+    if(!resolved)return JS_ThrowReferenceError(ctx,"image asset rejected: %s",error);
+    return Handle(ctx,MicroFxSceneAddBackgroundImage(script->scene,path,
+                                                     ColorArg(ctx,argv[1])));
+}
+
 static JSValue SetImageScale(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
 {
     (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;double scale=0;
@@ -635,6 +652,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_shader",JS_NewCFunction(script->context,SetMeshShader,"_shader",3));
     JS_SetPropertyStr(script->context,fx,"_text",JS_NewCFunction(script->context,AddText,"_text",5));
     JS_SetPropertyStr(script->context,fx,"_image",JS_NewCFunction(script->context,AddImage,"_image",5));
+    JS_SetPropertyStr(script->context,fx,"_backgroundImage",JS_NewCFunction(script->context,AddBackgroundImage,"_backgroundImage",2));
     JS_SetPropertyStr(script->context,fx,"_imageScale",JS_NewCFunction(script->context,SetImageScale,"_imageScale",2));
     JS_SetPropertyStr(script->context,fx,"_setText",JS_NewCFunction(script->context,SetText,"_setText",2));
     JS_SetPropertyStr(script->context,fx,"_font",JS_NewCFunction(script->context,SetFont,"_font",2));
