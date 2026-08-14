@@ -188,6 +188,13 @@ int main() {
   cJSON_Delete(response);
 
   response = command(root, reload,
+      R"({"type":"asset.folder.create","project":"demo","path":"models/characters"})");
+  require_ok(response);
+  assert(string_value(response, "type") == "asset.folder");
+  cJSON_Delete(response);
+  assert(fs::is_directory(root / "projects/demo/assets/models/characters"));
+
+  response = command(root, reload,
       R"({"id":"get-asset","type":"asset.get","path":"images/pixel.png"})");
   require_ok(response);
   assert(string_value(response, "type") == "asset");
@@ -247,6 +254,9 @@ int main() {
   cJSON* assets = cJSON_GetObjectItemCaseSensitive(response, "assets");
   assert(cJSON_GetArraySize(assets) == 1);
   assert(string_value(cJSON_GetArrayItem(assets, 0), "path") == "images/pixel.png");
+  cJSON* folders = cJSON_GetObjectItemCaseSensitive(response, "folders");
+  assert(cJSON_IsArray(folders));
+  assert(cJSON_GetArraySize(folders) >= 2);
   cJSON_Delete(response);
 
   response = command(root, reload, R"({"type":"project.list"})");

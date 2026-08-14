@@ -166,7 +166,7 @@ static int AddMesh(MicroFxScene *scene, MicroFxMeshKind kind, float x, float y,
     int index = scene->meshCount++;
     scene->mesh[index] = (MicroFxMeshElement){
         .kind = kind, .position = { x, y, z }, .scale = scale,
-        .color = color, .visible = true
+        .color = color, .shaderIndex = -1, .visible = true
     };
     scene->meshGeometryDirty = true;
     scene->meshStateDirty = true;
@@ -375,6 +375,35 @@ bool MicroFxSceneSetEffect(MicroFxScene *scene, int handle, int effect,
     scene->mesh[index].effect[1] = amount;
     scene->mesh[index].effect[2] = scale;
     scene->meshStateDirty = true;
+    return true;
+}
+
+bool MicroFxSceneSetMeshShader(MicroFxScene *scene, int handle,
+                               const char *vertexPath,
+                               const char *fragmentPath)
+{
+    if ((handle & MICROFX_HANDLE_KIND_MASK) != MICROFX_HANDLE_MESH ||
+        !fragmentPath || !fragmentPath[0]) return false;
+    int elementIndex=handle & MICROFX_HANDLE_INDEX_MASK;
+    if(elementIndex<0||elementIndex>=scene->meshCount)return false;
+    const char *vertex=vertexPath?vertexPath:"";
+    int shaderIndex=-1;
+    for(int i=0;i<scene->meshShaderCount;i++){
+        if(strcmp(scene->meshShader[i].vertexPath,vertex)==0&&
+           strcmp(scene->meshShader[i].fragmentPath,fragmentPath)==0){
+            shaderIndex=i;break;
+        }
+    }
+    if(shaderIndex<0){
+        if(scene->meshShaderCount>=MICROFX_MAX_MESH_SHADERS)return false;
+        shaderIndex=scene->meshShaderCount++;
+        snprintf(scene->meshShader[shaderIndex].vertexPath,
+                 sizeof(scene->meshShader[shaderIndex].vertexPath),"%s",vertex);
+        snprintf(scene->meshShader[shaderIndex].fragmentPath,
+                 sizeof(scene->meshShader[shaderIndex].fragmentPath),"%s",fragmentPath);
+    }
+    scene->mesh[elementIndex].shaderIndex=shaderIndex;
+    scene->meshGeometryDirty=true;
     return true;
 }
 

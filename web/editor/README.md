@@ -21,7 +21,11 @@ response types, results, and latency without recording code or asset payloads.
 The **Check** button runs a read-only handshake, project-list, selected-project,
 and console pass and names the first failing stage.
 
-Retrieving a project loads `main.js` and the asset manifest. Asset transfers
+Retrieving a project loads `main.js`, the asset manifest, and the existing
+folder list. The Files panel can create an empty folder, upload individual
+files to a chosen relative destination, or upload a browser-selected directory
+while preserving its subfolders. This includes model textures and `.vs`/`.fs`
+shader assets; absolute paths and `..` traversal are rejected. Asset transfers
 use bounded base64 chunks rather than one large data-channel message. Uploads
 query their acknowledged offset before sending, so selecting the same file
 after a disconnect resumes the partial transfer. Studio also keeps an active

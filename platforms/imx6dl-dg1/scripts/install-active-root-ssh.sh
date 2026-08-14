@@ -40,6 +40,8 @@ stage_file "$OVERLAY/etc/init.d/S40canvas" etc/init.d/S40canvas 0755
 stage_file "$OVERLAY/etc/init.d/S40provision" etc/init.d/S40provision 0755
 stage_file "$OVERLAY/etc/init.d/S45status" etc/init.d/S45status 0755
 stage_file "$OVERLAY/usr/sbin/canvas-supervisor" usr/sbin/canvas-supervisor 0755
+stage_file "$OVERLAY/usr/sbin/microfx-benchmark-override" usr/sbin/microfx-benchmark-override 0755
+stage_file "$OVERLAY/usr/sbin/microfx-benchmark-capture" usr/sbin/microfx-benchmark-capture 0755
 stage_file "$OVERLAY/usr/sbin/microfx-status" usr/sbin/microfx-status 0755
 stage_file "$REPO_DIR/apps/onboarding/scripts/main.js" usr/share/microfx/onboarding.js 0644
 

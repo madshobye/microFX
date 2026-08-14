@@ -14,6 +14,7 @@
     { "name": "revision.get", "response": "revision", "access": "read", "safeCheck": false },
     { "name": "revision.restore", "response": "revision.restore", "access": "write", "safeCheck": false },
     { "name": "asset.upload.status", "response": "asset.upload", "access": "write", "safeCheck": false },
+    { "name": "asset.folder.create", "response": "asset.folder", "access": "write", "safeCheck": false },
     { "name": "asset.upload.chunk", "response": "asset.upload", "access": "write", "safeCheck": false },
     { "name": "asset.upload.commit", "response": "asset", "access": "write", "safeCheck": false },
     { "name": "asset.get.chunk", "response": "asset.chunk", "access": "read", "safeCheck": false },

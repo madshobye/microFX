@@ -2,6 +2,7 @@
 #include "microfx/assets.h"
 #include "microfx/identity.h"
 #include <quickjs/quickjs.h>
+#include <qrencode.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -103,6 +104,31 @@ static JSValue AddBackground(JSContext *ctx,JSValueConst thisValue,int argc,JSVa
                                                 ColorArg(ctx,argv[1])));
 }
 
+static JSValue QrMatrix(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;
+    if(argc!=1)return JS_ThrowTypeError(ctx,"qr(value,x,y,size[,foreground,background])");
+    const char *value=JS_ToCString(ctx,argv[0]);
+    if(!value)return JS_EXCEPTION;
+    QRcode *code=QRcode_encodeString8bit(value,0,QR_ECLEVEL_M);
+    JS_FreeCString(ctx,value);
+    if(!code)return JS_ThrowInternalError(ctx,"QR encoding failed");
+    size_t row=(size_t)code->width+1;
+    size_t length=row*(size_t)code->width;
+    char *matrix=malloc(length+1);
+    if(!matrix){QRcode_free(code);return JS_ThrowOutOfMemory(ctx);}
+    size_t cursor=0;
+    for(int y=0;y<code->width;y++){
+        for(int x=0;x<code->width;x++)
+            matrix[cursor++]=(code->data[y*code->width+x]&1)?'1':'0';
+        matrix[cursor++]='\n';
+    }
+    matrix[cursor]='\0';
+    JSValue result=JS_NewStringLen(ctx,matrix,cursor);
+    free(matrix);QRcode_free(code);
+    return result;
+}
+
 
 static JSValue AddPrimitive(JSContext *ctx, int argc, JSValueConst *argv,
                             MicroFxMeshKind kind, const char *signature)
@@ -155,6 +181,36 @@ static JSValue Transform(JSContext *ctx,JSValueConst thisValue,int argc,JSValueC
     if(argc<8||JS_ToInt32(ctx,&handle,argv[0]))return JS_ThrowTypeError(ctx,"transform(handle,x,y,z,rx,ry,rz,scale)");
     for(int i=0;i<7;i++)if(JS_ToFloat64(ctx,&v[i],argv[i+1]))return JS_ThrowTypeError(ctx,"transform arguments must be numbers");
     return JS_NewBool(ctx,MicroFxSceneTransform(script->scene,handle,v[0],v[1],v[2],v[3],v[4],v[5],v[6]));
+}
+
+static JSValue SetMeshShader(JSContext *ctx,JSValueConst thisValue,int argc,
+                             JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if((argc!=2&&argc!=3)||JS_ToInt32(ctx,&handle,argv[0]))
+        return JS_ThrowTypeError(ctx,"shader(handle,fragment) or shader(handle,vertex,fragment)");
+    const char *vertex=argc==3?JS_ToCString(ctx,argv[1]):NULL;
+    const char *fragment=JS_ToCString(ctx,argv[argc-1]);
+    if((argc==3&&!vertex)||!fragment){
+        if(vertex)JS_FreeCString(ctx,vertex);
+        if(fragment)JS_FreeCString(ctx,fragment);
+        return JS_EXCEPTION;
+    }
+    char vertexPath[MICROFX_MAX_ASSET_PATH]={0};
+    char fragmentPath[MICROFX_MAX_ASSET_PATH]={0};
+    char error[128];
+    bool resolvedFragment=MicroFxResolveAsset(script->projectRoot,fragment,
+        fragmentPath,sizeof(fragmentPath),error,sizeof(error));
+    bool resolvedVertex=argc!=3||MicroFxResolveAsset(script->projectRoot,vertex,
+        vertexPath,sizeof(vertexPath),error,sizeof(error));
+    if(vertex)JS_FreeCString(ctx,vertex);
+    JS_FreeCString(ctx,fragment);
+    if(!resolvedFragment||!resolvedVertex)
+        return JS_ThrowReferenceError(ctx,"mesh shader asset rejected: %s",error);
+    if(!MicroFxSceneSetMeshShader(script->scene,handle,
+                                  argc==3?vertexPath:"",fragmentPath))
+        return JS_ThrowRangeError(ctx,"mesh shader could not be assigned");
+    return JS_UNDEFINED;
 }
 
 static JSValue AddText(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
@@ -566,6 +622,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_rect",JS_NewCFunction(script->context,AddRect,"_rect",5));
     JS_SetPropertyStr(script->context,fx,"_gradientRect",JS_NewCFunction(script->context,AddGradientRect,"_gradientRect",6));
     JS_SetPropertyStr(script->context,fx,"_background",JS_NewCFunction(script->context,AddBackground,"_background",2));
+    JS_SetPropertyStr(script->context,fx,"_qrMatrix",JS_NewCFunction(script->context,QrMatrix,"_qrMatrix",1));
     JS_SetPropertyStr(script->context,fx,"_move",JS_NewCFunction(script->context,Move,"_move",4));
     JS_SetPropertyStr(script->context,fx,"_cube",JS_NewCFunction(script->context,AddCube,"_cube",5));
     JS_SetPropertyStr(script->context,fx,"_sphere",JS_NewCFunction(script->context,AddSphere,"_sphere",5));
@@ -573,6 +630,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_grid",JS_NewCFunction(script->context,AddGrid,"_grid",5));
     JS_SetPropertyStr(script->context,fx,"_model",JS_NewCFunction(script->context,AddModel,"_model",6));
     JS_SetPropertyStr(script->context,fx,"_transform",JS_NewCFunction(script->context,Transform,"_transform",8));
+    JS_SetPropertyStr(script->context,fx,"_shader",JS_NewCFunction(script->context,SetMeshShader,"_shader",3));
     JS_SetPropertyStr(script->context,fx,"_text",JS_NewCFunction(script->context,AddText,"_text",5));
     JS_SetPropertyStr(script->context,fx,"_image",JS_NewCFunction(script->context,AddImage,"_image",5));
     JS_SetPropertyStr(script->context,fx,"_imageScale",JS_NewCFunction(script->context,SetImageScale,"_imageScale",2));

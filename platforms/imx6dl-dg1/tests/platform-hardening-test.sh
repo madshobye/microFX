@@ -22,6 +22,7 @@ microfx_assert_file_contains 'rm -f "${TARGET_DIR}/etc/init.d/S01seedrng"' "$ROO
 microfx_assert_file_contains 'rm -f "${TARGET_DIR}/etc/init.d/S80dnsmasq"' "$ROOT/buildroot/board/imx6dl-dg1/post-build.sh" "generic dnsmasq service removal"
 microfx_assert_file_contains 'MICROFX_PROVISIONING="${MICROFX_PROVISIONING:-0}"' "$OVERLAY/usr/sbin/canvas-supervisor" "onboarding provisioning policy"
 microfx_assert_file_contains 'provisioningEnabled.*MICROFX_PROVISIONING' "$REPO/apps/onboarding/scripts/main.js" "onboarding setup-network guard"
+microfx_assert_file_contains 'onboarding_app=.apps_root/current-runtime/canvas-demo' "$OVERLAY/usr/sbin/canvas-supervisor" "onboarding uses current runtime API"
 
 mkdir -p "$TEMP/bin" "$TEMP/data/state" "$TEMP/run" "$TEMP/firmware/ath6k/AR6003/hw2.1.1"
 printf '/dev/mmcblk0p4 /data ext4 rw 0 0\n' >"$TEMP/mounts"
@@ -98,7 +99,18 @@ cat >"$TEMP/bin/status-command" <<'EOF'
 printf 'state\tok\n'
 EOF
 chmod +x "$TEMP/bin/status-command"
-MICROFX_RUN_ROOT="$TEMP/run" MICROFX_STATUS_COMMAND="$TEMP/bin/status-command" MICROFX_STATUS_INTERVAL=60 \
+cat >"$TEMP/bin/internet-route" <<'EOF'
+#!/bin/sh
+printf 'default via 192.0.2.1 dev eth0\n'
+EOF
+cat >"$TEMP/bin/internet-probe" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$TEMP/bin/internet-route" "$TEMP/bin/internet-probe"
+MICROFX_RUN_ROOT="$TEMP/run" MICROFX_STATUS_COMMAND="$TEMP/bin/status-command" \
+MICROFX_IP_COMMAND="$TEMP/bin/internet-route" MICROFX_HTTP_COMMAND="$TEMP/bin/internet-probe" \
+MICROFX_STATUS_INTERVAL=60 \
   "$OVERLAY/etc/init.d/S45status" start
 status_pid=$(cat "$TEMP/run/microfx-status.pid")
 MICROFX_RUN_ROOT="$TEMP/run" MICROFX_STATUS_COMMAND="$TEMP/bin/status-command" MICROFX_STATUS_INTERVAL=60 \
@@ -110,6 +122,7 @@ while [ ! -s "$TEMP/run/microfx-status" ] && [ "$attempt" -lt 20 ]; do
   sleep 0.05
 done
 microfx_assert_file_contains '^state[[:space:]]*ok$' "$TEMP/run/microfx-status" "RAM status report"
+microfx_assert_file_contains '^online$' "$TEMP/run/microfx-internet-status" "generic internet report"
 
 MICROFX_RUN_ROOT="$TEMP/run" MICROFX_STATUS_COMMAND="$TEMP/bin/status-command" \
   "$OVERLAY/etc/init.d/S45status" stop

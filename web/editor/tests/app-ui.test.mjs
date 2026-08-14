@@ -71,6 +71,7 @@ const server = {
       metadata: project.metadata,
       code: project.code,
       assets: [...project.assets].map(([path, bytes]) => ({ path, size: bytes.length })),
+      folders: project.folders || [],
       revisions: [...project.revisions.keys()]
     });
     if (request.type === "project.create") {
@@ -78,6 +79,7 @@ const server = {
         metadata: request.metadata,
         code: "",
         assets: new Map(),
+        folders: [],
         revisions: new Map()
       });
       Object.assign(response, { project: request.name, operation: request.operation });
@@ -127,6 +129,11 @@ const server = {
       });
     }
     if (request.type === "asset.delete") project.assets.delete(request.path);
+    if (request.type === "asset.folder.create") {
+      project.folders ||= [];
+      if (!project.folders.includes(request.path)) project.folders.push(request.path);
+      Object.assign(response, { project: request.project, path: request.path });
+    }
     if (request.type === "console.get") Object.assign(response, { cursor: 0, content: "" });
     if (request.type === "project.save-run") {
       project.code = request.content;
@@ -180,7 +187,8 @@ class FakePeer extends Emitter {
 
 function browserEnvironment() {
   const ids = [
-    "asset-input", "assets", "clear-console", "clear-trace", "connect", "console", "device-console",
+    "asset-input", "asset-folder-input", "asset-folder", "create-asset-folder", "assets",
+    "clear-console", "clear-trace", "connect", "console", "device-console",
     "disconnect", "editor", "message", "metadata-form", "new-project", "operation",
     "peer-history", "peer-id", "product-title", "project", "project-description",
     "project-title", "retrieve", "revision-assets", "revision-code", "revision-dialog",

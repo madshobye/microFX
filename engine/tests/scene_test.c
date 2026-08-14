@@ -53,11 +53,22 @@ int main(void)
     assert((model&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_MESH);
     assert(scene.mesh[1].kind==MICROFX_MESH_MODEL);
     assert(strcmp(scene.mesh[1].assetPath,"/project/models/demo.obj")==0);
+    assert(MicroFxSceneSetMeshShader(&scene,model,"/project/shaders/custom.vs",
+                                     "/project/shaders/custom.fs"));
+    assert(scene.mesh[1].shaderIndex==0 && scene.meshShaderCount==1);
+    assert(strcmp(scene.meshShader[0].fragmentPath,
+                  "/project/shaders/custom.fs")==0);
+    assert(MicroFxSceneSetMeshShader(&scene,cube,"/project/shaders/custom.vs",
+                                     "/project/shaders/custom.fs"));
+    assert(scene.mesh[0].shaderIndex==0 && scene.meshShaderCount==1);
     int wire=MicroFxSceneAddWireCube(&scene,0,1,2,3,0xffffffff);
     int grid=MicroFxSceneAddGrid(&scene,0,0,0,10,0x7aa8d0ff);
     assert(wire>=0 && grid>=0);
     assert(scene.mesh[2].kind==MICROFX_MESH_WIRE_CUBE);
     assert(scene.mesh[3].kind==MICROFX_MESH_GRID);
+    for(int index=scene.meshCount;index<20;index++)
+        assert(MicroFxSceneAddCube(&scene,index,0,0,1,0xffffffff)>=0);
+    assert(scene.meshCount==20);
 
     int text=MicroFxSceneAddText(&scene,"hello",10,20,24,0xffffffff);
     assert((text&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_TEXT);

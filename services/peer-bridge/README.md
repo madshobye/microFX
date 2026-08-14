@@ -11,11 +11,12 @@ The device accepts a PeerJS data connection and exposes a small JSON protocol:
 | `system.ping` | Verify the application protocol and report persistence, active-project, and renderer state |
 | `project.list` | List project folders and identify the active project |
 | `project.create` | Create a project with `main.js`, `assets/`, and metadata |
-| `project.get` | Return `main.js` and a deterministic asset manifest |
+| `project.get` | Return `main.js`, folders, and a deterministic asset manifest |
 | `code.put` | Atomically replace `main.js` |
 | `project.save-run` | Atomically save `main.js`, select the project, and request one health-checked activation |
 | `asset.get` | Return one asset as base64 with its path and byte size |
 | `asset.put` | Atomically write a base64-encoded asset |
+| `asset.folder.create` | Create a validated project-relative asset folder |
 | `asset.get.chunk` | Read a bounded binary-safe segment of an asset |
 | `asset.upload.status` | Initialize or resume a persistent partial upload |
 | `asset.upload.chunk` | Idempotently append one bounded upload segment |
@@ -47,6 +48,10 @@ is excluded from asset manifests and revisions. The deterministic upload token,
 declared path, and total size let Studio continue after reconnecting or after a
 bridge restart. Replayed acknowledged chunks are accepted only when their bytes
 match. Legacy `asset.get` and `asset.put` remain supported.
+
+Nested asset paths create their parent directories transactionally. Folder and
+file operations share the same canonical project-boundary checks, including
+symlink escape protection.
 
 Every device-side request and response is logged with negotiation number,
 DataChannel SID, request ID, command/response type, byte count, and success.

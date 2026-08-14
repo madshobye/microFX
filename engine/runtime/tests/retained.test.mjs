@@ -18,7 +18,7 @@ function runtime() {
       return nextHandle++;
     };
   }
-  for (const name of ["move", "transform", "setText", "font", "color", "effect", "visible", "opacity"]) {
+  for (const name of ["move", "transform", "setText", "font", "color", "effect", "shader", "visible", "opacity"]) {
     fx[`_${name}`] = (...args) => {
       calls.push([`_${name}`, ...args]);
       return true;
@@ -28,6 +28,7 @@ function runtime() {
     calls.push(["_imageScale", ...args]);
     return true;
   };
+  fx._qrMatrix = () => "111\n101\n111\n";
   vm.runInNewContext(source, { fx });
   return { fx, calls };
 }
@@ -94,6 +95,18 @@ test("3D retained elements preserve transform state across fluent mutations", ()
     ["_transform", 1, 3, 5, 7, 0.1, 0.2, 0.3, 4],
     ["_transform", 1, 3, 5, 7, 0.1, 0.2, 0.3, 2]
   ]);
+});
+
+test("QR codes are generic retained groups and mesh shaders are fluent", () => {
+  const { fx, calls } = runtime();
+  const code = fx.qr("microfx-demo", 100, 200, 300);
+  assert.ok(code.elements().length > 1);
+  assert.ok(calls.some(call => call[0] === "_rect"));
+  const model = fx.model("models/demo.obj", 0, 0, 0, 1, 0xffffffff)
+    .shader("shaders/custom.vs", "shaders/custom.fs");
+  assert.equal(model.handle > 0, true);
+  assert.deepEqual(calls.at(-1),
+    ["_shader", model.handle, "shaders/custom.vs", "shaders/custom.fs"]);
 });
 
 test("scene membership is explicit and constructors remain renderer-backed", () => {

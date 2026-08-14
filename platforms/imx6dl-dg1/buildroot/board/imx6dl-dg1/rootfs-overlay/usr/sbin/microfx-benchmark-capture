@@ -4,7 +4,7 @@ set -eu
 profile=${1:-}
 seconds=${2:-20}
 case "$profile" in
-  native-auto|native-fixed|native-75|native-50|720-fixed|720-half|1080-fixed|1080-quality) ;;
+  native-auto|native-fixed|native-75|native-50|720-fixed|720-half|1080-fixed|1080-fixed-60|1080-msaa|1080-msaa-60|1080-color|1080-quality) ;;
   *) echo "Unknown benchmark profile: $profile" >&2; exit 2 ;;
 esac
 case "$seconds" in ''|*[!0-9]*) echo "Duration must be 1..300 seconds" >&2; exit 2 ;; esac

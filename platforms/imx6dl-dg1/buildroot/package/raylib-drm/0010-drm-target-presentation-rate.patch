@@ -1,0 +1,46 @@
+--- a/src/platforms/rcore_drm.c
++++ b/src/platforms/rcore_drm.c
+@@ -594,6 +594,38 @@ void SwapScreenBuffer(void)
+     }
+     double tWaitEnd = SwapClockMs();
+ 
++    // The application can intentionally choose a lower presentation rate to
++    // preserve resolution or colour quality. Pace here, after the previous
++    // flip completed but before the completed EGL frame is submitted. A
++    // conventional post-frame sleep wakes after the desired vblank on this
++    // backend and commonly turns a 30 fps request into 20 fps.
++    static double nextPresentationMs = 0.0;
++    const char *targetValue = getenv("MICROFX_TARGET_FPS");
++    const int targetFps = targetValue ? atoi(targetValue) : 0;
++    const int refreshFps = platform.connector->modes[platform.modeIndex].vrefresh;
++    if ((targetFps > 0) && (refreshFps > 0) && (targetFps < refreshFps))
++    {
++        const double intervalMs = 1000.0/(double)targetFps;
++        const double nowMs = SwapClockMs();
++        if ((nextPresentationMs <= 0.0) ||
++            (nowMs > nextPresentationMs + intervalMs))
++        {
++            nextPresentationMs = nowMs;
++        }
++        else
++        {
++            // Leave approximately one millisecond for EGL/GBM/DRM submission
++            // so the page flip reaches the next vblank rather than missing it.
++            const double wakeMs = nextPresentationMs - 1.0;
++            if (wakeMs > nowMs)
++            {
++                struct timespec deadline = {
++                    .tv_sec = (time_t)(wakeMs/1000.0),
++                    .tv_nsec = (long)((wakeMs - (double)((time_t)(wakeMs/1000.0))*1000.0)*1000000.0)
++                };
++                while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
++                                       &deadline, NULL) == EINTR) {}
++            }
++        }
++        nextPresentationMs += intervalMs;
++    }
++    else nextPresentationMs = 0.0;
++
+     double t0 = SwapClockMs();
+     eglSwapBuffers(platform.device, platform.surface);
+     double t1 = SwapClockMs();

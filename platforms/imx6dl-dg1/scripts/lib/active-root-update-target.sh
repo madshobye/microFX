@@ -48,6 +48,8 @@ etc/init.d/S40canvas
 etc/init.d/S40provision
 etc/init.d/S45status
 usr/sbin/canvas-supervisor
+usr/sbin/microfx-benchmark-override
+usr/sbin/microfx-benchmark-capture
 usr/sbin/microfx-status
 usr/share/microfx/onboarding.js'
 
@@ -86,6 +88,8 @@ for path in \
   etc/init.d/S40provision \
   etc/init.d/S45status \
   usr/sbin/canvas-supervisor \
+  usr/sbin/microfx-benchmark-override \
+  usr/sbin/microfx-benchmark-capture \
   usr/sbin/microfx-status; do
   install_file "$path" 0755
 done

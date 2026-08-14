@@ -5,7 +5,7 @@
 MICROFX_DEMO_VERSION = 1.0.0
 MICROFX_DEMO_SITE = $(BR2_EXTERNAL_IMX6DL_DG1_PATH)/../../..
 MICROFX_DEMO_SITE_METHOD = local
-MICROFX_DEMO_DEPENDENCIES = raylib-drm quickjs
+MICROFX_DEMO_DEPENDENCIES = raylib-drm quickjs libqrencode
 
 define MICROFX_DEMO_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) -I$(@D)/engine/include \
@@ -18,7 +18,7 @@ define MICROFX_DEMO_BUILD_CMDS
 		$(@D)/engine/src/script.c $(@D)/engine/src/assets.c \
 		$(TARGET_LDFLAGS) -Wl,-rpath,'$$ORIGIN' \
 		-lraylib -lEGL -lGLESv2 -ldrm -lgbm \
-		-L$(STAGING_DIR)/usr/lib/quickjs -lquickjs -lm -lpthread -ldl -latomic
+		-L$(STAGING_DIR)/usr/lib/quickjs -lquickjs -lqrencode -lm -lpthread -ldl -latomic
 endef
 
 define MICROFX_DEMO_INSTALL_TARGET_CMDS
@@ -36,6 +36,8 @@ define MICROFX_DEMO_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0644 $(@D)/apps/demo/project.json $(TARGET_DIR)/usr/share/microfx/projects/demo/project.json
 	$(INSTALL) -D -m 0644 $(@D)/apps/demo/scripts/main.js $(TARGET_DIR)/usr/share/microfx/projects/demo/main.js
 	$(INSTALL) -D -m 0644 $(@D)/apps/demo/assets/models/icosahedron.obj $(TARGET_DIR)/usr/share/microfx/projects/demo/assets/models/icosahedron.obj
+	$(INSTALL) -D -m 0644 $(@D)/apps/demo/assets/shaders/Light.vs $(TARGET_DIR)/usr/share/microfx/projects/demo/assets/shaders/Light.vs
+	$(INSTALL) -D -m 0644 $(@D)/apps/demo/assets/shaders/Light.fs $(TARGET_DIR)/usr/share/microfx/projects/demo/assets/shaders/Light.fs
 	cp -R $(@D)/apps/projects/. $(TARGET_DIR)/usr/share/microfx/projects/
 	$(INSTALL) -D -m 0644 $(@D)/apps/onboarding/scripts/main.js $(TARGET_DIR)/usr/share/microfx/onboarding.js
 	$(INSTALL) -D -m 0644 $(@D)/apps/error/scripts/main.js $(TARGET_DIR)/usr/share/microfx/error.js

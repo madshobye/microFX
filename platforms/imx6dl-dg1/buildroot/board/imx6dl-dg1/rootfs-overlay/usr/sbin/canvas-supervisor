@@ -126,34 +126,25 @@ rollback() {
     rm -f "$state_root/app-pending"
 }
 
+onboarding_app=$MICROFX_FACTORY_APP
+data_available &&
+  [ -x "$apps_root/current-runtime/canvas-demo" ] &&
+  onboarding_app=$apps_root/current-runtime/canvas-demo
+
 if [ ! -e "$onboarding_marker" ] &&
-   [ -x "$MICROFX_FACTORY_APP" ] &&
+   [ -x "$onboarding_app" ] &&
    [ -r "$MICROFX_ONBOARDING_SCRIPT" ]; then
     touch "$onboarding_marker"
     peer_id=$MICROFX_DEFAULT_PEER_ID
     [ ! -s "$MICROFX_DATA_ROOT/config/peer-id" ] || peer_id=$(head -n 1 "$MICROFX_DATA_ROOT/config/peer-id")
-    wifi_qr=
-    if command -v qrencode >/dev/null 2>&1; then
-        wifi_payload="WIFI:T:WPA;S:$MICROFX_SETUP_SSID;P:$MICROFX_SETUP_PASSWORD;;"
-        wifi_qr=$(qrencode -t ASCII -m 0 "$wifi_payload" 2>/dev/null | awk '
-          {
-            row=""
-            for (column=1; column<=length($0); column+=2) {
-              row=row (substr($0,column,2)=="  " ? "0" : "1")
-            }
-            if (length(row)>0) print row
-          }
-        ' || true)
-    fi
     echo "Starting 40-second onboarding application" >>"$log"
     MICROFX_SCRIPT="$MICROFX_ONBOARDING_SCRIPT" \
     MICROFX_PEER_ID="$peer_id" \
     MICROFX_AP_SSID="$MICROFX_SETUP_SSID" \
     MICROFX_AP_PASSWORD="$MICROFX_SETUP_PASSWORD" \
-    MICROFX_WIFI_QR="$wifi_qr" \
     MICROFX_CAPTIVE_PORTAL=1 \
     MICROFX_PROVISIONING="${MICROFX_PROVISIONING:-0}" \
-      "$MICROFX_FACTORY_APP" >>"$log" 2>&1 &
+      "$onboarding_app" >>"$log" 2>&1 &
     child=$!
     wait "$child" || echo "Onboarding application exited with an error" >>"$log"
     child=

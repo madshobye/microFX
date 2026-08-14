@@ -39,9 +39,15 @@ const pulse = scene.add(fx.circle(390, 220, 42, 0x4de7ffff));
 const panel = scene.add(fx.gradientRect(1480, 790, 280, 116, 0x493080dd, 0x251342dd));
 scene.add(fx.text("RETAINED JS: SHAPES + TEXT + 3D", 64, 205, 28, 0x8de8ffff));
 scene.add(fx.grid(0, 0, 0, 10, 0x7aa8d0ff));
-const demoModel = scene.add(fx.model("assets/models/icosahedron.obj", 0, 1.85, 0, 3.4, 0x65d9ffff));
+const demoModel = scene.add(
+  fx.model("assets/models/icosahedron.obj", 0, 1.85, 0, 3.4, 0x65d9ffff)
+    .shader("assets/shaders/Light.vs", "assets/shaders/Light.fs")
+);
 const orbitCubes = [];
-for (let i = 0; i < 6; i++) {
+// Deliberately crosses the GLES2 16-object uniform-batch boundary. The engine
+// splits this scene into multiple draws instead of imposing that GPU detail on
+// application authors.
+for (let i = 0; i < 20; i++) {
   const cube = scene.add(fx.cube(0, 0, 0, 0.4 + (i % 3) * 0.1,
                                  i % 2 ? 0x29ccffff : 0xffc240ff));
   cube.effect(fx.effects.gradient, 0.8, 1.0);

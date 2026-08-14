@@ -43,11 +43,15 @@ aside { display: flex; flex-direction: column; overflow: auto; border-left: 1px 
 #metadata-form input, #metadata-form textarea { width: 100%; resize: vertical; }
 #save-metadata { grid-column: 2; }
 .projects-section { flex: 0 0 auto; height: 9rem; }
-.assets-section { flex: 0 0 auto; height: 11rem; }
+.assets-section { flex: 0 0 auto; min-height: 14rem; }
 .console-section { flex: 1 0 12rem; min-height: 12rem; }
 .aside-title { padding: .75rem; justify-content: space-between; border-bottom: 1px solid var(--line); }
 .aside-title small { display: block; color: var(--muted); }
 .upload input { display: none; }
+.asset-buttons, .asset-folder-row { display: flex; align-items: center; gap: .35rem; }
+.asset-folder-row { padding: .45rem .65rem; border-bottom: 1px solid var(--line); }
+.asset-folder-row input { min-width: 0; width: 100%; margin: 0; padding: .35rem .5rem; }
+.asset-folder-row button { flex: 0 0 auto; padding: .35rem .5rem; }
 #assets, #revisions { overflow: auto; list-style: none; margin: 0; padding: .5rem; }
 #assets li, #revisions li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .4rem; align-items: center; padding: .55rem; border-bottom: 1px solid #242934; font-size: .78rem; }
 #assets .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

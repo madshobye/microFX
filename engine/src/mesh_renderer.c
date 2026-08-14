@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SPHERE_RINGS 8
 #define SPHERE_SLICES 12
@@ -32,10 +33,7 @@ static GLuint Compile(GLenum type, const char *source)
     return shader;
 }
 
-bool MicroFxMeshRendererInit(MicroFxMeshRenderer *renderer)
-{
-    *renderer = (MicroFxMeshRenderer){ 0 };
-    static const char *vs =
+static const char *DefaultVertexSource =
         "#version 100\nprecision highp float;\n"
         "attribute vec3 aPosition;attribute vec3 aNormal;attribute float aObject;\n"
         "uniform mat4 uView;uniform mat4 uProjection;uniform vec4 uPositionScale[16];"
@@ -68,7 +66,7 @@ bool MicroFxMeshRendererInit(MicroFxMeshRenderer *renderer)
         "float rim=pow(1.0-max(n.z,0.0),2.0);vec3 lit=color.rgb*(0.24+0.72*d)+rim*color.rgb*0.18;"
         "vColor=vec4(lit,color.a);vLocal=aPosition;vEffect=effect.xyz;"
         "gl_Position=uProjection*uView*vec4(p,1.0);}\n";
-    static const char *fs =
+static const char *DefaultFragmentSource =
         "#version 100\nprecision mediump float;varying lowp vec4 vColor;varying vec3 vLocal;"
         "varying vec3 vEffect;uniform float uTime;"
         MICROFX_GLSL_NOISE2
@@ -77,27 +75,55 @@ bool MicroFxMeshRendererInit(MicroFxMeshRenderer *renderer)
         "else if(vEffect.x>1.5&&vEffect.x<2.5){float n=microfxNoise2(vLocal.xy*max(vEffect.z,0.01)+uTime*0.2);color*=mix(1.0,0.45+n*1.1,vEffect.y);}"
         "else if(vEffect.x>2.5){float bands=0.5+0.5*sin((vLocal.y+uTime*0.35)*max(vEffect.z,1.0)*12.0);color*=mix(1.0,0.55+bands*0.75,vEffect.y);}"
         "gl_FragColor=vec4(color,vColor.a);}\n";
-    GLuint vertex = Compile(GL_VERTEX_SHADER, vs);
-    GLuint fragment = Compile(GL_FRAGMENT_SHADER, fs);
-    if (!vertex || !fragment) return false;
-    renderer->program = glCreateProgram();
-    glAttachShader(renderer->program, vertex);
-    glAttachShader(renderer->program, fragment);
-    glBindAttribLocation(renderer->program, 0, "aPosition");
-    glBindAttribLocation(renderer->program, 1, "aNormal");
-    glBindAttribLocation(renderer->program, 2, "aObject");
-    glLinkProgram(renderer->program);
+static bool LinkProgram(MicroFxMeshProgram *program,const char *vertexSource,
+                        const char *fragmentSource,int sceneShaderIndex)
+{
+    GLuint vertex = Compile(GL_VERTEX_SHADER, vertexSource);
+    GLuint fragment = Compile(GL_FRAGMENT_SHADER, fragmentSource);
+    if (!vertex || !fragment) {
+        if(vertex)glDeleteShader(vertex);
+        if(fragment)glDeleteShader(fragment);
+        return false;
+    }
+    program->id = glCreateProgram();
+    glAttachShader(program->id, vertex);
+    glAttachShader(program->id, fragment);
+    glBindAttribLocation(program->id, 0, "aPosition");
+    glBindAttribLocation(program->id, 1, "aNormal");
+    glBindAttribLocation(program->id, 2, "aObject");
+    glLinkProgram(program->id);
     glDeleteShader(vertex); glDeleteShader(fragment);
     GLint linked = GL_FALSE;
-    glGetProgramiv(renderer->program, GL_LINK_STATUS, &linked);
-    if (!linked) return false;
-    renderer->viewLocation = glGetUniformLocation(renderer->program, "uView");
-    renderer->projectionLocation = glGetUniformLocation(renderer->program, "uProjection");
-    renderer->positionScaleLocation = glGetUniformLocation(renderer->program, "uPositionScale");
-    renderer->rotationLocation = glGetUniformLocation(renderer->program, "uRotation");
-    renderer->colorLocation = glGetUniformLocation(renderer->program, "uColor");
-    renderer->effectLocation = glGetUniformLocation(renderer->program, "uEffect");
-    renderer->timeLocation = glGetUniformLocation(renderer->program, "uTime");
+    glGetProgramiv(program->id, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char log[1024]={0};
+        glGetProgramInfoLog(program->id,sizeof(log),NULL,log);
+        fprintf(stderr,"MICROFX_MESH program link failure: %s\n",log);
+        glDeleteProgram(program->id);program->id=0;return false;
+    }
+    program->viewLocation=glGetUniformLocation(program->id,"uView");
+    program->projectionLocation=glGetUniformLocation(program->id,"uProjection");
+    program->positionScaleLocation=glGetUniformLocation(program->id,"uPositionScale");
+    program->rotationLocation=glGetUniformLocation(program->id,"uRotation");
+    program->colorLocation=glGetUniformLocation(program->id,"uColor");
+    program->effectLocation=glGetUniformLocation(program->id,"uEffect");
+    program->timeLocation=glGetUniformLocation(program->id,"uTime");
+    program->sceneShaderIndex=sceneShaderIndex;
+    if(program->viewLocation<0||program->projectionLocation<0||
+       program->positionScaleLocation<0||program->rotationLocation<0||
+       program->colorLocation<0){
+        fprintf(stderr,"MICROFX_MESH shader contract missing required uniforms\n");
+        glDeleteProgram(program->id);program->id=0;return false;
+    }
+    return true;
+}
+
+bool MicroFxMeshRendererInit(MicroFxMeshRenderer *renderer)
+{
+    *renderer = (MicroFxMeshRenderer){ 0 };
+    if(!LinkProgram(&renderer->programs[0],DefaultVertexSource,
+                    DefaultFragmentSource,-1))return false;
+    renderer->programCount=1;
     glGenBuffers(1, &renderer->vertexBuffer);
     return renderer->vertexBuffer != 0;
 }
@@ -265,13 +291,34 @@ static bool Rebuild(MicroFxMeshRenderer *renderer, MicroFxScene *scene)
         return false;
     }
     int cursor=0;
+    renderer->batchCount=0;
     for (int i=0;i<scene->meshCount;i++) {
         if(!scene->mesh[i].visible)continue;
-        if (scene->mesh[i].kind==MICROFX_MESH_CUBE) Cube(vertices,&cursor,i);
-        else if(scene->mesh[i].kind==MICROFX_MESH_SPHERE)Sphere(vertices,&cursor,i);
-        else if(scene->mesh[i].kind==MICROFX_MESH_WIRE_CUBE)WireCube(vertices,&cursor,i);
-        else if(scene->mesh[i].kind==MICROFX_MESH_GRID)Grid(vertices,&cursor,i);
-        else ModelGeometry(vertices,&cursor,&models[i],i);
+        MicroFxMeshBatch *batch = renderer->batchCount > 0
+            ? &renderer->batches[renderer->batchCount-1] : NULL;
+        const int shaderIndex=scene->mesh[i].shaderIndex;
+        if (!batch || batch->elementCount >= MICROFX_MESH_BATCH_SIZE ||
+            batch->shaderIndex != shaderIndex) {
+            if (renderer->batchCount >= MICROFX_MAX_MESH_BATCHES) {
+                fprintf(stderr,"MICROFX_MESH batch capacity exceeded\n");
+                free(vertices);
+                for(int j=0;j<scene->meshCount;j++)if(IsModelValid(models[j]))UnloadModel(models[j]);
+                renderer->vertexCount=0;
+                return false;
+            }
+            batch=&renderer->batches[renderer->batchCount++];
+            *batch=(MicroFxMeshBatch){.firstVertex=cursor,
+                                      .shaderIndex=shaderIndex};
+        }
+        const int object=batch->elementCount;
+        batch->elementIndex[batch->elementCount++]=i;
+        const int before=cursor;
+        if (scene->mesh[i].kind==MICROFX_MESH_CUBE) Cube(vertices,&cursor,object);
+        else if(scene->mesh[i].kind==MICROFX_MESH_SPHERE)Sphere(vertices,&cursor,object);
+        else if(scene->mesh[i].kind==MICROFX_MESH_WIRE_CUBE)WireCube(vertices,&cursor,object);
+        else if(scene->mesh[i].kind==MICROFX_MESH_GRID)Grid(vertices,&cursor,object);
+        else ModelGeometry(vertices,&cursor,&models[i],object);
+        batch->vertexCount+=cursor-before;
     }
     glBindBuffer(GL_ARRAY_BUFFER,renderer->vertexBuffer);
     glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(cursor*sizeof(*vertices)),vertices,GL_STATIC_DRAW);
@@ -289,32 +336,47 @@ static void DecodeColor(float *out, uint32_t color)
     out[2]=((color>>8)&255)/255.0f; out[3]=(color&255)/255.0f;
 }
 
+static MicroFxMeshProgram *ProgramForShader(MicroFxMeshRenderer *renderer,
+                                            const MicroFxScene *scene,
+                                            int shaderIndex)
+{
+    if(shaderIndex<0)return &renderer->programs[0];
+    for(int i=1;i<renderer->programCount;i++)
+        if(renderer->programs[i].sceneShaderIndex==shaderIndex)
+            return &renderer->programs[i];
+    if(shaderIndex>=scene->meshShaderCount||
+       renderer->programCount>=MICROFX_MAX_MESH_SHADERS+1)return NULL;
+    const MicroFxMeshShader *definition=&scene->meshShader[shaderIndex];
+    char *vertexSource=definition->vertexPath[0]
+        ? LoadFileText(definition->vertexPath):NULL;
+    char *fragmentSource=LoadFileText(definition->fragmentPath);
+    if((definition->vertexPath[0]&&!vertexSource)||!fragmentSource){
+        fprintf(stderr,"MICROFX_MESH could not read shader vertex=%s fragment=%s\n",
+                definition->vertexPath[0]?definition->vertexPath:"<default>",
+                definition->fragmentPath);
+        if(vertexSource)UnloadFileText(vertexSource);
+        if(fragmentSource)UnloadFileText(fragmentSource);
+        return NULL;
+    }
+    MicroFxMeshProgram *program=&renderer->programs[renderer->programCount];
+    bool linked=LinkProgram(program,vertexSource?vertexSource:DefaultVertexSource,
+                            fragmentSource,shaderIndex);
+    if(vertexSource)UnloadFileText(vertexSource);
+    UnloadFileText(fragmentSource);
+    if(!linked)return NULL;
+    renderer->programCount++;
+    printf("MICROFX_MESH shader loaded vertex=%s fragment=%s\n",
+           definition->vertexPath[0]?definition->vertexPath:"<default>",
+           definition->fragmentPath);
+    return program;
+}
+
 bool MicroFxMeshRendererDraw(MicroFxMeshRenderer *renderer, MicroFxScene *scene,
                             const float *view, const float *projection)
 {
-    if(!renderer->program)return false;
+    if(renderer->programCount<1||!renderer->programs[0].id)return false;
     if(scene->meshCount==0)return true;
     if(scene->meshGeometryDirty&&!Rebuild(renderer,scene))return false;
-    float positionScale[MICROFX_MAX_MESH_ELEMENTS*4]={0};
-    float rotation[MICROFX_MAX_MESH_ELEMENTS*4]={0};
-    float color[MICROFX_MAX_MESH_ELEMENTS*4]={0};
-    float effect[MICROFX_MAX_MESH_ELEMENTS*4]={0};
-    for (int i=0;i<scene->meshCount;i++) {
-        const MicroFxMeshElement *e=&scene->mesh[i];
-        positionScale[i*4]=e->position[0]; positionScale[i*4+1]=e->position[1];
-        positionScale[i*4+2]=e->position[2]; positionScale[i*4+3]=e->visible?e->scale:0.0f;
-        rotation[i*4]=e->rotation[0]; rotation[i*4+1]=e->rotation[1]; rotation[i*4+2]=e->rotation[2];
-        DecodeColor(&color[i*4],e->color);
-        effect[i*4]=e->effect[0];effect[i*4+1]=e->effect[1];effect[i*4+2]=e->effect[2];
-    }
-    glUseProgram(renderer->program);
-    glUniformMatrix4fv(renderer->viewLocation,1,GL_FALSE,view);
-    glUniformMatrix4fv(renderer->projectionLocation,1,GL_FALSE,projection);
-    glUniform4fv(renderer->positionScaleLocation,MICROFX_MAX_MESH_ELEMENTS,positionScale);
-    glUniform4fv(renderer->rotationLocation,MICROFX_MAX_MESH_ELEMENTS,rotation);
-    glUniform4fv(renderer->colorLocation,MICROFX_MAX_MESH_ELEMENTS,color);
-    glUniform4fv(renderer->effectLocation,MICROFX_MAX_MESH_ELEMENTS,effect);
-    glUniform1f(renderer->timeLocation,scene->time);
     glBindBuffer(GL_ARRAY_BUFFER,renderer->vertexBuffer);
     for (int i=0;i<3;i++) glEnableVertexAttribArray((GLuint)i);
     glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(MeshVertex),(void *)offsetof(MeshVertex,position));
@@ -322,7 +384,34 @@ bool MicroFxMeshRendererDraw(MicroFxMeshRenderer *renderer, MicroFxScene *scene,
     glVertexAttribPointer(2,1,GL_FLOAT,GL_FALSE,sizeof(MeshVertex),(void *)offsetof(MeshVertex,object));
     glEnable(GL_DEPTH_TEST); glDepthMask(GL_TRUE); glDepthFunc(GL_LEQUAL);
     glEnable(GL_CULL_FACE); glCullFace(GL_BACK);
-    glDrawArrays(GL_TRIANGLES,0,renderer->vertexCount);
+    for(int b=0;b<renderer->batchCount;b++){
+        const MicroFxMeshBatch *batch=&renderer->batches[b];
+        MicroFxMeshProgram *program=ProgramForShader(renderer,scene,
+                                                     batch->shaderIndex);
+        if(!program)return false;
+        glUseProgram(program->id);
+        glUniformMatrix4fv(program->viewLocation,1,GL_FALSE,view);
+        glUniformMatrix4fv(program->projectionLocation,1,GL_FALSE,projection);
+        if(program->timeLocation>=0)glUniform1f(program->timeLocation,scene->time);
+        float positionScale[MICROFX_MESH_BATCH_SIZE*4]={0};
+        float rotation[MICROFX_MESH_BATCH_SIZE*4]={0};
+        float color[MICROFX_MESH_BATCH_SIZE*4]={0};
+        float effect[MICROFX_MESH_BATCH_SIZE*4]={0};
+        for(int i=0;i<batch->elementCount;i++){
+            const MicroFxMeshElement *e=&scene->mesh[batch->elementIndex[i]];
+            positionScale[i*4]=e->position[0];positionScale[i*4+1]=e->position[1];
+            positionScale[i*4+2]=e->position[2];positionScale[i*4+3]=e->scale;
+            rotation[i*4]=e->rotation[0];rotation[i*4+1]=e->rotation[1];rotation[i*4+2]=e->rotation[2];
+            DecodeColor(&color[i*4],e->color);
+            effect[i*4]=e->effect[0];effect[i*4+1]=e->effect[1];effect[i*4+2]=e->effect[2];
+        }
+        glUniform4fv(program->positionScaleLocation,MICROFX_MESH_BATCH_SIZE,positionScale);
+        glUniform4fv(program->rotationLocation,MICROFX_MESH_BATCH_SIZE,rotation);
+        glUniform4fv(program->colorLocation,MICROFX_MESH_BATCH_SIZE,color);
+        if(program->effectLocation>=0)
+            glUniform4fv(program->effectLocation,MICROFX_MESH_BATCH_SIZE,effect);
+        glDrawArrays(GL_TRIANGLES,batch->firstVertex,batch->vertexCount);
+    }
     glDisable(GL_CULL_FACE);
     for (int i=0;i<3;i++) glDisableVertexAttribArray((GLuint)i);
     glBindBuffer(GL_ARRAY_BUFFER,0); glUseProgram(0);
@@ -333,6 +422,7 @@ bool MicroFxMeshRendererDraw(MicroFxMeshRenderer *renderer, MicroFxScene *scene,
 void MicroFxMeshRendererDestroy(MicroFxMeshRenderer *renderer)
 {
     if (renderer->vertexBuffer) glDeleteBuffers(1,&renderer->vertexBuffer);
-    if (renderer->program) glDeleteProgram(renderer->program);
+    for(int i=0;i<renderer->programCount;i++)
+        if(renderer->programs[i].id)glDeleteProgram(renderer->programs[i].id);
     *renderer=(MicroFxMeshRenderer){0};
 }

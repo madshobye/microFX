@@ -120,6 +120,13 @@
         return object;
       },
 
+      shader(vertex, fragment) {
+        if (dimension !== 3) throw new TypeError("shader() is available on 3D elements");
+        if (fragment === undefined) fx._shader(handle, String(vertex));
+        else fx._shader(handle, String(vertex), String(fragment));
+        return object;
+      },
+
       text(value) {
         fx._setText(handle, value);
         return object;
@@ -274,6 +281,38 @@
   fx.background = function background(top, bottom) {
     return make2d(fx._background, arguments, {});
   };
+  fx.qr = function qr(value, left, top, size, foreground, background) {
+    if (typeof value !== "string" || !value.length ||
+        !Number.isFinite(left) || !Number.isFinite(top) ||
+        !Number.isFinite(size) || size <= 0) {
+      throw new TypeError("qr(value,x,y,size[,foreground,background])");
+    }
+    const rows = fx._qrMatrix(value).trim().split("\n");
+    if (!rows.length || rows.some(row => row.length !== rows.length)) {
+      throw new Error("QR encoder returned an invalid matrix");
+    }
+    const dark = foreground === undefined ? 0x000000ff : foreground;
+    const light = background === undefined ? 0xffffffff : background;
+    const quiet = 4;
+    const moduleSize = size / (rows.length + quiet * 2);
+    const result = retainedGroup();
+    result.add(fx.rect(left + size * 0.5, top + size * 0.5, size, size, light));
+    rows.forEach((row, y) => {
+      let start = -1;
+      for (let x = 0; x <= row.length; x++) {
+        const black = x < row.length && row[x] === "1";
+        if (black && start < 0) start = x;
+        if (!black && start >= 0) {
+          const width = x - start;
+          result.add(fx.rect(left + (quiet + start + width * 0.5) * moduleSize,
+                             top + (quiet + y + 0.5) * moduleSize,
+                             width * moduleSize, moduleSize, dark));
+          start = -1;
+        }
+      }
+    });
+    return result;
+  };
   fx.circle = function circle(x, y, radius, color) {
     return make2d(fx._circle, arguments, { x, y });
   };
@@ -346,6 +385,10 @@
     return fx._effect(numericHandle(target), kind,
                       amount === undefined ? 1 : amount,
                       scale === undefined ? 4 : scale);
+  };
+  fx.shader = function shader(target, vertex, fragment) {
+    if (fragment === undefined) return fx._shader(numericHandle(target), String(vertex));
+    return fx._shader(numericHandle(target), String(vertex), String(fragment));
   };
 
   fx.rgba = function rgba(red, green, blue, alpha) {

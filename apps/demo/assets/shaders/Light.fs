@@ -1,22 +1,13 @@
 #version 100
-precision lowp float;
+precision mediump float;
 
-varying vec3 fragNormal;
-varying vec4 fragColor;
-
-uniform vec4 colDiffuse;
-uniform vec3 lightDirection;
-uniform vec3 lightColor;
-uniform vec3 ambientColor;
+varying lowp vec4 vColor;
+varying vec3 vLocal;
+varying vec3 vEffect;
+uniform float uTime;
 
 void main()
 {
-    // The mesh normals are normalized in the vertex stage. Avoid normalize()
-    // and pow() per fragment on this older Vivante GPU.
-    vec3 normal = fragNormal;
-    float diffuse = max(dot(normal, -lightDirection), 0.0);
-    float skyFill = 0.12*max(normal.y, 0.0);
-    vec3 lighting = ambientColor + lightColor*(diffuse*0.82 + skyFill);
-    gl_FragColor = vec4(colDiffuse.rgb*fragColor.rgb*lighting,
-                        colDiffuse.a*fragColor.a);
+    float pulse=0.92+0.08*sin(uTime*0.7+vLocal.y*5.0);
+    gl_FragColor=vec4(vColor.rgb*pulse,vColor.a);
 }

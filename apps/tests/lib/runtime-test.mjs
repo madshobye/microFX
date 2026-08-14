@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 export const defaultCapacities = Object.freeze({
   sdf: 256,
   quad: 512,
-  mesh: 16,
+  mesh: 256,
   text: 32,
   image: 16
 });
@@ -73,6 +73,11 @@ function instrumentedNativeFx(root, capacities) {
     _rect: add("quad"),
     _gradientRect: add("quad"),
     _background: add("quad"),
+    _qrMatrix(value) {
+      assert.equal(typeof value, "string");
+      assert.ok(value.length > 0);
+      return "111\n101\n111\n";
+    },
     _circle: add("quad"),
     _sdfCircle: add("sdf"),
     _sdfRoundedRect: add("sdf"),
@@ -112,6 +117,12 @@ function instrumentedNativeFx(root, capacities) {
     },
     _effect(handle, kind, amount, scale) {
       return mutation("effect", handle, [kind, amount, scale]);
+    },
+    _shader(handle, vertex, fragment) {
+      knownHandle(handle, "shader");
+      assert.equal(typeof vertex, "string");
+      if (fragment !== undefined) assert.equal(typeof fragment, "string");
+      return true;
     },
     _visible(handle, value) {
       knownHandle(handle, "visible");

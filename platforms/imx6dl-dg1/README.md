@@ -260,6 +260,10 @@ capture duration with `MICROFX_BENCHMARK_SECONDS`. Optional
 `MICROFX_BENCHMARK_MAX_OVER_BUDGET` values turn measured limits into failing
 regression checks. Raw target output, per-profile text/JSON reports, and a
 combined comparison matrix are retained only in the requested host directory.
+For quality isolation, `1080-msaa` changes only MSAA from `1080-fixed`, while
+`1080-color` changes only scanout color/depth. The `-60` variants of fixed and
+MSAA exercise the display-rate boundary without conflating it with resolution;
+`1080-quality` enables RGBA8888, 24-bit depth, and MSAA together.
 
 Each target profile is written below `/run`, applied to one renderer child by a
 strict variable whitelist, and removed before the normal project is reloaded.

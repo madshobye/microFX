@@ -42,8 +42,10 @@ package should point to the repository-level app/engine source.
 ## Rendering constraints
 
 The GC880 supports OpenGL ES 2, not compute shaders or ES 3.1. The proven fast
-path batches the current 3D scene into one static VBO, one shader, one draw call,
-and updates object transforms/colors through uniforms. Lighting is per vertex.
+path builds static mesh VBO data and updates object transforms/colors through
+uniforms. GLES 2 safely accommodates 16 mesh objects per uniform batch; larger
+scenes are divided into adjacent batches and at project-shader boundaries.
+Lighting in the embedded default shader is per vertex.
 Cube outlines are baked into the same VBO. Per-fragment procedural outlines,
 separate line passes and full-screen layered effects have all exceeded the frame
 budget on this GPU.
@@ -53,7 +55,8 @@ implemented JS API uses a cheap retained quad/geometry batch for ordinary
 rectangles, gradients and circles. Experimental SDF circles and rounded
 rectangles remain an explicit second batch. Elements update by handle; each
 renderer submits one compact GLES2 draw.
-Script exceptions are fail-fast. Keep construction out of `update(time, delta)`
+Script exceptions and explicit retained-capacity overruns are fail-fast. Keep
+construction out of `update(time, delta)`
 and extend the bindings only with bounded retained operations. See
 `engine/README.md` for the current API.
 
@@ -72,6 +75,17 @@ MICROFX_OUTPUT_HEIGHT=0
 MICROFX_PIXEL_DENSITY=auto
 MICROFX_MIN_PIXEL_DENSITY=0.50
 MICROFX_TARGET_FPS=30
+MICROFX_COLOR_FORMAT=rgb565
+MICROFX_DEPTH_BITS=16
+MICROFX_DITHERING=1
+MICROFX_ANTIALIASING=none
+MICROFX_DENSITY_SAMPLE_FRAMES=60
+MICROFX_DENSITY_STEP=0.10
+MICROFX_DENSITY_DOWN_THRESHOLD=1.08
+MICROFX_DENSITY_UP_THRESHOLD=0.72
+MICROFX_DENSITY_UP_SAMPLES=4
+MICROFX_PROFILE=0
+MICROFX_PROFILE_INTERVAL=120
 ```
 
 Zero output dimensions mean native DRM mode. A numeric pixel density is fixed;
@@ -85,10 +99,26 @@ lower-resolution full-screen FBO: on GC880 the final texture upscale cost more
 than it saved. RGB565 is intentional: it halves scanout bandwidth versus
 RGBA8888 at the cost of color precision.
 
+Applications expose the same output, density, target-rate, color, depth,
+dithering, antialiasing, and profiling controls through top-level
+`fx.configure()`. Quality presets are only baselines: explicit settings win,
+so a project can independently choose, for example, RGBA8888, fixed native
+resolution, no MSAA, and a 20 FPS target. `msaa4` is available for jagged 3D
+edges but must be measured on the target because it increases fragment and
+memory bandwidth substantially.
+
 OpenGL ES 2 has no reliable GPU timer query on this target. The status bar's CPU
 average uses process CPU time. “GPU” is the remaining wall-clock render/present
 time, so it includes driver and page-flip waits rather than being a pure shader
-timer.
+timer. The direct-DRM backend uses atomic page flips and retains buffers until
+flip completion. Lower target frame rates are paced just before submission so
+they do not miss the intended vblank; this is distinct from the archived IPU
+scaling experiment.
+
+The debug bar reads a RAM-only connectivity state produced by `S45status`.
+That service requires both a default IPv4 route and a bounded HTTP connectivity
+probe, without assuming Wi-Fi or Ethernet as the interface. The renderer never
+performs network I/O in its frame loop.
 
 ## i.MX6DL-DG1 boot and storage model
 

@@ -17,10 +17,11 @@ editor.setOptions({ showPrintMargin: false, wrap: true });
 
 const state = { peer: null, connection: null, protocol: null, connectTimer: null,
   reconnectTimer: null, consoleTimer: null, consoleCursor: 0, intentionalClose: false,
-  assets: [], projects: [], project: "", metadata: {}, revisions: [], inspectedRevision: "", negotiation: 0,
+  assets: [], folders: [], projects: [], project: "", metadata: {}, revisions: [], inspectedRevision: "", negotiation: 0,
   protocolReady: false };
 const reconnectSession = new ReconnectSession({ timeoutMs: 90000 });
-const controls = ["#retrieve", "#save", "#run", "#asset-input", "#project", "#new-project", "#disconnect",
+const controls = ["#retrieve", "#save", "#run", "#asset-input", "#asset-folder-input",
+  "#asset-folder", "#create-asset-folder", "#project", "#new-project", "#disconnect",
   "#project-title", "#project-description", "#save-metadata", "#system-check"];
 const peerIdInput = $("#peer-id");
 const peerHistoryKey = `${product.slug}.peerIds`;
@@ -303,7 +304,15 @@ function formatBytes(value) {
 function renderAssets() {
   const list = $("#assets");
   list.replaceChildren();
-  if (!state.assets.length) {
+  for (const folder of state.folders) {
+    const row = document.createElement("li");
+    const info = document.createElement("span"); info.className = "name";
+    info.textContent = `${folder}/`;
+    const size = document.createElement("span"); size.className = "size";
+    size.textContent = "folder"; info.append(document.createElement("br"), size);
+    row.append(info); list.append(row);
+  }
+  if (!state.assets.length && !state.folders.length) {
     const empty = document.createElement("li"); empty.className = "empty"; empty.textContent = "No assets"; list.append(empty); return;
   }
   for (const asset of state.assets) {
@@ -414,6 +423,7 @@ async function retrieve() {
     state.metadata = project.metadata || {};
     editor.setValue(project.code || "", -1);
     state.assets = project.assets || [];
+    state.folders = project.folders || [];
     state.revisions = project.revisions || [];
     renderAssets();
     renderRevisions();
@@ -456,14 +466,27 @@ const studioActions = createStudioActions({
   onState: renderOperation
 });
 
-async function upload(files) {
+function cleanAssetPath(value) {
+  const path = String(value || "").trim().replaceAll("\\", "/")
+    .replace(/^\/+|\/+$/g, "");
+  if (!path) return "";
+  if (path.split("/").some((part) => !part || part === "." || part === ".."))
+    throw new Error("Asset folder must be a relative path without . or ..");
+  return path;
+}
+
+async function upload(files, preserveDirectory = false) {
+  const destination = cleanAssetPath($("#asset-folder").value);
   const batch = await uploadAssetBatch(files, async (file) => {
-    message(`Uploading ${file.name}…`);
+    const relative = preserveDirectory && file.webkitRelativePath
+      ? file.webkitRelativePath : file.name;
+    const path = [destination, relative].filter(Boolean).join("/");
+    message(`Uploading ${path}…`);
     const content = await file.arrayBuffer();
     await reconnectSession.retry((protocol) =>
-      uploadAsset(protocol, state.project, file.name, content,
-        { onProgress: ({ offset, size }) => message(`Uploading ${file.name}… ${formatBytes(offset)} / ${formatBytes(size)}`) }),
-    { onRetry: () => message(`Connection interrupted; resuming ${file.name} after reconnect…`) });
+      uploadAsset(protocol, state.project, path, content,
+        { onProgress: ({ offset, size }) => message(`Uploading ${path}… ${formatBytes(offset)} / ${formatBytes(size)}`) }),
+    { onRetry: () => message(`Connection interrupted; resuming ${path} after reconnect…`) });
   });
   if (batch.uploaded.length) await retrieve();
   const summary = `${batch.uploaded.length} uploaded` +
@@ -471,6 +494,16 @@ async function upload(files) {
   message(summary);
   return batch;
 }
+
+$("#create-asset-folder").onclick = async () => {
+  try {
+    const path = cleanAssetPath($("#asset-folder").value);
+    if (!path) throw new Error("Enter a folder name first");
+    await send("asset.folder.create", { project: state.project, path });
+    await retrieve();
+    message(`Created assets/${path}`);
+  } catch (error) { message(error.message); }
+};
 
 $("#connect").onclick = () => connect(false);
 $("#disconnect").onclick = () => { closeCurrent(true); message("Disconnected"); };
@@ -507,6 +540,10 @@ $("#save").onclick = () => save(false);
 $("#run").onclick = () => save(true);
 $("#asset-input").onchange = async (event) => {
   await upload([...event.target.files]);
+  event.target.value = "";
+};
+$("#asset-folder-input").onchange = async (event) => {
+  await upload([...event.target.files], true);
   event.target.value = "";
 };
 $("#metadata-form").onsubmit = async (event) => {

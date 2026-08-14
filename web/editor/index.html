@@ -56,7 +56,14 @@
       <section class="aside-section assets-section">
       <div class="aside-title">
         <div><strong>Assets</strong><small>/assets</small></div>
-        <label class="upload">Upload<input id="asset-input" type="file" multiple disabled></label>
+        <div class="asset-buttons">
+          <label class="upload">Files<input id="asset-input" type="file" multiple disabled></label>
+          <label class="upload">Folder<input id="asset-folder-input" type="file" webkitdirectory multiple disabled></label>
+        </div>
+      </div>
+      <div class="asset-folder-row">
+        <input id="asset-folder" placeholder="folder/subfolder" spellcheck="false" disabled>
+        <button id="create-asset-folder" type="button" disabled>Create</button>
       </div>
       <ul id="assets"><li class="empty">Connect to retrieve project</li></ul>
       </section>

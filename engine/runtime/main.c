@@ -375,10 +375,11 @@ static void ReportAndResetProfile(FrameProfile *profile,
     memset(profile, 0, sizeof(*profile));
 }
 
-static void DrawInterface(int fps, float time,
+static void DrawInterface(float fps, float time,
                           float cpuAverageMs, float gpuAverageMs,
                           bool automaticDensity, float pixelDensity,
-                          int outputWidth, int outputHeight)
+                          int outputWidth, int outputHeight,
+                          const char *internetState)
 {
     const int barX = 38;
     const int barY = DESIGN_HEIGHT - 54;
@@ -399,8 +400,10 @@ static void DrawInterface(int fps, float time,
     else if(time>=hour){uptime=time/hour;unit="h";}
     else if(time>=minute){uptime=time/minute;unit="m";}
     char up[32],fpsText[24],mode[24],resolution[32];
-    snprintf(up,sizeof(up),"UP %.1f%s",uptime,unit);
-    snprintf(fpsText,sizeof(fpsText),"%d FPS",fps);
+    // Fixed-width numeric fields prevent the bar from shifting as the final
+    // digit changes. The leading padding also keeps zero as an explicit 0.0.
+    snprintf(up,sizeof(up),"UP %5.1f%s",uptime,unit);
+    snprintf(fpsText,sizeof(fpsText),"%5.1f FPS",(double)fps);
     if (GetScreenWidth() == outputWidth && GetScreenHeight() == outputHeight) {
         snprintf(resolution,sizeof(resolution),"%dx%d",outputWidth,outputHeight);
     } else {
@@ -411,7 +414,8 @@ static void DrawInterface(int fps, float time,
              pixelDensity);
     int width=padding*2+MeasureText(up,fontSize)+MeasureText(fpsText,fontSize)+
       MeasureText(resolution,fontSize)+MeasureText(mode,fontSize)+
-      MeasureText("CPU",fontSize)+MeasureText("GPU",fontSize)+meterWidth*2+gap*7;
+      MeasureText(internetState,fontSize)+MeasureText("CPU",fontSize)+
+      MeasureText("GPU",fontSize)+meterWidth*2+gap*8;
     DrawRectangle(barX,barY,width,barHeight,(Color){4,8,22,245});
     DrawRectangleLines(barX,barY,width,barHeight,(Color){65,105,145,255});
     int x=barX+padding,y=barY+(barHeight-fontSize)/2;
@@ -423,6 +427,13 @@ static void DrawInterface(int fps, float time,
     DRAW_FIELD(fpsText,255,210,70);
     DRAW_FIELD(resolution,245,245,245);
     DRAW_FIELD(mode,180,205,235);
+    if (strcmp(internetState, "NET ON ") == 0) {
+        DRAW_FIELD(internetState,90,220,145);
+    } else if (strcmp(internetState, "NET OFF") == 0) {
+        DRAW_FIELD(internetState,255,105,105);
+    } else {
+        DRAW_FIELD(internetState,165,175,190);
+    }
     DRAW_FIELD("CPU",40,205,255);
     DrawRectangle(x,meterY,meterWidth,meterHeight,(Color){35,42,66,255});
     DrawRectangle(x,meterY,cpuWidth,meterHeight,(Color){40,205,255,255});x+=meterWidth+gap;
@@ -430,6 +441,27 @@ static void DrawInterface(int fps, float time,
     DrawRectangle(x,meterY,meterWidth,meterHeight,(Color){35,42,66,255});
     DrawRectangle(x,meterY,gpuWidth,meterHeight,(Color){255,85,180,255});
 #undef DRAW_FIELD
+}
+
+static const char *ReadInternetState(float time)
+{
+    static float nextRead = 0.0f;
+    static char state[16] = "NET ?  ";
+    if (time < nextRead) return state;
+    nextRead = time + 2.0f;
+    FILE *input = fopen("/run/microfx-internet-status", "r");
+    char value[24] = { 0 };
+    if (!input || !fgets(value, sizeof(value), input)) {
+        snprintf(state, sizeof(state), "NET ?  ");
+    } else if (strncmp(value, "online", 6) == 0) {
+        snprintf(state, sizeof(state), "NET ON ");
+    } else if (strncmp(value, "offline", 7) == 0) {
+        snprintf(state, sizeof(state), "NET OFF");
+    } else {
+        snprintf(state, sizeof(state), "NET ?  ");
+    }
+    if (input) fclose(input);
+    return state;
 }
 
 int main(void)
@@ -455,6 +487,9 @@ int main(void)
     char depthValue[8];
     snprintf(depthValue, sizeof(depthValue), "%d", runtime.depthBits);
     setenv("MICROFX_DEPTH_BITS", depthValue, 1);
+    char targetFpsValue[16];
+    snprintf(targetFpsValue, sizeof(targetFpsValue), "%d", runtime.targetFps);
+    setenv("MICROFX_TARGET_FPS", targetFpsValue, 1);
     setenv("MICROFX_PROFILE", runtime.profiling ? "1" : "0", 1);
     unsigned int windowFlags = FLAG_FULLSCREEN_MODE;
     if (runtime.antialiasing == MICROFX_ANTIALIAS_MSAA4) windowFlags |= FLAG_MSAA_4X_HINT;
@@ -605,9 +640,14 @@ int main(void)
             rlPushMatrix();
             rlScalef((float)GetScreenWidth()/DESIGN_WIDTH,
                      (float)GetScreenHeight()/DESIGN_HEIGHT, 1.0f);
-            DrawInterface(GetFPS(), time, cpuAverageMs, gpuAverageMs,
+            const float averageFrameMs = cpuAverageMs + gpuAverageMs;
+            const float displayedFps = averageFrameMs > 0.01f
+                                     ? 1000.0f/averageFrameMs
+                                     : (float)runtime.targetFps;
+            DrawInterface(displayedFps, time, cpuAverageMs, gpuAverageMs,
                           runtime.automaticDensity, runtime.pixelDensity,
-                          runtime.outputWidth, runtime.outputHeight);
+                          runtime.outputWidth, runtime.outputHeight,
+                          ReadInternetState(time));
             rlPopMatrix();
         }
         if (synchronizedProfiling) glFinish();

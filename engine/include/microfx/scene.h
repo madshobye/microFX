@@ -9,11 +9,12 @@
 
 #define MICROFX_MAX_SDF_ELEMENTS 256
 #define MICROFX_MAX_QUAD_ELEMENTS 512
-#define MICROFX_MAX_MESH_ELEMENTS 16
+#define MICROFX_MAX_MESH_ELEMENTS 256
 #define MICROFX_MAX_TEXT_ELEMENTS 32
 #define MICROFX_MAX_IMAGE_ELEMENTS 16
 #define MICROFX_MAX_TEXT_BYTES 128
 #define MICROFX_MAX_ASSET_PATH 256
+#define MICROFX_MAX_MESH_SHADERS 8
 
 #define MICROFX_HANDLE_SDF  0x01000000
 #define MICROFX_HANDLE_MESH 0x02000000
@@ -76,9 +77,15 @@ typedef struct {
     float scale;
     uint32_t color;
     float effect[3];
+    int shaderIndex;
     char assetPath[MICROFX_MAX_ASSET_PATH];
     bool visible;
 } MicroFxMeshElement;
+
+typedef struct {
+    char vertexPath[MICROFX_MAX_ASSET_PATH];
+    char fragmentPath[MICROFX_MAX_ASSET_PATH];
+} MicroFxMeshShader;
 
 typedef struct {
     char text[MICROFX_MAX_TEXT_BYTES];
@@ -152,6 +159,8 @@ typedef struct {
     bool quadDirty;
     MicroFxMeshElement mesh[MICROFX_MAX_MESH_ELEMENTS];
     int meshCount;
+    MicroFxMeshShader meshShader[MICROFX_MAX_MESH_SHADERS];
+    int meshShaderCount;
     bool meshGeometryDirty;
     bool meshStateDirty;
     MicroFxTextElement text[MICROFX_MAX_TEXT_ELEMENTS];
@@ -210,6 +219,9 @@ bool MicroFxSceneSetOpacity(MicroFxScene *scene, int handle, float opacity);
 bool MicroFxSceneSetVisible(MicroFxScene *scene, int handle, bool visible);
 bool MicroFxSceneSetEffect(MicroFxScene *scene, int handle, int effect,
                           float amount, float scale);
+bool MicroFxSceneSetMeshShader(MicroFxScene *scene, int handle,
+                               const char *vertexPath,
+                               const char *fragmentPath);
 void MicroFxSceneSetCamera(MicroFxScene *scene, float x, float y, float z,
                           float targetX, float targetY, float targetZ,
                           float fovY);

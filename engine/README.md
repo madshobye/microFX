@@ -97,7 +97,10 @@ relative offset. Both are fluent and return the same object.
 | `wireCube(x,y,z,size,color)` | Add a retained 3D cube outline |
 | `grid(x,y,z,size,color)` | Add a retained horizontal 3D grid |
 | `model(path,x,y,z,size,color)` | Load a project-relative model asset |
+| `model.shader(fragmentPath)` | Select a project fragment shader with the built-in mesh vertex shader |
+| `model.shader(vertexPath,fragmentPath)` | Select project-local vertex and fragment shaders for this model |
 | `image(path,x,y,scale,tint)` | Load a bilinear-filtered image at native aspect ratio and uniform scale; other argument counts fail |
+| `qr(value,x,y,size[,foreground,background])` | Add a retained QR code using ordinary quad geometry |
 | `camera(x,y,z,tx,ty,tz,fovY)` | Set retained perspective camera |
 | `text(value,x,y,size,color[,fontPath])` | Add retained atlas text with an optional project font |
 | `scene(options)` / `scenes.add(scene)` | Create and register an application scene |
@@ -175,6 +178,11 @@ Each record includes the target frame budget, mean and worst wall time, count of
 frames over budget, process CPU time, non-CPU/pacing time, and named render
 stages. The non-CPU value is deliberately not called GPU time: GLES 2 exposes no
 portable timer query here, so it also contains DRM page-flip/display waiting.
+On the DG1 direct-DRM backend, a target below the display refresh is paced
+immediately before frame submission. This keeps a deliberate 30 FPS choice on
+a 60 Hz display from waking just after a vblank and collapsing to 20 FPS. A
+60 FPS target adds no extra pacing; atomic page-flip completion remains the
+display synchronization boundary.
 `engine/tools/profile-report.py` produces a frame-weighted summary. It never
 averages different output/density/target configurations under one label: the
 normal report selects the latest configuration, while `--matrix` keeps every
@@ -199,16 +207,32 @@ non-regular files, `..` traversal outside the project, and symlinks that escape
 the project directory. This is a basic project boundary for application assets,
 not a security sandbox for untrusted JavaScript.
 
+Models use the engine's embedded default shader unless the application calls
+`shader()`. Project shaders are ordinary uploaded assets. A custom vertex shader
+must provide `aPosition`, `aNormal`, and `aObject`, and the uniforms `uView`,
+`uProjection`, `uPositionScale[16]`, `uRotation[16]`, and `uColor[16]`.
+`uEffect[16]` and `uTime` are optional. The fragment shader must use GLES 2
+syntax and match any varyings emitted by the vertex shader. Missing files,
+compile failures, and an incomplete required contract are fatal and visible;
+the runtime never silently substitutes a different project shader.
+
 The text renderer caches at most four faces, including the built-in default,
 and preserves scene order by batching only adjacent strings that share a face.
 Font parsing and GPU upload happen once, after graphics initialization; a bad
 font or a fifth distinct face is a visible fatal asset error rather than an
 implicit fallback.
 
-Current limits are 256 SDF elements, 512 quad elements, 16 mesh elements, 32 text elements of 127
+Current limits are 256 SDF elements, 512 quad elements, 256 mesh elements, 32 text elements of 127
 bytes each, four font faces, 16 image elements/textures, a 16 MiB JS heap, and a 512 KiB JS stack. A script exception is fatal
 by design so a bad remote revision remains visible through independent SSH
 rather than silently changing behavior.
+
+Mesh transforms use arrays of 16 objects because that is the safe GLES 2
+uniform budget on this GPU. Scenes are split automatically into adjacent
+16-object draw batches, including at shader boundaries, so that GPU constraint
+does not impose a 16-object JavaScript scene limit. Exceeding the explicit
+256-object scene capacity raises a clear JavaScript exception instead of
+partially loading or hanging.
 
 `data()` applies the same project boundary as `model()`, accepts at most 64 KiB,
 and parses JSON inside the existing QuickJS runtime. It first checks the matching

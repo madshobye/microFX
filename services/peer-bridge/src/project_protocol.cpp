@@ -237,6 +237,24 @@ void append_assets(cJSON* response, const fs::path& project_root) {
   }
 }
 
+void append_asset_folders(cJSON* response, const fs::path& project_root) {
+  cJSON* folders = cJSON_AddArrayToObject(response, "folders");
+  fs::path root = project_root / "assets";
+  std::error_code ec;
+  std::vector<fs::path> paths;
+  for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end;
+       it.increment(ec)) {
+    fs::file_status status = it->symlink_status(ec);
+    if (!ec && fs::is_directory(status)) paths.push_back(it->path());
+  }
+  std::sort(paths.begin(), paths.end());
+  for (const fs::path& path : paths) {
+    const std::string relative = fs::relative(path, root, ec).generic_string();
+    if (!ec && relative != ".")
+      cJSON_AddItemToArray(folders, cJSON_CreateString(relative.c_str()));
+  }
+}
+
 std::optional<fs::path> revision_root_path(const fs::path& project_root) {
   std::error_code ec;
   fs::path project = fs::weakly_canonical(project_root, ec);
@@ -635,6 +653,7 @@ cJSON* handle_project_command(const char* data, size_t length,
     cJSON* parsed = cJSON_Parse(metadata.c_str());
     cJSON_AddItemToObject(response, "metadata", parsed ? parsed : cJSON_CreateObject());
     append_assets(response, *project);
+    append_asset_folders(response, *project);
     cJSON* history = cJSON_AddArrayToObject(response, "revisions");
     for (const fs::path& path : revisions(*project))
       cJSON_AddItemToArray(history, cJSON_CreateString(revision_name(path).c_str()));
@@ -729,8 +748,13 @@ cJSON* handle_project_command(const char* data, size_t length,
       cJSON_AddBoolToObject(response, "legacy", legacy);
       cJSON_AddStringToObject(response, "code", code.c_str());
       cJSON_AddItemToObject(response, "metadata", parsed ? parsed : cJSON_CreateObject());
-      if (legacy) cJSON_AddArrayToObject(response, "assets");
-      else append_assets(response, snapshot);
+      if (legacy) {
+        cJSON_AddArrayToObject(response, "assets");
+        cJSON_AddArrayToObject(response, "folders");
+      } else {
+        append_assets(response, snapshot);
+        append_asset_folders(response, snapshot);
+      }
     }
   } else if (std::strcmp(command, "revision.restore") == 0) {
     cJSON* revision = cJSON_GetObjectItemCaseSensitive(request, "revision");
@@ -847,16 +871,19 @@ cJSON* handle_project_command(const char* data, size_t length,
       auto previous = read_file_exact(*destination);
       if ((!previous || *previous != *content) && !save_revision(*project)) {
         fail(response, "could not save asset revision");
-      } else if (!atomic_write(*destination, *content)) {
-        fail(response, "could not commit asset upload");
       } else {
         std::error_code ec;
-        fs::remove(*part, ec);
-        fs::remove(*metadata, ec);
-        cJSON_ReplaceItemInObject(response, "type", cJSON_CreateString("asset"));
-        cJSON_AddStringToObject(response, "project", selected.c_str());
-        cJSON_AddStringToObject(response, "path", path->valuestring);
-        cJSON_AddNumberToObject(response, "size", static_cast<double>(*size));
+        fs::create_directories(destination->parent_path(), ec);
+        if (ec || !atomic_write(*destination, *content)) {
+          fail(response, "could not commit asset upload");
+        } else {
+          fs::remove(*part, ec);
+          fs::remove(*metadata, ec);
+          cJSON_ReplaceItemInObject(response, "type", cJSON_CreateString("asset"));
+          cJSON_AddStringToObject(response, "project", selected.c_str());
+          cJSON_AddStringToObject(response, "path", path->valuestring);
+          cJSON_AddNumberToObject(response, "size", static_cast<double>(*size));
+        }
       }
     }
   } else if (std::strcmp(command, "asset.get.chunk") == 0) {
@@ -921,10 +948,31 @@ cJSON* handle_project_command(const char* data, size_t length,
     } else {
       auto decoded = decode_base64(content->valuestring);
       auto previous = destination ? read_file_exact(*destination) : std::nullopt;
-      if (!decoded || decoded->size() > kAssetLimit ||
+      std::error_code ec;
+      if (destination) fs::create_directories(destination->parent_path(), ec);
+      if (!decoded || decoded->size() > kAssetLimit || ec ||
           ((!previous || *previous != *decoded) && !save_revision(*project)) ||
           !atomic_write(*destination, *decoded))
         fail(response, "could not write asset");
+    }
+  } else if (std::strcmp(command, "asset.folder.create") == 0) {
+    cJSON* path = cJSON_GetObjectItemCaseSensitive(request, "path");
+    auto destination = asset_path(
+        *project, cJSON_IsString(path) ? path->valuestring : nullptr);
+    std::error_code ec;
+    const fs::path asset_root = fs::weakly_canonical(*project / "assets", ec);
+    if (!destination || ec || *destination == asset_root) {
+      fail(response, "invalid asset folder");
+    } else {
+      fs::create_directories(*destination, ec);
+      if (ec || !fs::is_directory(*destination, ec)) {
+        fail(response, "could not create asset folder");
+      } else {
+        cJSON_ReplaceItemInObject(response, "type",
+                                  cJSON_CreateString("asset.folder"));
+        cJSON_AddStringToObject(response, "project", selected.c_str());
+        cJSON_AddStringToObject(response, "path", path->valuestring);
+      }
     }
   } else if (std::strcmp(command, "asset.delete") == 0) {
     cJSON* path = cJSON_GetObjectItemCaseSensitive(request, "path");

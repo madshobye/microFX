@@ -17,37 +17,15 @@ const provisioningEnabled = fx.env("MICROFX_PROVISIONING", "0") === "1";
 const captivePortal = fx.env("MICROFX_CAPTIVE_PORTAL", "0") === "1";
 const portalUrl = "http://10.42.0.1";
 
-function drawQr(matrixText, left, top, size) {
-  const rows = matrixText.split("\n").filter(row => /^[01]+$/.test(row));
-  if (!rows.length || rows.some(row => row.length !== rows.length)) return false;
-  const quiet = 4;
-  const moduleSize = size / (rows.length + quiet * 2);
-  fx.rect(left + size / 2, top + size / 2, size, size, 0xffffffff);
-  for (let y = 0; y < rows.length; y++) {
-    let start = -1;
-    for (let x = 0; x <= rows[y].length; x++) {
-      const black = x < rows[y].length && rows[y][x] === "1";
-      if (black && start < 0) start = x;
-      if (!black && start >= 0) {
-        const width = x - start;
-        fx.rect(left + (quiet + start + width / 2) * moduleSize,
-                top + (quiet + y + 0.5) * moduleSize,
-                width * moduleSize, moduleSize, 0x000000ff);
-        start = -1;
-      }
-    }
-  }
-  return true;
-}
-
 fx.rect(960, 540, 1920, 1080, 0x000000ff);
 fx.text(fx.product.name, 92, 52, 52, 0xffffffff);
 fx.text(provisioningEnabled ? "SETUP" : "STORED-NETWORK MODE",
         94, 122, 22, 0xaaaaaaff);
 
 if (provisioningEnabled) {
-  const qrAvailable = drawQr(fx.env("MICROFX_WIFI_QR", ""), 100, 220, 620);
-  fx.text(qrAvailable ? "SCAN TO JOIN SETUP WI-FI" : "JOIN THE SETUP WI-FI",
+  const wifiPayload = "WIFI:T:WPA;S:" + apSsid + ";P:" + apPassword + ";;";
+  fx.qr(wifiPayload, 100, 220, 620);
+  fx.text("SCAN TO JOIN SETUP WI-FI",
           820, 244, 28, 0xffffffff);
   fx.text("Network", 820, 324, 18, 0x999999ff);
   fx.text(apSsid, 820, 358, 34, 0xffffffff);
@@ -61,11 +39,13 @@ if (provisioningEnabled) {
   fx.text("PEERJS NAME", 820, 752, 18, 0x999999ff);
   fx.text(peerId, 820, 790, 32, 0xffffffff);
 } else {
-  fx.text("The setup access point is disabled.", 110, 300, 29, 0xffffffff);
+  fx.qr(peerId, 100, 220, 620);
+  fx.text("SCAN PEERJS NAME", 820, 244, 28, 0xffffffff);
+  fx.text("The setup access point is disabled.", 820, 324, 24, 0xccccccff);
   fx.text("Client Wi-Fi, key-only SSH, and PeerJS remain available.",
-          110, 364, 22, 0xaaaaaaff);
-  fx.text("PEERJS NAME", 110, 528, 18, 0x999999ff);
-  fx.text(peerId, 110, 570, 38, 0xffffffff);
+          820, 372, 19, 0x999999ff);
+  fx.text("PEERJS NAME", 820, 500, 18, 0x999999ff);
+  fx.text(peerId, 820, 540, 38, 0xffffffff);
 }
 
 const countdown = fx.text("Starting project in 40 seconds", 94, 994, 20, 0xaaaaaaff);

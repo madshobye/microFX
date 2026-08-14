@@ -3,8 +3,30 @@
 run_root=${MICROFX_RUN_ROOT:-/run}
 pidfile=$run_root/microfx-status.pid
 report=$run_root/microfx-status
+internet_report=$run_root/microfx-internet-status
 interval=${MICROFX_STATUS_INTERVAL:-15}
 status_command=${MICROFX_STATUS_COMMAND:-/usr/sbin/microfx-status}
+connectivity_url=${MICROFX_CONNECTIVITY_URL:-http://connectivitycheck.gstatic.com/generate_204}
+http_command=${MICROFX_HTTP_COMMAND:-wget}
+ip_command=${MICROFX_IP_COMMAND:-ip}
+
+write_internet_status() {
+  state=$1
+  printf '%s\n' "$state" >"$internet_report.new" &&
+    mv -f "$internet_report.new" "$internet_report"
+}
+
+check_internet() {
+  # A successful default route alone only proves LAN connectivity. Use a small
+  # interface-independent HTTP probe so Ethernet and Wi-Fi follow one policy.
+  if ! "$ip_command" -4 route show default 2>/dev/null | grep -q '^default '; then
+    write_internet_status offline
+  elif "$http_command" -q -T 4 --spider "$connectivity_url"; then
+    write_internet_status online
+  else
+    write_internet_status offline
+  fi
+}
 
 case "$1" in
   start)
@@ -15,6 +37,7 @@ case "$1" in
     (
       trap 'exit 0' TERM INT
       while :; do
+        check_internet
         if "$status_command" >"$report.new"; then
           mv -f "$report.new" "$report"
         else
@@ -32,6 +55,7 @@ case "$1" in
       rm -f "$pidfile"
     fi
     rm -f "$report.new"
+    rm -f "$internet_report.new"
     ;;
   restart)
     "$0" stop

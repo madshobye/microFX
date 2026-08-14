@@ -6,19 +6,23 @@ for the concrete host, VM, SD-card, SSH, update, and recovery workflow.
 
 ## Safety boundary
 
-There are three update levels. Use the narrowest one that fits the change:
+There are six update levels. Use the narrowest one that fits the change:
 
 1. `canvas-upload.sh` builds the current checkout and atomically replaces the
    application release under `/data`. This is the normal graphics/JavaScript
    workflow and does not modify a root slot.
-2. `install-active-root-ssh.sh` updates a strict whitelist of tested userspace
+2. `project-upload.sh` transactionally updates the current demo project while
+   preserving a recoverable copy of its previous code and assets.
+3. `studio-upload.sh` installs the cross-built peer bridge and static Studio,
+   backing up the replaced active-root files under `/data`.
+4. `install-active-root-ssh.sh` updates a strict whitelist of tested userspace
    service/configuration files on the active root. It creates a backup under
    `/data/state/root-update-backups`, validates network/SSH/graphics afterward,
    does not reboot, and never changes Wi-Fi or SSH startup itself.
-3. `install-network-hardening-ssh.sh` updates only reviewed network/SSH
+5. `install-network-hardening-ssh.sh` updates only reviewed network/SSH
    recovery services on the active root. It backs up replacements, never
    includes credentials, and does not restart the live connection.
-4. `install-full-sd.sh` writes the complete image to both Linux root slots.
+6. `install-full-sd.sh` writes the complete image to both Linux root slots.
    This is destructive and is the normal way to make both slots match.
 
 Never use `dd` against an unresolved disk name. Never rewrite the raw boot area
@@ -155,6 +159,9 @@ it.
 cd platforms/imx6dl-dg1
 ./scripts/canvas-ssh.sh 192.168.3.109
 ./scripts/canvas-upload.sh 192.168.3.109
+./scripts/project-upload.sh 192.168.3.109 demo-scene
+./scripts/bundled-projects-upload.sh 192.168.3.109
+./scripts/studio-upload.sh 192.168.3.109
 ./scripts/canvas-screenshot.sh 192.168.3.109
 ./scripts/hardware-smoke.sh 192.168.3.109
 ```
@@ -179,6 +186,13 @@ with the QuickJS message/line while the supervisor waits for the next Save &
 Run request. The generated setup identity persists in
 `/data/config/device-identity.conf`; a portal-edited peer ID in
 `/data/config/peer-id` is intentionally not regenerated.
+
+Run the runtime upload before a project that uses a newly added API. The project
+uploader updates `main.js`, metadata, and the complete asset tree without
+disturbing revision history; when the project is active it stops the renderer,
+checks that the replacement stays alive, and restores the saved files on
+failure. The Studio uploader is separate because it replaces active-root web
+and service files, not the renderer release.
 
 ## Recovery expectations
 
@@ -216,6 +230,9 @@ read again from the device.
 | `build.sh` | Produce and checksum the complete root image | No |
 | `canvas-ssh.sh` | Key-only SSH wrapper | Only the supplied command |
 | `canvas-upload.sh` | Atomic application release build/upload | `/data/apps` |
+| `project-upload.sh` | Backed-up demo project/API and asset update | `/data/apps/projects` |
+| `bundled-projects-upload.sh` | Update every bundled example, preserving user projects | `/data/apps/projects` |
+| `studio-upload.sh` | Cross-built Studio and peer bridge update | Active root + backup on `/data` |
 | `canvas-screenshot.sh` | Retrieve a framebuffer screenshot | Target `/tmp`, host artifacts |
 | `canvas-profile.sh` | Toggle/read RAM-only renderer profiling | `/run` only |
 | `canvas-benchmark.sh` | Run volatile benchmark profiles | `/run`, host artifacts |

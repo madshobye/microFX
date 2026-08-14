@@ -10,16 +10,20 @@ case "$profile" in
     rm -f "$destination"
     exit 0
     ;;
-  native-auto) values='0 0 auto 0.50 rgb565 16 1 none' ;;
-  native-fixed) values='0 0 1.00 1.00 rgb565 16 1 none' ;;
-  native-75) values='0 0 0.75 0.75 rgb565 16 1 none' ;;
-  native-50) values='0 0 0.50 0.50 rgb565 16 1 none' ;;
-  720-fixed) values='1280 720 1.00 1.00 rgb565 16 1 none' ;;
-  720-half) values='1280 720 0.50 0.50 rgb565 16 1 none' ;;
-  1080-fixed) values='1920 1080 1.00 1.00 rgb565 16 1 none' ;;
-  1080-quality) values='1920 1080 1.00 1.00 rgba8888 24 1 msaa4' ;;
+  native-auto) values='0 0 auto 0.50 rgb565 16 1 none 30' ;;
+  native-fixed) values='0 0 1.00 1.00 rgb565 16 1 none 30' ;;
+  native-75) values='0 0 0.75 0.75 rgb565 16 1 none 30' ;;
+  native-50) values='0 0 0.50 0.50 rgb565 16 1 none 30' ;;
+  720-fixed) values='1280 720 1.00 1.00 rgb565 16 1 none 30' ;;
+  720-half) values='1280 720 0.50 0.50 rgb565 16 1 none 30' ;;
+  1080-fixed) values='1920 1080 1.00 1.00 rgb565 16 1 none 30' ;;
+  1080-fixed-60) values='1920 1080 1.00 1.00 rgb565 16 1 none 60' ;;
+  1080-msaa) values='1920 1080 1.00 1.00 rgb565 16 1 msaa4 30' ;;
+  1080-msaa-60) values='1920 1080 1.00 1.00 rgb565 16 1 msaa4 60' ;;
+  1080-color) values='1920 1080 1.00 1.00 rgba8888 24 1 none 30' ;;
+  1080-quality) values='1920 1080 1.00 1.00 rgba8888 24 1 msaa4 30' ;;
   *)
-    echo "Usage: microfx-benchmark-override clear|native-auto|native-fixed|native-75|native-50|720-fixed|720-half|1080-fixed|1080-quality" >&2
+    echo "Usage: microfx-benchmark-override clear|native-auto|native-fixed|native-75|native-50|720-fixed|720-half|1080-fixed|1080-fixed-60|1080-msaa|1080-msaa-60|1080-color|1080-quality" >&2
     exit 2
     ;;
 esac
@@ -32,7 +36,7 @@ umask 077
   echo "MICROFX_OUTPUT_HEIGHT=$2"
   echo "MICROFX_PIXEL_DENSITY=$3"
   echo "MICROFX_MIN_PIXEL_DENSITY=$4"
-  echo 'MICROFX_TARGET_FPS=30'
+  echo "MICROFX_TARGET_FPS=$9"
   echo "MICROFX_COLOR_FORMAT=$5"
   echo "MICROFX_DEPTH_BITS=$6"
   echo "MICROFX_DITHERING=$7"
