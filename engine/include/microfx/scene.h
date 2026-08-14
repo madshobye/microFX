@@ -173,6 +173,11 @@ typedef enum {
     MICROFX_ANTIALIAS_MSAA4 = 1
 } MicroFxAntialiasing;
 
+typedef enum {
+    MICROFX_DEBUG_BAR_STANDARD = 0,
+    MICROFX_DEBUG_BAR_COMPACT = 1
+} MicroFxDebugBarStyle;
+
 typedef struct {
     int outputWidth;
     int outputHeight;
@@ -188,6 +193,7 @@ typedef struct {
     // 0 disables diagnostics, a negative value keeps them visible, and a
     // positive value is the absolute runtime second when they disappear.
     float debugBarUntilSeconds;
+    MicroFxDebugBarStyle debugBarStyle;
     bool profiling;
     int profileIntervalFrames;
     int densitySampleFrames;

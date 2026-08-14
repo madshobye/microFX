@@ -710,6 +710,15 @@ static JSValue Configure(JSContext *ctx,JSValueConst thisValue,int argc,JSValueC
         }
     }
     JS_FreeValue(ctx,debug);
+    present=StringProperty(ctx,argv[0],"debugBarStyle",&value,&property);
+    if(present<0){JS_FreeValue(ctx,property);return JS_ThrowTypeError(ctx,"debugBarStyle must be standard or compact");}
+    if(present){
+        if(strcmp(value,"standard")==0)settings.debugBarStyle=MICROFX_DEBUG_BAR_STANDARD;
+        else if(strcmp(value,"compact")==0)settings.debugBarStyle=MICROFX_DEBUG_BAR_COMPACT;
+        else {JS_FreeCString(ctx,value);JS_FreeValue(ctx,property);return JS_ThrowRangeError(ctx,"debugBarStyle must be standard or compact");}
+        JS_FreeCString(ctx,value);
+    }
+    JS_FreeValue(ctx,property);
     JSValue profiling=JS_GetPropertyStr(ctx,argv[0],"profiling");
     if(!JS_IsUndefined(profiling))settings.profiling=JS_ToBool(ctx,profiling)>0;
     JS_FreeValue(ctx,profiling);

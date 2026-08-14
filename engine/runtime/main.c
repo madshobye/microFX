@@ -410,16 +410,18 @@ static void DrawInterface(float fps, float time,
                           bool automaticDensity, float pixelDensity,
                           int outputWidth, int outputHeight,
                           const char *internetState,
-                          bool internetKnown, bool internetOnline)
+                          bool internetKnown, bool internetOnline,
+                          MicroFxDebugBarStyle style)
 {
+    const bool compact = style == MICROFX_DEBUG_BAR_COMPACT;
     const int barX = 38;
-    const int barY = DESIGN_HEIGHT - 54;
-    const int barHeight = 34;
-    const int padding = 10;
-    const int gap = 12;
-    const int fontSize = 16;
+    const int barY = DESIGN_HEIGHT - (compact ? 38 : 54);
+    const int barHeight = compact ? 24 : 34;
+    const int padding = compact ? 7 : 10;
+    const int gap = compact ? 8 : 12;
+    const int fontSize = compact ? 12 : 16;
     const int tabularCellWidth = DebugTabularCellWidth(fontSize);
-    const int meterWidth = 21;
+    const int meterWidth = compact ? 16 : 21;
     const int meterHeight = fontSize;
     const int meterY = barY + (barHeight - meterHeight)/2;
     const float meterScale = (float)meterWidth/33.333f;
@@ -451,20 +453,31 @@ static void DrawInterface(float fps, float time,
         ? DebugTabularTextWidth(internetState,tabularCellWidth)
         : MeasureText(internetState,fontSize))+MeasureText("CPU",fontSize)+
       MeasureText("GPU",fontSize)+meterWidth*2+gap*8;
-    DrawRectangle(barX,barY,width,barHeight,(Color){4,8,22,245});
-    DrawRectangleLines(barX,barY,width,barHeight,(Color){65,105,145,255});
+    DrawRectangle(barX,barY,width,barHeight,
+                  compact ? (Color){2,4,7,205} : (Color){4,8,22,245});
+    if (!compact) {
+        DrawRectangleLines(barX,barY,width,barHeight,(Color){65,105,145,255});
+    }
     int x=barX+padding,y=barY+(barHeight-fontSize)/2;
-#define DRAW_FIELD(value,red,green,blue) do { \
-    DrawText((value),x,y,fontSize,(Color){red,green,blue,255}); \
+    const Color grey = (Color){132,140,148,255};
+    const Color upColor = compact ? grey : (Color){180,205,235,255};
+    const Color fpsColor = compact ? grey : (Color){255,210,70,255};
+    const Color resolutionColor = compact ? grey : (Color){245,245,245,255};
+    const Color modeColor = compact ? grey : (Color){180,205,235,255};
+    const Color cpuColor = compact ? grey : (Color){40,205,255,255};
+    const Color gpuColor = compact ? grey : (Color){255,85,180,255};
+#define DRAW_FIELD(value,colorValue) do { \
+    DrawText((value),x,y,fontSize,(colorValue)); \
     x+=MeasureText((value),fontSize)+gap; \
 } while(0)
-    DrawDebugTabularText(up,x,y,fontSize,tabularCellWidth,(Color){180,205,235,255});
+    DrawDebugTabularText(up,x,y,fontSize,tabularCellWidth,upColor);
     x+=DebugTabularTextWidth(up,tabularCellWidth)+gap;
-    DrawDebugTabularText(fpsText,x,y,fontSize,tabularCellWidth,(Color){255,210,70,255});
+    DrawDebugTabularText(fpsText,x,y,fontSize,tabularCellWidth,fpsColor);
     x+=DebugTabularTextWidth(fpsText,tabularCellWidth)+gap;
-    DRAW_FIELD(resolution,245,245,245);
-    DRAW_FIELD(mode,180,205,235);
-    Color internetColor = !internetKnown ? (Color){165,175,190,255}
+    DRAW_FIELD(resolution,resolutionColor);
+    DRAW_FIELD(mode,modeColor);
+    Color internetColor = compact ? grey
+                        : !internetKnown ? (Color){165,175,190,255}
                         : internetOnline ? (Color){90,220,145,255}
                                          : (Color){255,105,105,255};
     if (strncmp(internetState,"WIFI ",5)==0) {
@@ -474,12 +487,16 @@ static void DrawInterface(float fps, float time,
         DrawText(internetState,x,y,fontSize,internetColor);
         x+=MeasureText(internetState,fontSize)+gap;
     }
-    DRAW_FIELD("CPU",40,205,255);
-    DrawRectangle(x,meterY,meterWidth,meterHeight,(Color){35,42,66,255});
-    DrawRectangle(x,meterY,cpuWidth,meterHeight,(Color){40,205,255,255});x+=meterWidth+gap;
-    DRAW_FIELD("GPU",255,85,180);
-    DrawRectangle(x,meterY,meterWidth,meterHeight,(Color){35,42,66,255});
-    DrawRectangle(x,meterY,gpuWidth,meterHeight,(Color){255,85,180,255});
+    DRAW_FIELD("CPU",cpuColor);
+    DrawRectangle(x,meterY,meterWidth,meterHeight,
+                  compact ? (Color){45,50,55,255} : (Color){35,42,66,255});
+    DrawRectangle(x,meterY,cpuWidth,meterHeight,
+                  compact ? grey : (Color){40,205,255,255});x+=meterWidth+gap;
+    DRAW_FIELD("GPU",gpuColor);
+    DrawRectangle(x,meterY,meterWidth,meterHeight,
+                  compact ? (Color){45,50,55,255} : (Color){35,42,66,255});
+    DrawRectangle(x,meterY,gpuWidth,meterHeight,
+                  compact ? grey : (Color){255,85,180,255});
 #undef DRAW_FIELD
 }
 
@@ -734,7 +751,8 @@ int main(void)
             DrawInterface(displayedFps, time, cpuAverageMs, gpuAverageMs,
                           runtime.automaticDensity, runtime.pixelDensity,
                           runtime.outputWidth, runtime.outputHeight,
-                          internetState, internetKnown, internetOnline);
+                          internetState, internetKnown, internetOnline,
+                          scriptScene.runtime.debugBarStyle);
             rlPopMatrix();
         }
         if (synchronizedProfiling) glFinish();

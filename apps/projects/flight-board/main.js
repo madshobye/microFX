@@ -1,4 +1,9 @@
-fx.configure({ targetFps: 60, pixelDensity: 1, debugBar: 1 });
+fx.configure({
+  targetFps: 60,
+  pixelDensity: 1,
+  debugBar: true,
+  debugBarStyle: "compact"
+});
 
 // Change this block to move the entire sketch to another airport.
 const PLACE = {

@@ -24,6 +24,7 @@ void MicroFxSceneInit(MicroFxScene *scene)
     scene->runtime.automaticDensity = true;
     scene->runtime.dithering = true;
     scene->runtime.debugBarUntilSeconds = 10.0f*60.0f;
+    scene->runtime.debugBarStyle = MICROFX_DEBUG_BAR_STANDARD;
     scene->runtime.profiling = false;
     scene->runtime.profileIntervalFrames = 120;
     scene->runtime.densitySampleFrames = 60;

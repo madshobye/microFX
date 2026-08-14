@@ -28,6 +28,7 @@ fx.configure({
   densityUpSamples: 4,        // consecutive samples before raising quality
   targetFps: 30,
   debugBar: 10,
+  debugBarStyle: "standard", // standard or compact monochrome
   durationSeconds: 0,
   quality: "performance",     // performance, balanced, or quality
   colorFormat: "rgb565",      // rgb565 or rgba8888
@@ -185,7 +186,8 @@ The named quality preset establishes a complete baseline, after which explicit
 Environment variables are the final deployment override. The diagnostics bar
 defaults to ten minutes after each renderer start. `debugBar(false)` disables
 it, `debugBar(true)` keeps it visible, and `debugBar(minutes)` restarts a timed
-window; calls from `update()` take effect on the next frame.
+window; calls from `update()` take effect on the next frame. Set
+`debugBarStyle: "compact"` for the smaller borderless monochrome presentation.
 Automatic density uses separate overload and recovery thresholds to avoid
 oscillation. It lowers at the first overloaded sample and raises only after
 `densityUpSamples` consecutive under-budget samples. The five density policy

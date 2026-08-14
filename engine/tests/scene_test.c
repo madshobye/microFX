@@ -8,6 +8,7 @@ int main(void)
     MicroFxSceneInit(&scene);
     assert(scene.camera.fovY == 48.0f);
     assert(scene.runtime.targetFps == 30 && scene.runtime.debugBarUntilSeconds == 600.0f);
+    assert(scene.runtime.debugBarStyle == MICROFX_DEBUG_BAR_STANDARD);
     assert(scene.runtime.durationSeconds == 0.0f);
     assert(!scene.runtime.profiling && scene.runtime.profileIntervalFrames == 120);
     assert(scene.runtime.densitySampleFrames == 60);
