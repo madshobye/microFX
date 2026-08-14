@@ -23,9 +23,9 @@ const map = scene.add(fx.tileMap({
   filter: {
     grayscale: 1,
     invert: 1,
-    contrast: 0.9,
-    brightness: 0.72,
-    tint: 0x25364dff
+    contrast: 1.35,
+    brightness: 0.95,
+    tint: 0x405a75ff
   }
 }));
 scene.add(fx.text("CPH LIVE AIRSPACE", 55, 45, 28, 0x7ee5ffff));

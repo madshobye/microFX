@@ -1,4 +1,5 @@
 #include "microfx/tile_renderer.h"
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,7 +76,9 @@ bool MicroFxTileRendererUpdate(MicroFxTileRenderer *renderer,MicroFxScene *scene
             Image image=LoadImageFromMemory(".png",tile->encoded,(int)tile->encodedSize);
             if(IsImageValid(image)){
                 Rectangle source={0,0,(float)image.width,(float)image.height};
-                Rectangle target={tile->x,tile->y,tile->size,tile->size};
+                float left=floorf(tile->x),top=floorf(tile->y);
+                float right=ceilf(tile->x+tile->size),bottom=ceilf(tile->y+tile->size);
+                Rectangle target={left,top,right-left,bottom-top};
                 ImageDraw(&state->staging,image,source,target,WHITE);UnloadImage(image);
             }else fprintf(stderr,"MICROFX_TILE ignored invalid PNG tile %d/%d\n",
                           i,map->tileCount);
