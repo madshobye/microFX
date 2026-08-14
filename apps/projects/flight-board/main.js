@@ -29,11 +29,10 @@ const map = scene.add(fx.tileMap({
   }
 }));
 scene.add(fx.text("CPH LIVE AIRSPACE", 55, 45, 28, 0x7ee5ffff));
-scene.add(fx.text("DATA: ADSB.FI", 55, 1040, 14, 0x6e8ca8ff)
+scene.add(fx.text("ADSB.FI", 55, 1044, 11, 0x35495eff)
   .antialias(false));
-scene.add(fx.text("© OPENSTREETMAP CONTRIBUTORS · OPENSTREETMAP.ORG/COPYRIGHT",
-  1210, 1040, 12, 0x6e8ca8ff).antialias(false));
-const status = scene.add(fx.text("OFFLINE SNAPSHOT", 1530, 50, 18, 0x6e8ca8ff));
+scene.add(fx.text("© OPENSTREETMAP CONTRIBUTORS",
+  1640, 1044, 11, 0x35495eff).antialias(false));
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapX = longitude => map.project(longitude, 55.67).x;
@@ -73,7 +72,6 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
 let clockTime = 0;
 let requestInFlight = false;
 let nextRequestTime = 0;
-let hasLiveData = false;
 const routeCache = new Map();
 const routeQueue = [];
 let routeInFlight = false;
@@ -286,9 +284,6 @@ function applyFlights(values, live) {
     slot.label.visible(false);
   });
 
-  hasLiveData = live;
-  status.text(live ? `LIVE / ${items.length} AIRCRAFT` : "OFFLINE SNAPSHOT")
-    .color(live ? 0x7ee5ffff : 0x6e8ca8ff);
 }
 
 function normalizeFlights(payload) {
@@ -351,8 +346,6 @@ function requestFlights() {
     .catch(() => {
       requestInFlight = false;
       nextRequestTime = clockTime + POLL_SECONDS;
-      status.text(hasLiveData ? "LIVE / RETRYING" : "OFFLINE SNAPSHOT")
-        .color(hasLiveData ? 0xffd55aff : 0x6e8ca8ff);
     });
 }
 
