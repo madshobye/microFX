@@ -25,10 +25,12 @@ const MAX_FLIGHTS = 50;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
-const MAX_TRANSIT = 120;
+const MAX_TRANSIT = 200;
 const MAX_METRO = 40;
+const MAX_BUSES = 80;
 const TRANSIT_MODES = new Set(["LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN"]);
 const METRO_MODES = new Set(["SUBWAY"]);
+const BUS_MODES = new Set(["BUS"]);
 const TRANSIT_URL = "https://api.transitous.org/api/v6/map/trips";
 const TRANSIT_USER_AGENT =
   "microFX-copenhagen-map/0.1 (+https://github.com/madshobye/microFX)";
@@ -633,6 +635,8 @@ function styleTransit(slot, mode) {
   slot.mode = mode;
   if (mode === "SUBWAY") {
     slot.marker.shape("circle", 5, 5, 2.5).color(0xffd55aff);
+  } else if (mode === "BUS") {
+    slot.marker.shape("circle", 3, 3, 1.5).color(0x7f8d96ff);
   } else {
     slot.marker.shape("circle", 6, 6, 3).color(0x65e6ffff);
   }
@@ -696,10 +700,12 @@ function requestTransit() {
       if (!payloads.every(Array.isArray)) throw new Error("invalid Transitous response");
       const now = Date.now();
       const trains = normalizeTransit(payloads[0], now, TRANSIT_MODES)
-        .slice(0, MAX_TRANSIT - MAX_METRO);
+        .slice(0, MAX_TRANSIT - MAX_METRO - MAX_BUSES);
       const metro = normalizeTransit(payloads[1], now, METRO_MODES)
         .slice(0, MAX_METRO);
-      applyTransit(trains.concat(metro));
+      const buses = normalizeTransit(payloads[1], now, BUS_MODES)
+        .slice(0, MAX_BUSES);
+      applyTransit(trains.concat(metro, buses));
       transitRequestInFlight = false;
       nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
     })
