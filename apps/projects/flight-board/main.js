@@ -30,6 +30,7 @@ const MAX_FLIGHTS = 50;
 const MAX_AIRPORT_DOTS = 50;
 const AIRPORT_CLUSTER_MIN_RADIUS = 9;
 const AIRPORT_CLUSTER_MAX_RADIUS = 24;
+const LANDMARK_BREATH_SECONDS = 3;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
@@ -102,9 +103,13 @@ scene.add(fx.text("OPENSTREETMAP + CARTO",
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapPoint = (longitude, latitude) => map.project(longitude, latitude);
-PLACE.landmarks.forEach(landmark => {
+const landmarks = PLACE.landmarks.map(landmark => {
   const point = mapPoint(landmark.longitude, landmark.latitude);
-  scene.add(fx.circle(point.x, point.y, landmark.radius, landmark.color));
+  return {
+    element: scene.add(fx.circle(point.x, point.y, landmark.radius, landmark.color)),
+    color: landmark.color,
+    brightnessStep: -1
+  };
 });
 const airportPoint = mapPoint(PLACE.airport.longitude, PLACE.airport.latitude);
 const airportX = airportPoint.x;
@@ -205,6 +210,23 @@ let nextAisConnectTime = 0;
 const shipDetails = new Map();
 let transitRequestInFlight = false;
 let nextTransitRequestTime = 0;
+
+function brightnessColor(color, brightness) {
+  const channel = shift => Math.round(clamp(((color >>> shift) & 255) * brightness,
+    0, 255));
+  return ((channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) |
+    (color & 255)) >>> 0;
+}
+
+function updateLandmarks(time) {
+  const wave = 0.85 + Math.sin(time * Math.PI * 2 / LANDMARK_BREATH_SECONDS) * 0.15;
+  const step = Math.round(wave * 12);
+  landmarks.forEach(landmark => {
+    if (landmark.brightnessStep === step) return;
+    landmark.brightnessStep = step;
+    landmark.element.color(brightnessColor(landmark.color, step / 12));
+  });
+}
 
 function labelText(slot) {
   const route = routeCache.get(slot.callsign);
@@ -930,6 +952,7 @@ requestTransit();
 function update(time, delta) {
   clockTime = time;
   scene.show();
+  updateLandmarks(time);
   if (!requestInFlight && time >= nextRequestTime) requestFlights();
   if (!transitRequestInFlight && time >= nextTransitRequestTime) requestTransit();
   requestNextRoute();
