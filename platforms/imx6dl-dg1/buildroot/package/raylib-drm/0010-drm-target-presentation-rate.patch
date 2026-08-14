@@ -1,6 +1,10 @@
 --- a/src/platforms/rcore_drm.c
 +++ b/src/platforms/rcore_drm.c
-@@ -594,6 +594,38 @@ void SwapScreenBuffer(void)
+@@ -51,2 +51,3 @@
+ #include <fcntl.h>   // POSIX file control definitions - open(), creat(), fcntl()
++#include <errno.h>   // POSIX error constants - EINTR
+ #include <unistd.h>  // POSIX standard function definitions - read(), close(), STDIN_FILENO
+@@ -594,6 +594,43 @@ void SwapScreenBuffer(void)
      }
      double tWaitEnd = SwapClockMs();
  

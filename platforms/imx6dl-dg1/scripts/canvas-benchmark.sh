@@ -18,7 +18,7 @@ mkdir -p "$OUTPUT"
 
 for profile in $PROFILES; do
   case "$profile" in
-    native-auto|native-fixed|native-75|native-50|720-fixed|720-half|1080-fixed|1080-fixed-60|1080-msaa|1080-msaa-60|1080-color|1080-quality) ;;
+    native-auto|native-fixed|native-75|native-50|720-fixed|720-fixed-60|720-half|1080-fixed|1080-fixed-60|1080-msaa|1080-msaa-60|1080-color|1080-quality) ;;
     *) echo "Unknown benchmark profile: $profile" >&2; exit 2 ;;
   esac
   echo "Capturing $profile for $CAPTURE_SECONDS seconds" >&2

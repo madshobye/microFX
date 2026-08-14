@@ -263,6 +263,9 @@ combined comparison matrix are retained only in the requested host directory.
 For quality isolation, `1080-msaa` changes only MSAA from `1080-fixed`, while
 `1080-color` changes only scanout color/depth. The `-60` variants of fixed and
 MSAA exercise the display-rate boundary without conflating it with resolution;
+`720-fixed-60` does the same at 720p. Unsupported EGL quality combinations fail
+loudly and the capture helper restores the normal project; on the current
+GC880/Mesa target, `msaa4` has no suitable EGL configuration.
 `1080-quality` enables RGBA8888, 24-bit depth, and MSAA together.
 
 Each target profile is written below `/run`, applied to one renderer child by a

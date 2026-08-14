@@ -87,6 +87,19 @@ the resulting time state rather than requiring `ntpd` to remain resident.
    volatile `/run` override, removes it, and reloads the normal project after
    every capture; verify the normal project is visible before continuing.
 
+### Current development-unit result (2026-08-14)
+
+- The 24-mesh demo averages about 49.94 ms at fixed 1920x1080 with either a
+  30 or 60 fps target. CPU submission is about 8.2 ms; GPU/presentation work is
+  the limiting part, so this is not an artificial 30 fps cap.
+- Fixed 1280x720 with a 30 fps target averages about 33.20 ms and presents at a
+  stable two-vblank cadence. A 60 fps target averages 21.10 ms (about 47 fps),
+  so it intermittently misses vblank and is not a stable 60 fps mode.
+- RGBA8888 with 24-bit depth works at 1080p and is slightly slower. Four-sample
+  MSAA has no suitable EGL configuration and fails initialization loudly; do
+  not claim antialiasing is active from configuration alone—confirm
+  `CANVAS_GL samples=4` in the target log.
+
 ## Later experimental validation
 
 - Complete the DDR, storage offsets, pin multiplexing, and serial recovery facts

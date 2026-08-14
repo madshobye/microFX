@@ -105,7 +105,9 @@ dithering, antialiasing, and profiling controls through top-level
 so a project can independently choose, for example, RGBA8888, fixed native
 resolution, no MSAA, and a 20 FPS target. `msaa4` is available for jagged 3D
 edges but must be measured on the target because it increases fragment and
-memory bandwidth substantially.
+memory bandwidth substantially. The current GC880/EGL stack exposes no suitable
+four-sample configuration, so `msaa4` deliberately fails project startup instead
+of pretending antialiasing is active.
 
 OpenGL ES 2 has no reliable GPU timer query on this target. The status bar's CPU
 average uses process CPU time. “GPU” is the remaining wall-clock render/present
