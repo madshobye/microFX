@@ -1,14 +1,28 @@
 fx.configure({ targetFps: 60, pixelDensity: 1, debugBar: 1 });
 
-const LON_MIN = 12.16;
-const LON_MAX = 13.11;
-const LAT_MIN = 55.53;
-const LAT_MAX = 55.81;
-const DATA_URL = "https://opendata.adsb.fi/api/v3/lat/55.6181/lon/12.6561/dist/25";
+// Change this block to move the entire sketch to another airport.
+const PLACE = {
+  label: "CORDOBA",
+  airport: {
+    iata: "COR",
+    icao: "SACO",
+    latitude: -31.31,
+    longitude: -64.208333
+  },
+  mapCenter: {
+    latitude: -31.37,
+    longitude: -64.2
+  },
+  mapZoom: 11.45,
+  searchRadiusNm: 25,
+  airportGroundRadiusKm: 3
+};
+
 const POLL_SECONDS = 5;
 const CORRECTION_SECONDS = 8;
 const MAX_FLIGHTS = 50;
-const fallback = fx.data("flights.json", { flights: [] });
+const DATA_URL = `https://opendata.adsb.fi/api/v3/lat/${PLACE.airport.latitude}` +
+  `/lon/${PLACE.airport.longitude}/dist/${PLACE.searchRadiusNm}`;
 const scene = fx.scenes.add(fx.scene({ name: "flight-board" }));
 
 const map = scene.add(fx.tileMap({
@@ -17,8 +31,8 @@ const map = scene.add(fx.tileMap({
     tileSize: 256,
     attribution: "© OpenStreetMap contributors"
   },
-  center: [12.635, 55.67],
-  zoom: 11.45,
+  center: [PLACE.mapCenter.longitude, PLACE.mapCenter.latitude],
+  zoom: PLACE.mapZoom,
   cacheDays: 7,
   filter: {
     grayscale: 1,
@@ -28,17 +42,17 @@ const map = scene.add(fx.tileMap({
     tint: 0x405a75ff
   }
 }));
-scene.add(fx.text("CPH LIVE AIRSPACE", 55, 45, 28, 0x7ee5ffff));
+scene.add(fx.text(`${PLACE.label} AIRSPACE`, 55, 45, 28, 0x7ee5ffff));
 scene.add(fx.text("ADSB.FI", 55, 1044, 11, 0x35495eff)
   .antialias(false));
 scene.add(fx.text("© OPENSTREETMAP CONTRIBUTORS",
   1640, 1044, 11, 0x35495eff).antialias(false));
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
-const mapX = longitude => map.project(longitude, 55.67).x;
-const mapY = latitude => map.project(12.635, latitude).y;
-const airportX = mapX(12.6561);
-const airportY = mapY(55.6181);
+const mapPoint = (longitude, latitude) => map.project(longitude, latitude);
+const airportPoint = mapPoint(PLACE.airport.longitude, PLACE.airport.latitude);
+const airportX = airportPoint.x;
+const airportY = airportPoint.y;
 const airportDot = scene.add(fx.sdfCircle(airportX, airportY, 11, 0xffd55aff)
   .visible(false));
 const airportCount = scene.add(fx.text("x 0", airportX + 20, airportY - 10,
@@ -84,6 +98,9 @@ function labelText(slot) {
 
 function updateAirportCount(payload) {
   const landed = payload.ac.filter(row => row && row.alt_baro === "ground" &&
+    Number.isFinite(row.lon) && Number.isFinite(row.lat) &&
+    distanceKm(Number(row.lon), Number(row.lat), PLACE.airport.longitude,
+      PLACE.airport.latitude) <= PLACE.airportGroundRadiusKm &&
     row.t !== "TWR" && !String(row.category || "").startsWith("C")).length;
   const visible = landed > 0;
   airportDot.visible(visible);
@@ -118,10 +135,14 @@ function placeName(airport) {
     airport.iata_code || airport.icao_code || "").trim().toUpperCase();
 }
 
+function isLocalAirport(airport) {
+  return String(airport.iata_code || "").toUpperCase() === PLACE.airport.iata ||
+    String(airport.icao_code || "").toUpperCase() === PLACE.airport.icao;
+}
+
 function routeDescription(origin, destination) {
-  const originLocal = origin.iata_code === "CPH" || origin.icao_code === "EKCH";
-  const destinationLocal = destination.iata_code === "CPH" ||
-    destination.icao_code === "EKCH";
+  const originLocal = isLocalAirport(origin);
+  const destinationLocal = isLocalAirport(destination);
   const from = placeName(origin);
   const to = placeName(destination);
   if (destinationLocal && from) return from;
@@ -153,13 +174,21 @@ function requestNextRoute() {
 
 function screenVelocity(item) {
   const heading = item.heading * Math.PI / 180;
-  const latitudeScale = 1080 / (LAT_MAX - LAT_MIN);
-  const longitudeScale = 1920 / (LON_MAX - LON_MIN);
+  const base = mapPoint(item.longitude, item.latitude);
+  const oneMetreEast = mapPoint(item.longitude + 1 /
+    (111320 * Math.max(0.2, Math.cos(item.latitude * Math.PI / 180))), item.latitude);
+  const oneMetreNorth = mapPoint(item.longitude, item.latitude + 1 / 111320);
   return {
-    x: Math.sin(heading) * item.velocity /
-      (111320 * Math.max(0.2, Math.cos(item.latitude * Math.PI / 180))) * longitudeScale,
-    y: -Math.cos(heading) * item.velocity / 111320 * latitudeScale
+    x: Math.sin(heading) * item.velocity * (oneMetreEast.x - base.x),
+    y: Math.cos(heading) * item.velocity * (oneMetreNorth.y - base.y)
   };
+}
+
+function distanceKm(longitudeA, latitudeA, longitudeB, latitudeB) {
+  const latitude = (latitudeA + latitudeB) * Math.PI / 360;
+  const x = (longitudeB - longitudeA) * Math.cos(latitude);
+  const y = latitudeB - latitudeA;
+  return Math.sqrt(x * x + y * y) * 111.32;
 }
 
 function setHeading(slot, heading, speed) {
@@ -240,8 +269,9 @@ function applyFlights(values, live) {
     if (!slot) return;
     assigned.add(slot);
 
-    const x = mapX(item.longitude);
-    const y = mapY(item.latitude);
+    const point = mapPoint(item.longitude, item.latitude);
+    const x = point.x;
+    const y = point.y;
     const velocity = screenVelocity(item);
     const sameAircraft = slot.active && slot.id === item.id;
     const positionTime = Number(item.positionTime || 0);
@@ -291,8 +321,10 @@ function normalizeFlights(payload) {
   const snapshotTime = Number(payload.now || Date.now()) / 1000;
   return payload.ac
     .filter(row => row && Number.isFinite(row.lon) && Number.isFinite(row.lat) &&
-      row.alt_baro !== "ground" && row.lon >= LON_MIN && row.lon <= LON_MAX &&
-      row.lat >= LAT_MIN && row.lat <= LAT_MAX)
+      row.alt_baro !== "ground" && (() => {
+        const point = mapPoint(Number(row.lon), Number(row.lat));
+        return point.x >= -120 && point.x <= 2040 && point.y >= -120 && point.y <= 1200;
+      })())
     .slice(0, flights.length)
     .map((row, index) => {
       const velocity = Math.max(0, Number(row.gs || 0)) * 0.514444;
@@ -349,18 +381,6 @@ function requestFlights() {
     });
 }
 
-applyFlights(fallback.flights.map((item, index) => ({
-  id: `fallback-${index}`,
-  callsign: String(item.callsign || `AIRCRAFT ${index + 1}`),
-  longitude: Number(item.longitude),
-  latitude: Number(item.latitude),
-  velocity: Math.max(0, Number(item.speed || 0)),
-  heading: Number(item.heading || 0),
-  positionTime: 0,
-  aircraftKind: "small",
-  markerRadius: 7,
-  onGround: false
-})), false);
 requestFlights();
 
 function update(time, delta) {
