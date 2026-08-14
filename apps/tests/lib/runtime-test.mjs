@@ -9,7 +9,7 @@ export const defaultCapacities = Object.freeze({
   mesh: 256,
   text: 64,
   image: 16,
-  outline: 64
+  outline: 96
 });
 
 function finite(label, values) {
@@ -214,6 +214,11 @@ function instrumentedNativeFx(root, capacities) {
         throw error;
       }
     },
+    secret(name, fallback = "") {
+      assert.match(name, /^[A-Za-z0-9_-]+$/);
+      return fallback;
+    },
+    log() {},
     product: Object.freeze({
       name: "microFX",
       slug: "microfx",

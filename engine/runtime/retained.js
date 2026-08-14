@@ -460,7 +460,7 @@
   };
 
   // feed() is an experimental snapshot/file helper, not the networking API.
-  // Direct HTTP, TCP, and UDP access lives under fetch() and fx.net.
+  // Direct HTTP, WebSocket, TCP, and UDP access lives under fetch() and fx.net.
   fx.feed = function feed(path, fallback) {
     const key = String(path);
     if (feedCache.has(key)) return feedCache.get(key);
@@ -599,6 +599,30 @@
       return server;
     }
 
+    function websocketConnect(options) {
+      const settings = typeof options === "string" ? { url: options } : options;
+      if (!settings || !settings.url) {
+        throw new TypeError("websocket.connect requires a ws:// or wss:// URL");
+      }
+      const handle = fx._netWebSocketConnect(String(settings.url));
+      const socket = {
+        send(value) { return fx._netWebSocketSend(handle, bytes(value)); },
+        close() { fx._netClose(handle); },
+        onOpen(callback) { on(handle, OPEN, callback); return socket; },
+        onMessage(callback) {
+          on(handle, DATA, buffer => callback(decode(buffer), new Uint8Array(buffer)));
+          return socket;
+        },
+        onClose(callback) { on(handle, CLOSE, callback); return socket; },
+        onError(callback) { on(handle, ERROR, callback); return socket; }
+      };
+      if (settings.onOpen) socket.onOpen(settings.onOpen);
+      if (settings.onMessage) socket.onMessage(settings.onMessage);
+      if (settings.onClose) socket.onClose(settings.onClose);
+      if (settings.onError) socket.onError(settings.onError);
+      return socket;
+    }
+
     function latin1(data) {
       let result = "";
       for (let index = 0; index < data.length; index += 1024) {
@@ -660,6 +684,7 @@
       decode,
       udp: Object.freeze({ open: udp }),
       tcp: Object.freeze({ connect, listen }),
+      websocket: Object.freeze({ connect: websocketConnect }),
       http: Object.freeze({ serve })
     });
   }

@@ -1,5 +1,6 @@
 #include "microfx/network.h"
 #include <curl/curl.h>
+#include <libwebsockets.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -12,7 +13,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-enum { HTTP_LIMIT=4, SOCKET_LIMIT=16, BODY_LIMIT=256*1024, IO_LIMIT=64*1024 };
+enum { HTTP_LIMIT=4, SOCKET_LIMIT=16, WEBSOCKET_LIMIT=4,
+       WEBSOCKET_QUEUE_LIMIT=32, WEBSOCKET_MESSAGES_PER_PUMP=8,
+       BODY_LIMIT=256*1024, IO_LIMIT=64*1024, WEBSOCKET_HANDLE_BASE=1000 };
 typedef enum { NET_UNUSED, NET_UDP, NET_TCP_CONNECTING, NET_TCP, NET_TCP_LISTENER } NetKind;
 
 typedef struct {
@@ -32,14 +35,136 @@ typedef struct {
     JSValue callbacks[5];
 } NetSocket;
 
+typedef struct {
+    struct MicroFxNetwork *network;
+    struct lws *wsi;
+    JSValue callbacks[4];
+    uint8_t *incoming;
+    size_t incomingSize;
+    uint8_t *outgoing;
+    size_t outgoingSize;
+    uint8_t *messages[WEBSOCKET_QUEUE_LIMIT];
+    size_t messageSizes[WEBSOCKET_QUEUE_LIMIT];
+    int messageHead;
+    int messageCount;
+    bool active;
+    bool loggedFirstMessage;
+} WebSocket;
+
 struct MicroFxNetwork {
     JSContext *context;
     CURLM *multi;
     HttpRequest http[HTTP_LIMIT];
     NetSocket sockets[SOCKET_LIMIT];
+    struct lws_context *websocketContext;
+    WebSocket websockets[WEBSOCKET_LIMIT];
+    bool destroying;
 };
 
 enum { EVENT_OPEN, EVENT_DATA, EVENT_CLOSE, EVENT_ERROR, EVENT_CONNECTION };
+
+static int Bytes(JSContext *ctx,JSValueConst value,const uint8_t **bytes,
+                 size_t *length,const char **owned);
+
+static bool EmitWebSocket(WebSocket *socket,int event,int argc,JSValue *argv)
+{
+    if(!socket||!socket->network||socket->network->destroying)return true;
+    JSContext *ctx=socket->network->context;
+    JSValue callback=socket->callbacks[event];
+    if(!JS_IsFunction(ctx,callback))return true;
+    JSValue result=JS_Call(ctx,callback,JS_UNDEFINED,argc,argv);
+    if(JS_IsException(result)){JS_FreeValue(ctx,result);return false;}
+    JS_FreeValue(ctx,result);return true;
+}
+
+static void ResetWebSocket(WebSocket *socket)
+{
+    if(!socket||!socket->active)return;
+    JSContext *ctx=socket->network->context;
+    for(int event=0;event<4;event++){
+        JS_FreeValue(ctx,socket->callbacks[event]);socket->callbacks[event]=JS_UNDEFINED;
+    }
+    free(socket->incoming);free(socket->outgoing);
+    for(int i=0;i<socket->messageCount;i++){
+        int index=(socket->messageHead+i)%WEBSOCKET_QUEUE_LIMIT;
+        free(socket->messages[index]);socket->messages[index]=NULL;
+    }
+    socket->incoming=NULL;socket->outgoing=NULL;
+    socket->incomingSize=0;socket->outgoingSize=0;socket->messageHead=0;
+    socket->messageCount=0;socket->loggedFirstMessage=false;
+    socket->wsi=NULL;socket->active=false;
+}
+
+static int WebSocketCallback(struct lws *wsi,enum lws_callback_reasons reason,
+                             void *user,void *data,size_t length)
+{
+    (void)user;WebSocket *socket=(WebSocket *)lws_wsi_user(wsi);
+    switch(reason){
+    case LWS_CALLBACK_CLIENT_ESTABLISHED:
+        fprintf(stderr,"MICROFX_NET websocket connected\n");
+        if(socket&&!EmitWebSocket(socket,EVENT_OPEN,0,NULL))return -1;
+        break;
+    case LWS_CALLBACK_CLIENT_RECEIVE:
+        if(!socket||length>BODY_LIMIT-socket->incomingSize)return -1;
+        if(length){
+            uint8_t *next=realloc(socket->incoming,socket->incomingSize+length);
+            if(!next)return -1;
+            socket->incoming=next;memcpy(next+socket->incomingSize,data,length);
+            socket->incomingSize+=length;
+        }
+        if(lws_is_final_fragment(wsi)&&lws_remaining_packet_payload(wsi)==0){
+            if(socket->messageCount==WEBSOCKET_QUEUE_LIMIT){
+                free(socket->messages[socket->messageHead]);
+                socket->messages[socket->messageHead]=NULL;
+                socket->messageHead=(socket->messageHead+1)%WEBSOCKET_QUEUE_LIMIT;
+                socket->messageCount--;
+            }
+            int index=(socket->messageHead+socket->messageCount)%WEBSOCKET_QUEUE_LIMIT;
+            socket->messages[index]=socket->incoming;
+            socket->messageSizes[index]=socket->incomingSize;
+            socket->messageCount++;
+            socket->incoming=NULL;socket->incomingSize=0;
+            if(!socket->loggedFirstMessage){
+                fprintf(stderr,"MICROFX_NET websocket first_message bytes=%zu\n",
+                        socket->messageSizes[index]);socket->loggedFirstMessage=true;
+            }
+            // Keep a busy stream from making one lws_service() call drain an
+            // unbounded number of messages before the renderer gets control.
+            lws_rx_flow_control(wsi,0);
+        }
+        break;
+    case LWS_CALLBACK_CLIENT_WRITEABLE:
+        if(socket&&socket->outgoing){
+            int written=lws_write(wsi,socket->outgoing+LWS_PRE,socket->outgoingSize,
+                                  LWS_WRITE_TEXT);
+            if(written<(int)socket->outgoingSize)return -1;
+            fprintf(stderr,"MICROFX_NET websocket message_sent bytes=%zu\n",
+                    socket->outgoingSize);
+            free(socket->outgoing);socket->outgoing=NULL;socket->outgoingSize=0;
+        }
+        break;
+    case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
+        if(socket){
+            fprintf(stderr,"MICROFX_NET websocket error=%s\n",
+                    data?(const char *)data:"connection failed");
+            JSContext *ctx=socket->network->context;
+            JSValue value=JS_NewString(ctx,data?(const char *)data:"WebSocket connection failed");
+            bool ok=EmitWebSocket(socket,EVENT_ERROR,1,&value);JS_FreeValue(ctx,value);
+            ResetWebSocket(socket);if(!ok)return -1;
+        }
+        break;
+    case LWS_CALLBACK_CLIENT_CLOSED:
+        if(socket){bool ok=EmitWebSocket(socket,EVENT_CLOSE,0,NULL);ResetWebSocket(socket);if(!ok)return -1;}
+        break;
+    default:break;
+    }
+    return 0;
+}
+
+static const struct lws_protocols WebSocketProtocols[]={
+    {"microfx-websocket",WebSocketCallback,0,IO_LIMIT,0,NULL,0},
+    LWS_PROTOCOL_LIST_TERM
+};
 
 static MicroFxNetwork *FromData(JSContext *ctx, JSValue *data)
 {
@@ -144,6 +269,64 @@ static NetSocket *SocketFor(MicroFxNetwork *network,int32_t handle)
     if(handle<1||handle>SOCKET_LIMIT)return NULL;
     NetSocket *socket=&network->sockets[handle-1];
     return socket->kind==NET_UNUSED?NULL:socket;
+}
+
+static WebSocket *WebSocketFor(MicroFxNetwork *network,int32_t handle)
+{
+    int index=handle-WEBSOCKET_HANDLE_BASE-1;
+    if(index<0||index>=WEBSOCKET_LIMIT)return NULL;
+    return network->websockets[index].active?&network->websockets[index]:NULL;
+}
+
+static JSValue WebSocketConnect(JSContext *ctx,JSValueConst thisValue,int argc,
+                                JSValueConst *argv,int magic,JSValue *data)
+{
+    (void)thisValue;(void)magic;MicroFxNetwork *network=FromData(ctx,data);
+    if(!network||argc!=1)return JS_ThrowTypeError(ctx,"websocket.connect(url) requires one URL");
+    const char *input=JS_ToCString(ctx,argv[0]);if(!input)return JS_EXCEPTION;
+    size_t inputLength=strlen(input);
+    if(inputLength<6||inputLength>=2048||
+       (strncmp(input,"ws://",5)!=0&&strncmp(input,"wss://",6)!=0)){
+        JS_FreeCString(ctx,input);return JS_ThrowTypeError(ctx,"WebSocket URL must use ws:// or wss://");
+    }
+    char url[2048];memcpy(url,input,inputLength+1);JS_FreeCString(ctx,input);
+    const char *protocol=NULL,*address=NULL,*path=NULL;int port=0;
+    if(lws_parse_uri(url,&protocol,&address,&port,&path)||!address||!path)
+        return JS_ThrowTypeError(ctx,"invalid WebSocket URL");
+    WebSocket *socket=NULL;int index=0;
+    for(index=0;index<WEBSOCKET_LIMIT;index++)if(!network->websockets[index].active){socket=&network->websockets[index];break;}
+    if(!socket)return JS_ThrowRangeError(ctx,"maximum 4 WebSocket connections");
+    socket->network=network;socket->active=true;socket->loggedFirstMessage=false;
+    for(int event=0;event<4;event++)socket->callbacks[event]=JS_UNDEFINED;
+    char fullPath[2048];snprintf(fullPath,sizeof(fullPath),"/%s",path[0]=='/'?path+1:path);
+    struct lws_client_connect_info info={0};
+    info.context=network->websocketContext;info.address=address;info.port=port;
+    info.path=fullPath;info.host=address;info.origin=address;
+    info.protocol=WebSocketProtocols[0].name;info.userdata=socket;
+    if(strcmp(protocol,"wss")==0)info.ssl_connection=LCCSCF_USE_SSL;
+    socket->wsi=lws_client_connect_via_info(&info);
+    if(!socket->wsi){ResetWebSocket(socket);return JS_ThrowInternalError(ctx,"WebSocket connection could not be queued");}
+    return JS_NewInt32(ctx,WEBSOCKET_HANDLE_BASE+index+1);
+}
+
+static JSValue WebSocketSend(JSContext *ctx,JSValueConst thisValue,int argc,
+                             JSValueConst *argv,int magic,JSValue *data)
+{
+    (void)thisValue;(void)magic;MicroFxNetwork *network=FromData(ctx,data);int32_t handle=0;
+    if(!network||argc<2||JS_ToInt32(ctx,&handle,argv[0]))
+        return JS_ThrowTypeError(ctx,"websocket.send(handle,data)");
+    WebSocket *socket=WebSocketFor(network,handle);
+    if(!socket||!socket->wsi)return JS_ThrowRangeError(ctx,"WebSocket is closed");
+    if(socket->outgoing)return JS_NewInt32(ctx,0);
+    const uint8_t *bytes=NULL;size_t length=0;const char *owned=NULL;
+    if(Bytes(ctx,argv[1],&bytes,&length,&owned)<0)
+        return JS_ThrowTypeError(ctx,"WebSocket data must be a string or ArrayBuffer");
+    if(length>IO_LIMIT){if(owned)JS_FreeCString(ctx,owned);return JS_ThrowRangeError(ctx,"WebSocket message exceeds 64 KiB");}
+    socket->outgoing=malloc(LWS_PRE+length);
+    if(!socket->outgoing){if(owned)JS_FreeCString(ctx,owned);return JS_ThrowOutOfMemory(ctx);}
+    memcpy(socket->outgoing+LWS_PRE,bytes,length);socket->outgoingSize=length;
+    if(owned)JS_FreeCString(ctx,owned);lws_callback_on_writable(socket->wsi);
+    return JS_NewInt32(ctx,(int)length);
 }
 
 static bool Resolve(const char *host,int port,int type,bool passive,
@@ -257,6 +440,12 @@ static JSValue NetClose(JSContext *ctx,JSValueConst thisValue,int argc,
 {
     (void)thisValue;(void)magic;MicroFxNetwork *network=FromData(ctx,data);int32_t handle=0;
     if(!network||argc<1||JS_ToInt32(ctx,&handle,argv[0]))return JS_ThrowTypeError(ctx,"socket.close(handle)");
+    WebSocket *websocket=WebSocketFor(network,handle);
+    if(websocket){
+        if(websocket->wsi)lws_set_timeout(websocket->wsi,PENDING_TIMEOUT_CLOSE_SEND,1);
+        else ResetWebSocket(websocket);
+        return JS_UNDEFINED;
+    }
     NetSocket *socket=SocketFor(network,handle);if(socket)CloseSocket(network,socket);
     return JS_UNDEFINED;
 }
@@ -267,6 +456,12 @@ static JSValue NetOn(JSContext *ctx,JSValueConst thisValue,int argc,
     (void)thisValue;(void)magic;MicroFxNetwork *network=FromData(ctx,data);int32_t handle=0,event=0;
     if(!network||argc<3||JS_ToInt32(ctx,&handle,argv[0])||JS_ToInt32(ctx,&event,argv[1])||event<0||event>4||!JS_IsFunction(ctx,argv[2]))
         return JS_ThrowTypeError(ctx,"socket event registration is invalid");
+    WebSocket *websocket=WebSocketFor(network,handle);
+    if(websocket){
+        if(event>EVENT_ERROR)return JS_ThrowTypeError(ctx,"WebSocket event registration is invalid");
+        JS_FreeValue(ctx,websocket->callbacks[event]);
+        websocket->callbacks[event]=JS_DupValue(ctx,argv[2]);return JS_UNDEFINED;
+    }
     NetSocket *socket=SocketFor(network,handle);if(!socket)return JS_ThrowRangeError(ctx,"network socket is closed");
     JS_FreeValue(ctx,socket->callbacks[event]);socket->callbacks[event]=JS_DupValue(ctx,argv[2]);
     if(event==EVENT_OPEN&&socket->kind==NET_TCP){
@@ -368,16 +563,59 @@ static bool PumpSockets(MicroFxNetwork *network)
     return true;
 }
 
+static bool PumpWebSocketMessages(MicroFxNetwork *network)
+{
+    int delivered=0;
+    for(int socketIndex=0;socketIndex<WEBSOCKET_LIMIT&&
+        delivered<WEBSOCKET_MESSAGES_PER_PUMP;socketIndex++){
+        WebSocket *socket=&network->websockets[socketIndex];
+        while(socket->active&&socket->messageCount>0&&
+              delivered<WEBSOCKET_MESSAGES_PER_PUMP){
+            int index=socket->messageHead;uint8_t *bytes=socket->messages[index];
+            size_t length=socket->messageSizes[index];socket->messages[index]=NULL;
+            socket->messageHead=(socket->messageHead+1)%WEBSOCKET_QUEUE_LIMIT;
+            socket->messageCount--;delivered++;
+            JSValue value=JS_NewArrayBufferCopy(network->context,bytes,length);free(bytes);
+            bool ok=EmitWebSocket(socket,EVENT_DATA,1,&value);
+            JS_FreeValue(network->context,value);if(!ok)return false;
+            if(socket->active&&socket->messageCount==0&&socket->wsi)
+                lws_rx_flow_control(socket->wsi,1);
+        }
+    }
+    return true;
+}
+
+static bool PumpWebSockets(MicroFxNetwork *network)
+{
+    bool active=false;
+    for(int i=0;i<WEBSOCKET_LIMIT;i++)if(network->websockets[i].active){active=true;break;}
+    if(!active)return true;
+    // libwebsockets 4.x ignores the legacy timeout argument and may sleep
+    // until its next internal timer. Prime its cancellation pipe so service
+    // remains a non-blocking part of the render loop.
+    lws_cancel_service(network->websocketContext);
+    return lws_service(network->websocketContext,0)>=0&&PumpWebSocketMessages(network);
+}
+
 MicroFxNetwork *MicroFxNetworkCreate(JSContext *context,JSValueConst fx)
 {
     MicroFxNetwork *network=calloc(1,sizeof(*network));if(!network)return NULL;
     network->context=context;
     for(int i=0;i<HTTP_LIMIT;i++){network->http[i].resolve=JS_UNDEFINED;network->http[i].reject=JS_UNDEFINED;}
     for(int i=0;i<SOCKET_LIMIT;i++){network->sockets[i].fd=-1;for(int event=0;event<5;event++)network->sockets[i].callbacks[event]=JS_UNDEFINED;}
+    struct lws_context_creation_info websocketInfo={0};
+    websocketInfo.port=CONTEXT_PORT_NO_LISTEN;websocketInfo.protocols=WebSocketProtocols;
+    websocketInfo.user=network;websocketInfo.options=LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+    websocketInfo.mbedtls_client_preload_filepath="/etc/ssl/certs/ca-certificates.crt";
+    lws_set_log_level(LLL_ERR|LLL_WARN,NULL);
     if(curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK||(network->multi=curl_multi_init())==NULL){free(network);return NULL;}
+    network->websocketContext=lws_create_context(&websocketInfo);
+    if(!network->websocketContext){curl_multi_cleanup(network->multi);curl_global_cleanup();free(network);return NULL;}
     JS_SetPropertyStr(context,(JSValue)fx,"_netFetch",Bind(network,Fetch,1));
     JS_SetPropertyStr(context,(JSValue)fx,"_netUdpOpen",Bind(network,UdpOpen,2));
     JS_SetPropertyStr(context,(JSValue)fx,"_netTcpConnect",Bind(network,TcpOpen,2));
+    JS_SetPropertyStr(context,(JSValue)fx,"_netWebSocketConnect",Bind(network,WebSocketConnect,1));
+    JS_SetPropertyStr(context,(JSValue)fx,"_netWebSocketSend",Bind(network,WebSocketSend,2));
     JSValue pointer=JS_NewInt64(context,(int64_t)(intptr_t)network);
     JSValue listener=JS_NewCFunctionData(context,TcpOpen,2,1,1,&pointer);JS_FreeValue(context,pointer);
     JS_SetPropertyStr(context,(JSValue)fx,"_netTcpListen",listener);
@@ -390,7 +628,7 @@ MicroFxNetwork *MicroFxNetworkCreate(JSContext *context,JSValueConst fx)
 bool MicroFxNetworkPump(MicroFxNetwork *network)
 {
     if(!network)return true;
-    if(!PumpHttp(network)||!PumpSockets(network))return false;
+    if(!PumpHttp(network)||!PumpSockets(network)||!PumpWebSockets(network))return false;
     JSContext *context=NULL;int status;
     while((status=JS_ExecutePendingJob(JS_GetRuntime(network->context),&context))>0){}
     return status>=0;
@@ -399,7 +637,10 @@ bool MicroFxNetworkPump(MicroFxNetwork *network)
 void MicroFxNetworkDestroy(MicroFxNetwork *network)
 {
     if(!network)return;
+    network->destroying=true;
     for(int i=0;i<HTTP_LIMIT;i++)if(network->http[i].easy){curl_multi_remove_handle(network->multi,network->http[i].easy);curl_easy_cleanup(network->http[i].easy);free(network->http[i].body);JS_FreeValue(network->context,network->http[i].resolve);JS_FreeValue(network->context,network->http[i].reject);}
     for(int i=0;i<SOCKET_LIMIT;i++)if(network->sockets[i].kind!=NET_UNUSED)CloseSocket(network,&network->sockets[i]);
+    lws_context_destroy(network->websocketContext);
+    for(int i=0;i<WEBSOCKET_LIMIT;i++)ResetWebSocket(&network->websockets[i]);
     curl_multi_cleanup(network->multi);curl_global_cleanup();free(network);
 }

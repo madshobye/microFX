@@ -121,6 +121,7 @@ relative offset. Both are fluent and return the same object.
 | `fx.net.udp.open(options)` | Open a non-blocking UDP socket with byte-oriented send/message helpers |
 | `fx.net.tcp.connect(options)` | Open a non-blocking TCP client |
 | `fx.net.tcp.listen(options)` | Listen for TCP clients using the same socket interface |
+| `fx.net.websocket.connect(urlOrOptions)` | Open a non-blocking `ws://` or verified `wss://` client |
 | `fx.net.http.serve(options, handler)` | Run the JavaScript HTTP/1.1 server helper over public TCP APIs |
 
 See [NETWORK.md](NETWORK.md) for examples, limits, and the no-worker execution model.
@@ -128,6 +129,8 @@ See [NETWORK.md](NETWORK.md) for examples, limits, and the no-worker execution m
 | `text.antialias(boolean)` | Keep smooth glyph alpha or use binary opaque/transparent coverage |
 | `sdf.shape(kind,width,height,radius)` | Restyle retained SDF geometry without allocating a new element |
 | `env(name,fallback)` | Read deployment information supplied to the app |
+| `secret(name,fallback)` | Read a device-local value from `/data/config/secrets/` without bundling it in a project |
+| `log(value)` | Write one bounded application diagnostic line to the active RAM log |
 | `data(path[,fallback])` | Parse a bounded project-relative JSON asset |
 | `feed(path[,fallback])` | Read one cached platform-managed live snapshot per activation |
 

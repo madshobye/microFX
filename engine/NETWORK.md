@@ -25,6 +25,29 @@ Responses expose `ok`, `status`, `url`, `text()`, `json()`, and
 `arrayBuffer()`. The binary response is still subject to the same 256 KiB
 limit.
 
+## WebSocket client
+
+`fx.net.websocket.connect()` supports non-blocking `ws://` and TLS-verified
+`wss://` streams. A runtime supports four connections, complete messages are
+bounded to 256 KiB, and one outgoing message of at most 64 KiB may be queued
+per connection. Incoming messages are held in a bounded native queue and at
+most eight are delivered to JavaScript per frame, so a busy stream cannot
+monopolize rendering.
+
+```js
+const socket = fx.net.websocket.connect("wss://stream.example.com/events");
+socket.onOpen(() => socket.send(JSON.stringify({ subscribe: "positions" })));
+socket.onMessage(text => update(JSON.parse(text)));
+socket.onClose(() => status.text("DISCONNECTED"));
+socket.onError(error => status.text(String(error)));
+```
+
+Credentials should be installed outside projects as files below
+`/data/config/secrets/` and read with `fx.secret()`. For example,
+`fx.secret("SERVICE_API_KEY", "")` reads
+`/data/config/secrets/SERVICE_API_KEY`; secret names cannot contain path
+separators.
+
 ## Cached raster maps
 
 `fx.tileMap()` accepts any HTTPS XYZ raster source. It loads up to three tiles

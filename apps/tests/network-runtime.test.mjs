@@ -21,6 +21,11 @@ function networkContext() {
     _netUdpOpen: () => nextHandle++,
     _netTcpConnect: () => nextHandle++,
     _netTcpListen: () => nextHandle++,
+    _netWebSocketConnect: () => nextHandle++,
+    _netWebSocketSend(handle, data) {
+      sends.push({ handle, data: new Uint8Array(data) });
+      return data.byteLength;
+    },
     _netOn(handle, event, callback) { callbacks.set(`${handle}:${event}`, callback); },
     _netSend(handle, data, host, port) {
       sends.push({ handle, data: new Uint8Array(data), host, port });
@@ -76,6 +81,22 @@ test("UDP and TCP wrappers carry bytes and peer metadata", () => {
   assert.equal(context.peerPort, 5000);
   assert.equal(Buffer.from(sends[0].data).toString(), "hello");
   assert.equal(sends[0].port, 9001);
+});
+
+test("WebSocket wrapper exposes text messages and lifecycle callbacks", () => {
+  const { context, callbacks, sends } = networkContext();
+  vm.runInContext(`
+    globalThis.opened = false;
+    globalThis.message = "";
+    const socket = fx.net.websocket.connect("wss://stream.example.test/feed");
+    socket.onOpen(() => { opened = true; socket.send("subscribe"); });
+    socket.onMessage(value => { message = value; });
+  `, context);
+  callbacks.get("1:0")();
+  callbacks.get("1:1")(Uint8Array.from([115, 104, 105, 112]).buffer);
+  assert.equal(context.opened, true);
+  assert.equal(context.message, "ship");
+  assert.equal(Buffer.from(sends[0].data).toString(), "subscribe");
 });
 
 test("tile maps project coordinates and submit one atomic cached generation", async () => {

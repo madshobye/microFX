@@ -751,6 +751,45 @@ static JSValue Environment(JSContext *ctx,JSValueConst thisValue,int argc,JSValu
     return result;
 }
 
+static JSValue LogMessage(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;
+    if(argc!=1)return JS_ThrowTypeError(ctx,"log(message) requires one value");
+    const char *message=JS_ToCString(ctx,argv[0]);if(!message)return JS_EXCEPTION;
+    fprintf(stderr,"MICROFX_JS_LOG %.512s\n",message);JS_FreeCString(ctx,message);
+    return JS_UNDEFINED;
+}
+
+static JSValue Secret(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;
+    if(argc<1)return JS_ThrowTypeError(ctx,"secret(name, fallback='')");
+    const char *name=JS_ToCString(ctx,argv[0]);if(!name)return JS_EXCEPTION;
+    size_t nameLength=strlen(name);bool valid=nameLength>0&&nameLength<=64;
+    for(size_t i=0;valid&&i<nameLength;i++){
+        char c=name[i];valid=(c>='A'&&c<='Z')||(c>='a'&&c<='z')||
+                            (c>='0'&&c<='9')||c=='_'||c=='-';
+    }
+    if(!valid){JS_FreeCString(ctx,name);return JS_ThrowTypeError(ctx,"secret name must contain only letters, digits, _ or -");}
+    const char *root=getenv("MICROFX_DATA_ROOT");if(!root||!root[0])root="/data";
+    char path[MICROFX_MAX_ASSET_PATH];
+    int written=snprintf(path,sizeof(path),"%s/config/secrets/%s",root,name);
+    JS_FreeCString(ctx,name);
+    if(written<0||(size_t)written>=sizeof(path))return JS_ThrowRangeError(ctx,"secret path is too long");
+    FILE *file=fopen(path,"rb");
+    if(file){
+        char value[4097];size_t length=fread(value,1,sizeof(value)-1,file);bool overflow=!feof(file);
+        fclose(file);if(overflow)return JS_ThrowRangeError(ctx,"secret exceeds 4 KiB");
+        while(length>0&&(value[length-1]=='\n'||value[length-1]=='\r'))length--;
+        value[length]='\0';return JS_NewStringLen(ctx,value,length);
+    }
+    if(argc>1){
+        const char *fallback=JS_ToCString(ctx,argv[1]);if(!fallback)return JS_EXCEPTION;
+        JSValue result=JS_NewString(ctx,fallback);JS_FreeCString(ctx,fallback);return result;
+    }
+    return JS_NewString(ctx,"");
+}
+
 static JSValue ProjectData(JSContext *ctx,JSValueConst thisValue,int argc,
                            JSValueConst *argv)
 {
@@ -927,6 +966,8 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"configure",JS_NewCFunction(script->context,Configure,"configure",1));
     JS_SetPropertyStr(script->context,fx,"debugBar",JS_NewCFunction(script->context,DebugBar,"debugBar",1));
     JS_SetPropertyStr(script->context,fx,"env",JS_NewCFunction(script->context,Environment,"env",2));
+    JS_SetPropertyStr(script->context,fx,"log",JS_NewCFunction(script->context,LogMessage,"log",1));
+    JS_SetPropertyStr(script->context,fx,"secret",JS_NewCFunction(script->context,Secret,"secret",2));
     JS_SetPropertyStr(script->context,fx,"data",JS_NewCFunction(script->context,ProjectData,"data",2));
     script->network=MicroFxNetworkCreate(script->context,fx);
     if(!script->network){

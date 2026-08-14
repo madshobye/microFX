@@ -15,12 +15,17 @@ const PLACE = {
   },
   mapZoom: 11.45,
   searchRadiusNm: 25,
-  airportGroundRadiusKm: 3
+  airportGroundRadiusKm: 3,
+  aisBounds: [[55.36, 12.10], [55.98, 13.18]]
 };
 
 const POLL_SECONDS = 5;
 const CORRECTION_SECONDS = 8;
 const MAX_FLIGHTS = 50;
+const MAX_SHIPS = 24;
+const SHIP_STALE_SECONDS = 180;
+const AIS_API_KEY = fx.secret("AISSTREAM_API_KEY", "");
+const AIS_URL = "wss://stream.aisstream.io/v0/stream";
 const DATA_URL = `https://opendata.adsb.fi/api/v3/lat/${PLACE.airport.latitude}` +
   `/lon/${PLACE.airport.longitude}/dist/${PLACE.searchRadiusNm}`;
 
@@ -48,6 +53,8 @@ const AIRCRAFT_SHAPES = {
     [-.798, .241], [-.805, .392], [-.766, .413], [-.151, .22], [-.134, .68],
     [-.376, .863], [-.373, .982], [-.337, .996], [0, .871]])
 };
+const SHIP_SHAPE = [[0, -1], [.42, -.55], [.34, .72], [0, 1],
+  [-.34, .72], [-.42, -.55]];
 const scene = fx.scenes.add(fx.scene({ name: "flight-board" }));
 
 const map = scene.add(fx.tileMap({
@@ -68,7 +75,8 @@ const map = scene.add(fx.tileMap({
   }
 }));
 scene.add(fx.text(`${PLACE.label} AIRSPACE`, 55, 45, 28, 0x7ee5ffff));
-scene.add(fx.text("ADSB.FI", 55, 1044, 11, 0x35495eff)
+scene.add(fx.text(AIS_API_KEY ? "ADSB.FI · AISSTREAM.IO" : "ADSB.FI",
+  55, 1044, 11, 0x35495eff)
   .antialias(false));
 scene.add(fx.text("© OPENSTREETMAP CONTRIBUTORS · © CARTO",
   1580, 1044, 11, 0x35495eff).antialias(false));
@@ -107,6 +115,16 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
   };
 });
 
+const ships = AIS_API_KEY ? Array.from({ length: MAX_SHIPS }, () => {
+  const outline = scene.add(fx.outline(SHIP_SHAPE, 0, 0, 12, 1.5,
+    0x7ee5ffff, { closed: true }).visible(false));
+  return {
+    id: "", active: false, outline, lastSeen: 0,
+    currentX: 0, currentY: 0, velocityX: 0, velocityY: 0,
+    correctionX: 0, correctionY: 0, correctionRemaining: 0
+  };
+}) : [];
+
 let clockTime = 0;
 let requestInFlight = false;
 let nextRequestTime = 0;
@@ -114,6 +132,9 @@ const routeCache = new Map();
 const routeQueue = [];
 let routeInFlight = false;
 let nextRouteRequestTime = 0;
+let aisSocket = null;
+let nextAisConnectTime = 0;
+const shipDetails = new Map();
 
 function labelText(slot) {
   const route = routeCache.get(slot.callsign);
@@ -380,6 +401,101 @@ function normalizeFlights(payload) {
     });
 }
 
+function shipIdentity(message, body) {
+  const metadata = message.Metadata || message.MetaData || {};
+  return String(body.UserID || metadata.MMSI || metadata.Mmsi || "");
+}
+
+function rememberShipDetails(message, body) {
+  const id = shipIdentity(message, body);
+  if (!id) return;
+  const metadata = message.Metadata || message.MetaData || {};
+  const previous = shipDetails.get(id) || {};
+  const dimension = body.Dimension || previous.dimension || {};
+  shipDetails.set(id, {
+    name: String(body.Name || metadata.ShipName || previous.name || "").trim(),
+    type: Number(body.Type || previous.type || 0),
+    dimension
+  });
+}
+
+function shipScale(id, speed) {
+  const detail = shipDetails.get(id) || {};
+  const dimension = detail.dimension || {};
+  const length = Number(dimension.A || 0) + Number(dimension.B || 0);
+  return clamp(length > 0 ? 8 + Math.sqrt(length) * .65 : 9 + Math.sqrt(speed) * .8,
+    9, 20);
+}
+
+function applyShipPosition(message, body) {
+  const metadata = message.Metadata || message.MetaData || {};
+  const id = shipIdentity(message, body);
+  const longitude = Number(body.Longitude ?? metadata.Longitude ?? metadata.longitude);
+  const latitude = Number(body.Latitude ?? metadata.Latitude ?? metadata.latitude);
+  if (!id || !Number.isFinite(longitude) || !Number.isFinite(latitude)) return;
+  const point = mapPoint(longitude, latitude);
+  if (point.x < -100 || point.x > 2020 || point.y < -100 || point.y > 1180) return;
+  let slot = ships.find(value => value.active && value.id === id);
+  if (!slot) slot = ships.find(value => !value.active);
+  if (!slot) slot = ships.reduce((oldest, value) =>
+    value.lastSeen < oldest.lastSeen ? value : oldest, ships[0]);
+  const speed = Math.max(0, Number(body.Sog || 0)) * .514444;
+  const heading = Number.isFinite(Number(body.Cog)) ? Number(body.Cog) :
+    (Number.isFinite(Number(body.TrueHeading)) && Number(body.TrueHeading) <= 360 ?
+      Number(body.TrueHeading) : 0);
+  const velocity = screenVelocity({ longitude, latitude, velocity: speed, heading });
+  if (slot.active && slot.id === id) {
+    slot.correctionX = point.x - slot.currentX;
+    slot.correctionY = point.y - slot.currentY;
+    slot.correctionRemaining = 12;
+  } else {
+    slot.currentX = point.x;slot.currentY = point.y;
+    slot.correctionX = 0;slot.correctionY = 0;slot.correctionRemaining = 0;
+  }
+  slot.id = id;slot.active = true;slot.lastSeen = clockTime;
+  slot.velocityX = velocity.x;slot.velocityY = velocity.y;
+  slot.outline.position(slot.currentX, slot.currentY)
+    .rotation(heading * Math.PI / 180).scale(shipScale(id, speed)).visible(true);
+}
+
+function receiveAis(text) {
+  let message;
+  try { message = JSON.parse(text); } catch (_) { return; }
+  if (!message) return;
+  if (message.error) { fx.log(`AISSTREAM ERROR: ${message.error}`); return; }
+  const type = String(message.MessageType || "");
+  const body = message.Message && message.Message[type];
+  if (!body) return;
+  if (type === "ShipStaticData" || type === "StaticDataReport") {
+    rememberShipDetails(message, body);
+    return;
+  }
+  if (type === "PositionReport" || type === "StandardClassBPositionReport" ||
+      type === "ExtendedClassBPositionReport") {
+    rememberShipDetails(message, body);
+    applyShipPosition(message, body);
+  }
+}
+
+function connectAis() {
+  if (!AIS_API_KEY || aisSocket || clockTime < nextAisConnectTime) return;
+  const socket = fx.net.websocket.connect(AIS_URL);
+  aisSocket = socket;
+  socket.onOpen(() => socket.send(JSON.stringify({
+    APIKey: AIS_API_KEY,
+    BoundingBoxes: [PLACE.aisBounds],
+    FilterMessageTypes: ["PositionReport", "StandardClassBPositionReport",
+      "ExtendedClassBPositionReport"]
+  })));
+  socket.onMessage(receiveAis);
+  const disconnected = () => {
+    if (aisSocket !== socket) return;
+    aisSocket = null;nextAisConnectTime = clockTime + 20;
+  };
+  socket.onClose(disconnected);
+  socket.onError(disconnected);
+}
+
 function requestFlights() {
   if (requestInFlight) return;
   requestInFlight = true;
@@ -408,6 +524,7 @@ function update(time, delta) {
   scene.show();
   if (!requestInFlight && time >= nextRequestTime) requestFlights();
   requestNextRoute();
+  connectAis();
 
   flights.forEach(slot => {
     if (!slot.active) return;
@@ -426,5 +543,24 @@ function update(time, delta) {
     }
     slot.marker.position(slot.currentX, slot.currentY);
     positionLabel(slot);
+  });
+
+  ships.forEach(slot => {
+    if (!slot.active) return;
+    if (time - slot.lastSeen > SHIP_STALE_SECONDS) {
+      slot.active = false;slot.id = "";slot.outline.visible(false);return;
+    }
+    const step = clamp(delta, 0, .25);
+    slot.currentX += slot.velocityX * step;
+    slot.currentY += slot.velocityY * step;
+    if (slot.correctionRemaining > 0) {
+      const correction = Math.min(1, step / slot.correctionRemaining);
+      const x = slot.correctionX * correction;
+      const y = slot.correctionY * correction;
+      slot.currentX += x;slot.currentY += y;
+      slot.correctionX -= x;slot.correctionY -= y;
+      slot.correctionRemaining = Math.max(0, slot.correctionRemaining - step);
+    }
+    slot.outline.position(slot.currentX, slot.currentY);
   });
 }
