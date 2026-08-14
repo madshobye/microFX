@@ -15,7 +15,7 @@
 
 enum { HTTP_LIMIT=8, SOCKET_LIMIT=16, WEBSOCKET_LIMIT=4,
        WEBSOCKET_QUEUE_LIMIT=32, WEBSOCKET_MESSAGES_PER_PUMP=8,
-       HTTP_BODY_LIMIT=512*1024, WEBSOCKET_BODY_LIMIT=256*1024,
+       HTTP_BODY_LIMIT=2*1024*1024, WEBSOCKET_BODY_LIMIT=256*1024,
        IO_LIMIT=64*1024, WEBSOCKET_HANDLE_BASE=1000 };
 typedef enum { NET_UNUSED, NET_UDP, NET_TCP_CONNECTING, NET_TCP, NET_TCP_LISTENER } NetKind;
 
@@ -544,7 +544,7 @@ static bool PumpHttp(MicroFxNetwork *network)
                     (const uint8_t *)(request->body?request->body:""),request->size));
             function=request->resolve;
         }else{
-            const char *detail=request->overflow?"HTTP response exceeds 512 KiB":
+            const char *detail=request->overflow?"HTTP response exceeds 2 MiB":
                                request->error[0]?request->error:curl_easy_strerror(message->data.result);
             fprintf(stderr,"MICROFX_NET fetch failed code=%d detail=%s\n",
                     (int)message->data.result,detail);

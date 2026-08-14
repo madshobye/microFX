@@ -17,12 +17,12 @@
     "transit": {
       "windowSeconds": 10,
       "regions": [
-        { "zoom": 8, "min": [40.52, -73.95], "max": [40.70, -74.20], "kinds": ["train", "metro"] },
-        { "zoom": 8, "min": [40.52, -73.68], "max": [40.70, -73.95], "kinds": ["train", "metro"] },
-        { "zoom": 8, "min": [40.70, -73.95], "max": [40.81, -74.20], "kinds": ["train", "metro"] },
-        { "zoom": 8, "min": [40.70, -73.68], "max": [40.81, -73.95], "kinds": ["train", "metro"] },
-        { "zoom": 8, "min": [40.81, -73.95], "max": [40.98, -74.20], "kinds": ["train", "metro"] },
-        { "zoom": 8, "min": [40.81, -73.68], "max": [40.98, -73.95], "kinds": ["train", "metro"] }
+        { "zoom": 8, "min": [40.45, -73.95], "max": [41.05, -74.30], "kinds": ["train"] },
+        { "zoom": 8, "min": [40.45, -73.60], "max": [41.05, -73.95], "kinds": ["train"] },
+        { "zoom": 9, "min": [40.52, -73.95], "max": [40.70, -74.20], "kinds": ["metro"] },
+        { "zoom": 9, "min": [40.70, -73.95], "max": [40.81, -74.20], "kinds": ["metro"] },
+        { "zoom": 9, "min": [40.81, -73.95], "max": [40.98, -74.20], "kinds": ["metro"] },
+        { "zoom": 9, "min": [40.52, -73.68], "max": [40.98, -73.95], "kinds": ["metro"] }
       ]
     },
     "aisBounds": null

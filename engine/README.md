@@ -244,7 +244,7 @@ Font parsing and GPU upload happen once, after graphics initialization; a bad
 font or a fifth distinct face is a visible fatal asset error rather than an
 implicit fallback.
 
-Current limits are 384 SDF elements, 512 quad elements, 256 mesh elements, 32 text elements of 127
+Current limits are 512 SDF elements, 512 quad elements, 256 mesh elements, 64 text elements of 127
 bytes each, four font faces, 16 image elements/textures, a 32 MiB JS heap, and a 512 KiB JS stack. A script exception is fatal
 by design so a bad remote revision remains visible through independent SSH
 rather than silently changing behavior.

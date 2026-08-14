@@ -4,12 +4,12 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 import { readFileSync } from "node:fs";
 
 export const defaultCapacities = Object.freeze({
-  sdf: 384,
+  sdf: 512,
   quad: 512,
   mesh: 256,
   text: 64,
   image: 16,
-  outline: 256
+  outline: 384
 });
 
 function finite(label, values) {

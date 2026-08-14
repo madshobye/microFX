@@ -20,7 +20,9 @@ const CORRECTION_SECONDS = 8;
 const ROUTE_CACHE_SECONDS = 15 * 60;
 const ROUTE_MAX_CROSS_TRACK_KM = 220;
 const ROUTE_MAX_HEADING_ERROR = 80;
-const MAX_FLIGHTS = 50;
+const MAX_FLIGHTS = 80;
+const MAX_FLIGHT_LABELS = 50;
+const DENSE_FLIGHT_THRESHOLD = 55;
 const MAX_AIRPORT_DOTS = 50;
 const AIRPORT_CLUSTER_MIN_RADIUS = 9;
 const AIRPORT_CLUSTER_MAX_RADIUS = 24;
@@ -32,7 +34,7 @@ const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
 const TRANSIT_WINDOW_SECONDS = 20;
-const TRANSIT_REQUEST_CONCURRENCY = 2;
+const TRANSIT_REQUEST_CONCURRENCY = 1;
 const TRANSIT_HOLD_SECONDS = 4 * 60;
 const TRANSIT_CORRECTION_SECONDS = 8;
 const MAX_RAIL_TRANSIT = 224;
@@ -137,7 +139,7 @@ const airportDots = Array.from({ length: MAX_AIRPORT_DOTS }, () =>
 
 // The retained slot count is bounded by the 64-element text batch. Geometry
 // and labels are allocated once; network responses only update their state.
-const flights = Array.from({ length: MAX_FLIGHTS }, () => {
+const flights = Array.from({ length: MAX_FLIGHTS }, (_, slotIndex) => {
   const marker = fx.group();
   const trail = Array.from({ length: 3 }, (_, segment) =>
     scene.add(fx.sdfRoundedRect(0, 0, 20, 5 - segment,
@@ -148,9 +150,10 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
     0, 0, 16, 0x020406ff).opacity(0.78).visible(false));
   const outline = marker.add(fx.outline(AIRCRAFT_SHAPES.small,
     0, 0, 16, 1.6, 0xffd55aff, { closed: true }));
-  const label = fx.text("---", 0, 0, 18, 0xffffffff).antialias(false);
+  const label = slotIndex < MAX_FLIGHT_LABELS ?
+    fx.text("---", 0, 0, 18, 0xffffffff).antialias(false) : null;
   scene.add(marker);
-  scene.add(label);
+  if (label) scene.add(label);
   return {
     id: "", callsign: "", active: false, onGround: false,
     aircraftKind: "small", markerRadius: 7, altitudeFeet: 0,
@@ -208,6 +211,7 @@ const ships = AIS_API_KEY && PLACE.aisBounds ? Array.from({ length: MAX_SHIPS },
 }) : [];
 
 let clockTime = 0;
+let denseFlightMode = false;
 let requestInFlight = false;
 let nextRequestTime = 0;
 const routeCache = new Map();
@@ -277,6 +281,7 @@ function updateAirportCount(payload) {
 }
 
 function positionLabel(slot) {
+  if (!slot.label) return;
   const x = Math.round(slot.currentX + Math.max(24, slot.markerRadius * 2.2));
   const y = Math.round(slot.currentY - 10);
   if (x === slot.labelX && y === slot.labelY) return;
@@ -299,7 +304,9 @@ function finishRouteRequest(callsign, route) {
     expiresAt: clockTime + ROUTE_CACHE_SECONDS
   });
   flights.forEach(slot => {
-    if (slot.active && slot.callsign === callsign) slot.label.text(labelText(slot));
+    if (slot.label && slot.active && slot.callsign === callsign) {
+      slot.label.text(labelText(slot));
+    }
   });
   routeInFlight = false;
   nextRouteRequestTime = clockTime + 2;
@@ -435,7 +442,8 @@ function setHeading(slot, heading, speed) {
   slot.trail.forEach((segment, index) => {
     slot.trailState[index].spacing = (index === 0 ? 34 : 25) * trailScale;
     const speedThreshold = 15 + index * 45;
-    segment.visible(slot.aircraftKind !== "helicopter" && speed >= speedThreshold);
+    segment.visible(slot.aircraftKind !== "helicopter" && speed >= speedThreshold &&
+      (!denseFlightMode || index === 0));
   });
   slot.outline.rotation(angle);
   slot.shadow.rotation(angle);
@@ -528,6 +536,7 @@ function styleMarker(slot, item) {
 }
 
 function applyFlights(values, live) {
+  denseFlightMode = values.length > DENSE_FLIGHT_THRESHOLD;
   const items = Array.isArray(values) ? values.slice(0, flights.length) : [];
   const assigned = new Set();
 
@@ -573,7 +582,7 @@ function applyFlights(values, live) {
     slot.marker.visible(true).position(slot.currentX, slot.currentY);
     slot.shadow.visible(!slot.onGround);
     positionShadow(slot);
-    slot.label.visible(!slot.onGround).text(labelText(slot));
+    if (slot.label) slot.label.visible(!slot.onGround).text(labelText(slot));
     positionLabel(slot);
     if (!slot.onGround) queueRoute(slot.callsign);
     setHeading(slot, item.heading, item.velocity);
@@ -592,7 +601,7 @@ function applyFlights(values, live) {
     slot.marker.visible(false);
     slot.shadow.visible(false);
     slot.trail.forEach(segment => segment.visible(false));
-    slot.label.visible(false);
+    if (slot.label) slot.label.visible(false);
   });
 
 }
@@ -1030,11 +1039,13 @@ function pumpTransitRequests(job) {
       return response.text();
     }).then(body => {
       if (transitJob !== job) return;
-      job.tasks.push({ body, kinds: region.kinds });
+      job.tasks.push({
+        body, kinds: region.kinds, scanIndex: 0, itemStart: -1,
+        depth: 0, inString: false, escaped: false, opened: false
+      });
       job.active--;
       job.pending--;
       if (job.pending === 0) transitRequestInFlight = false;
-      pumpTransitRequests(job);
     })
     .catch(error => {
       fx.log(`TRANSITOUS ${error.message || error}`);
@@ -1065,38 +1076,97 @@ function requestTransit() {
   pumpTransitRequests(job);
 }
 
+function nextTransitJsonItem(task) {
+  const budgetEnd = Math.min(task.body.length, task.scanIndex + 32768);
+  for (let index = task.scanIndex; index < budgetEnd; index++) {
+    const character = task.body[index];
+    if (!task.opened) {
+      if (/\s/.test(character)) continue;
+      if (character !== "[") throw new Error("invalid Transitous response");
+      task.opened = true;
+      task.scanIndex = index + 1;
+      continue;
+    }
+    if (task.itemStart < 0) {
+      if (/\s/.test(character) || character === ",") {
+        task.scanIndex = index + 1;
+        continue;
+      }
+      if (character === "]") {
+        task.scanIndex = index + 1;
+        return { done: true };
+      }
+      if (character !== "{" && character !== "[") {
+        throw new Error("invalid Transitous array item");
+      }
+      task.itemStart = index;
+      task.depth = 0;
+      task.inString = false;
+      task.escaped = false;
+    }
+    if (task.inString) {
+      if (task.escaped) task.escaped = false;
+      else if (character === "\\") task.escaped = true;
+      else if (character === "\"") task.inString = false;
+    } else if (character === "\"") {
+      task.inString = true;
+    } else if (character === "{" || character === "[") {
+      task.depth++;
+    } else if (character === "}" || character === "]") {
+      task.depth--;
+      if (task.depth === 0) {
+        const text = task.body.slice(task.itemStart, index + 1);
+        task.itemStart = -1;
+        task.scanIndex = index + 1;
+        return { done: false, text };
+      }
+    }
+    task.scanIndex = index + 1;
+  }
+  if (task.scanIndex >= task.body.length) {
+    throw new Error("incomplete Transitous response");
+  }
+  return null;
+}
+
 function processTransitJob() {
   if (!transitJob) return;
   const job = transitJob;
   if (job.tasks.length) {
-    const task = job.tasks.shift();
-    if (task.body !== undefined) {
-      try {
-        const payload = JSON.parse(task.body);
-        if (!Array.isArray(payload)) throw new Error("invalid Transitous response");
-        task.kinds.forEach(kind => job.tasks.push({ payload, kind }));
-      } catch (error) {
-        fx.log(`TRANSITOUS ${error.message || error}`);
+    const task = job.tasks[0];
+    try {
+      const next = nextTransitJsonItem(task);
+      if (!next) return;
+      if (next.done) {
+        job.tasks.shift();
+        pumpTransitRequests(job);
+        return;
       }
-      return;
-    }
-    if (task.kind === "train") {
-      job.trains.push(normalizeTransit(task.payload, job.now, TRANSIT_MODES, "train"));
-    } else if (task.kind === "metro") {
-      job.metro.push(normalizeTransit(task.payload, job.now, METRO_MODES, "metro"));
-    } else if (task.kind === "bus") {
-      job.buses.push(normalizeTransit(task.payload, job.now, BUS_MODES));
+      const item = JSON.parse(next.text);
+      task.kinds.forEach(kind => {
+        if (kind === "train") {
+          job.trains.push(...normalizeTransit([item], job.now, TRANSIT_MODES, "train"));
+        } else if (kind === "metro") {
+          job.metro.push(...normalizeTransit([item], job.now, METRO_MODES, "metro"));
+        } else if (kind === "bus") {
+          job.buses.push(...normalizeTransit([item], job.now, BUS_MODES));
+        }
+      });
+    } catch (error) {
+      fx.log(`TRANSITOUS ${error.message || error}`);
+      job.tasks.shift();
+      pumpTransitRequests(job);
     }
     return;
   }
   if (job.pending === 0) {
-    const rail = mergeTransit(...job.trains).concat(mergeTransit(...job.metro));
+    const rail = mergeTransit(job.trains).concat(mergeTransit(job.metro));
     applyTransit(transit, rail.slice(0, MAX_RAIL_TRANSIT), true,
       TRANSIT_HOLD_SECONDS);
     if (rail.length > MAX_RAIL_TRANSIT) {
       fx.log(`TRANSITOUS RAIL LIMITED ${rail.length}/${MAX_RAIL_TRANSIT}`);
     }
-    const buses = mergeTransit(...job.buses);
+    const buses = mergeTransit(job.buses);
     applyTransit(busTransit, buses.slice(0, MAX_BUSES), false,
       TRANSIT_HOLD_SECONDS);
     if (buses.length > MAX_BUSES) {
