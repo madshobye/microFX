@@ -89,12 +89,8 @@ const map = scene.add(fx.tileMap({
   }
 }));
 scene.add(fx.text(PLACE.label, 55, 45, 28, 0x7ee5ffff));
-scene.add(fx.text(AIS_API_KEY ? "ADSB.FI · TRANSITOUS · AISSTREAM.IO" :
-  "ADSB.FI · TRANSITOUS",
-  55, 1044, 11, 0x35495eff)
-  .antialias(false));
-scene.add(fx.text("© OPENSTREETMAP CONTRIBUTORS · © CARTO",
-  1580, 1044, 11, 0x35495eff).antialias(false));
+scene.add(fx.text("OPENSTREETMAP + CARTO",
+  1690, 1040, 14, 0x708090ff).antialias(false));
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapPoint = (longitude, latitude) => map.project(longitude, latitude);
