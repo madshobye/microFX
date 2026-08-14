@@ -397,10 +397,8 @@
              (byte(blue) << 8) | byte(alpha === undefined ? 255 : alpha)) >>> 0);
   };
 
-  // Network ownership stays in the platform adapter. A feed is read once per
-  // renderer activation, so calling this helper from update() cannot turn into
-  // a per-frame file read or HTTP request. Changed live data reloads the active
-  // project after the adapter's bounded refresh interval.
+  // feed() is an experimental snapshot/file helper, not the networking API.
+  // Direct HTTP, TCP, and UDP access lives under fetch() and fx.net.
   fx.feed = function feed(path, fallback) {
     const key = String(path);
     if (feedCache.has(key)) return feedCache.get(key);
@@ -408,6 +406,195 @@
     feedCache.set(key, value);
     return value;
   };
+
+  if (typeof fx._netFetch === "function") {
+    const OPEN = 0, DATA = 1, CLOSE = 2, ERROR = 3, CONNECTION = 4;
+
+    function bytes(value) {
+      if (typeof value === "string") return encode(value);
+      if (value instanceof ArrayBuffer) return value;
+      if (ArrayBuffer.isView(value)) {
+        return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+      }
+      throw new TypeError("network data must be a string, ArrayBuffer, or typed array");
+    }
+
+    function encode(value) {
+      const points = Array.from(String(value));
+      const output = [];
+      points.forEach(character => {
+        const code = character.codePointAt(0);
+        if (code < 0x80) output.push(code);
+        else if (code < 0x800) output.push(0xc0 | code >> 6, 0x80 | code & 63);
+        else if (code < 0x10000) output.push(0xe0 | code >> 12, 0x80 | code >> 6 & 63, 0x80 | code & 63);
+        else output.push(0xf0 | code >> 18, 0x80 | code >> 12 & 63, 0x80 | code >> 6 & 63, 0x80 | code & 63);
+      });
+      return new Uint8Array(output).buffer;
+    }
+
+    function decode(value) {
+      const input = value instanceof Uint8Array ? value : new Uint8Array(value);
+      let result = "";
+      for (let index = 0; index < input.length;) {
+        const first = input[index++];
+        let code = first, extra = 0;
+        if ((first & 0xe0) === 0xc0) { code = first & 31; extra = 1; }
+        else if ((first & 0xf0) === 0xe0) { code = first & 15; extra = 2; }
+        else if ((first & 0xf8) === 0xf0) { code = first & 7; extra = 3; }
+        for (let offset = 0; offset < extra; offset++) {
+          if (index >= input.length || (input[index] & 0xc0) !== 0x80) {
+            code = 0xfffd; break;
+          }
+          code = code << 6 | input[index++] & 63;
+        }
+        result += String.fromCodePoint(code);
+      }
+      return result;
+    }
+
+    class MicroFxResponse {
+      constructor(raw) {
+        this.status = raw.status;
+        this.url = raw.url;
+        this.ok = raw.status >= 200 && raw.status < 300;
+        Object.defineProperty(this, "_body", { value: raw.body });
+      }
+      text() { return Promise.resolve(this._body); }
+      json() { return Promise.resolve().then(() => JSON.parse(this._body)); }
+    }
+
+    function fetch(input, options) {
+      const method = String(options && options.method || "GET").toUpperCase();
+      if (method !== "GET") {
+        return Promise.reject(new TypeError("microFX fetch currently supports GET only"));
+      }
+      return fx._netFetch(String(input)).then(raw => new MicroFxResponse(raw));
+    }
+
+    function on(handle, event, callback) {
+      if (typeof callback !== "function") throw new TypeError("network callback must be a function");
+      fx._netOn(handle, event, callback);
+    }
+
+    function tcp(handle) {
+      const socket = {
+        send(value) { return fx._netSend(handle, bytes(value)); },
+        close() { fx._netClose(handle); },
+        onConnect(callback) { on(handle, OPEN, callback); return socket; },
+        onData(callback) { on(handle, DATA, buffer => callback(new Uint8Array(buffer))); return socket; },
+        onClose(callback) { on(handle, CLOSE, callback); return socket; },
+        onError(callback) { on(handle, ERROR, callback); return socket; }
+      };
+      return socket;
+    }
+
+    function udp(options) {
+      const settings = options || {};
+      const handle = fx._netUdpOpen(String(settings.host || "0.0.0.0"), Number(settings.port || 0));
+      const socket = {
+        send(value, host, port) { return fx._netSend(handle, bytes(value), String(host), Number(port)); },
+        close() { fx._netClose(handle); },
+        onMessage(callback) {
+          on(handle, DATA, (buffer, peer) => callback(new Uint8Array(buffer), peer));
+          return socket;
+        },
+        onError(callback) { on(handle, ERROR, callback); return socket; }
+      };
+      if (settings.onMessage) socket.onMessage(settings.onMessage);
+      if (settings.onError) socket.onError(settings.onError);
+      return socket;
+    }
+
+    function connect(options) {
+      if (!options || !options.host || !options.port) throw new TypeError("tcp.connect requires host and port");
+      const socket = tcp(fx._netTcpConnect(String(options.host), Number(options.port)));
+      if (options.onConnect) socket.onConnect(options.onConnect);
+      if (options.onData) socket.onData(options.onData);
+      if (options.onClose) socket.onClose(options.onClose);
+      if (options.onError) socket.onError(options.onError);
+      return socket;
+    }
+
+    function listen(options) {
+      if (!options || !options.port) throw new TypeError("tcp.listen requires a port");
+      const handle = fx._netTcpListen(String(options.host || "0.0.0.0"), Number(options.port));
+      const server = {
+        close() { fx._netClose(handle); },
+        onConnection(callback) {
+          on(handle, CONNECTION, clientHandle => callback(tcp(clientHandle)));
+          return server;
+        },
+        onError(callback) { on(handle, ERROR, callback); return server; }
+      };
+      if (options.onConnection) server.onConnection(options.onConnection);
+      if (options.onError) server.onError(options.onError);
+      return server;
+    }
+
+    function latin1(data) {
+      let result = "";
+      for (let index = 0; index < data.length; index += 1024) {
+        result += String.fromCharCode(...data.subarray(index, index + 1024));
+      }
+      return result;
+    }
+
+    function statusText(status) {
+      return ({ 200: "OK", 201: "Created", 204: "No Content", 400: "Bad Request",
+                404: "Not Found", 500: "Internal Server Error" })[status] || "Response";
+    }
+
+    function serve(options, handler) {
+      if (typeof handler !== "function") throw new TypeError("http.serve requires a request handler");
+      const server = listen(options);
+      server.onConnection(client => {
+        let wire = "";
+        client.onData(chunk => {
+          wire += latin1(chunk);
+          if (wire.length > 256 * 1024) { client.close(); return; }
+          const boundary = wire.indexOf("\r\n\r\n");
+          if (boundary < 0) return;
+          const lines = wire.slice(0, boundary).split("\r\n");
+          const first = lines.shift().split(" ");
+          const headers = {};
+          lines.forEach(line => {
+            const colon = line.indexOf(":");
+            if (colon > 0) headers[line.slice(0, colon).trim().toLowerCase()] = line.slice(colon + 1).trim();
+          });
+          const length = Number(headers["content-length"] || 0);
+          if (!Number.isInteger(length) || length < 0 || length > 256 * 1024) { client.close(); return; }
+          if (wire.length < boundary + 4 + length) return;
+          const bodyBytes = Uint8Array.from(wire.slice(boundary + 4, boundary + 4 + length), character => character.charCodeAt(0));
+          const request = { method: first[0], path: first[1], headers, body: decode(bodyBytes) };
+          Promise.resolve(handler(request)).catch(error => ({ status: 500, body: String(error) })).then(value => {
+            const response = value && typeof value === "object" ? value : { body: value };
+            const status = Number(response.status || 200);
+            const body = String(response.body === undefined ? "" : response.body);
+            const responseHeaders = Object.assign({}, response.headers || {}, {
+              "content-length": new Uint8Array(encode(body)).length,
+              "connection": "close"
+            });
+            let head = `HTTP/1.1 ${status} ${statusText(status)}\r\n`;
+            Object.keys(responseHeaders).forEach(name => { head += `${name}: ${responseHeaders[name]}\r\n`; });
+            client.send(head + "\r\n" + body);
+            client.close();
+          });
+        });
+        client.onError(() => client.close());
+      });
+      return server;
+    }
+
+    globalThis.fetch = fetch;
+    fx.net = Object.freeze({
+      fetch,
+      encode: value => new Uint8Array(encode(value)),
+      decode,
+      udp: Object.freeze({ open: udp }),
+      tcp: Object.freeze({ connect, listen }),
+      http: Object.freeze({ serve })
+    });
+  }
 
   fx.scene = function scene(options) {
     const members = [];

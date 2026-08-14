@@ -110,6 +110,13 @@ relative offset. Both are fluent and return the same object.
 | `scene.add(elementOrGroup)` | Record explicit membership and return the element or group |
 | `scene.show()` | Select a scene for the current frame |
 | `configure(settings)` | Set startup output/FPS policy from the application |
+| `fetch(url)` / `fx.net.fetch(url)` | Non-blocking HTTP(S) GET with `text()` and `json()` responses |
+| `fx.net.udp.open(options)` | Open a non-blocking UDP socket with byte-oriented send/message helpers |
+| `fx.net.tcp.connect(options)` | Open a non-blocking TCP client |
+| `fx.net.tcp.listen(options)` | Listen for TCP clients using the same socket interface |
+| `fx.net.http.serve(options, handler)` | Run the JavaScript HTTP/1.1 server helper over public TCP APIs |
+
+See [NETWORK.md](NETWORK.md) for examples, limits, and the no-worker execution model.
 | `debugBar(booleanOrMinutes)` | Disable, persist, or restart the diagnostics timeout |
 | `env(name,fallback)` | Read deployment information supplied to the app |
 | `data(path[,fallback])` | Parse a bounded project-relative JSON asset |

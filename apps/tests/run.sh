@@ -29,6 +29,7 @@ done
 
 node "$APPS_DIR/tests/validate-assets.mjs"
 node --test "$APPS_DIR/tests/runtime-test.test.mjs"
+node --test "$APPS_DIR/tests/network-runtime.test.mjs"
 node "$APPS_DIR/tests/runtime-harness.mjs"
 
 if [ "$count" -ne 11 ]; then

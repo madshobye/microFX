@@ -9,9 +9,10 @@ The gallery deliberately spans typography, 2D composition, particles,
 wireframe and solid 3D, diagnostic gradients, clocks, and data-visualization
 concepts. `scene-switcher` demonstrates per-frame `scene.show()` selection and
 disabled-element culling. `flight-board` and `energy-clock` read bounded live
-snapshots through `fx.feed()`. The bundled files are deterministic fallbacks; a constrained platform
-adapter can atomically refresh them from a flight or electricity-price service
-without adding unrestricted filesystem or network access to JavaScript.
+snapshots through the experimental `fx.feed()` file helper. These two feeds are
+examples rather than the networking architecture. Applications can use the
+runtime-owned `fetch()` and `fx.net` HTTP, TCP, UDP, and JavaScript web-server
+APIs directly.
 
 Run `apps/tests/run.sh` to verify project count, JavaScript syntax, metadata,
 the public/private API boundary, and the retained runtime contract without

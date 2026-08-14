@@ -1,6 +1,7 @@
 #include "microfx/script.h"
 #include "microfx/assets.h"
 #include "microfx/identity.h"
+#include "microfx/network.h"
 #include <quickjs/quickjs.h>
 #include <qrencode.h>
 #include <math.h>
@@ -14,6 +15,7 @@ struct MicroFxScript {
     JSValue update;
     JSValue beginFrame;
     JSValue endFrame;
+    MicroFxNetwork *network;
     MicroFxScene *scene;
     char projectRoot[MICROFX_MAX_ASSET_PATH];
 };
@@ -645,6 +647,12 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"debugBar",JS_NewCFunction(script->context,DebugBar,"debugBar",1));
     JS_SetPropertyStr(script->context,fx,"env",JS_NewCFunction(script->context,Environment,"env",2));
     JS_SetPropertyStr(script->context,fx,"data",JS_NewCFunction(script->context,ProjectData,"data",2));
+    script->network=MicroFxNetworkCreate(script->context,fx);
+    if(!script->network){
+        fprintf(stderr,"MICROFX_NET initialization failed\n");
+        JS_FreeValue(script->context,fx);JS_FreeValue(script->context,global);
+        free(source);MicroFxScriptDestroy(script);return NULL;
+    }
     JSValue product=JS_NewObject(script->context);
     JS_SetPropertyStr(script->context,product,"name",JS_NewString(script->context,MICROFX_PRODUCT_NAME));
     JS_SetPropertyStr(script->context,product,"slug",JS_NewString(script->context,MICROFX_PRODUCT_SLUG));
@@ -699,6 +707,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
 bool MicroFxScriptUpdate(MicroFxScript *script, double time, double delta)
 {
     if (!script) return false;
+    if(!MicroFxNetworkPump(script->network)){DumpException(script->context);return false;}
     script->scene->time=(float)time;
     JSValue frameResult=JS_Call(script->context,script->beginFrame,JS_UNDEFINED,0,NULL);
     if(JS_IsException(frameResult)){DumpException(script->context);JS_FreeValue(script->context,frameResult);return false;}
@@ -717,6 +726,7 @@ bool MicroFxScriptUpdate(MicroFxScript *script, double time, double delta)
 void MicroFxScriptDestroy(MicroFxScript *script)
 {
     if (!script) return;
+    if (script->network) MicroFxNetworkDestroy(script->network);
     if (script->context) JS_FreeValue(script->context,script->update);
     if (script->context) JS_FreeValue(script->context,script->beginFrame);
     if (script->context) JS_FreeValue(script->context,script->endFrame);

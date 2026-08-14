@@ -5,7 +5,7 @@
 MICROFX_DEMO_VERSION = 1.0.0
 MICROFX_DEMO_SITE = $(BR2_EXTERNAL_IMX6DL_DG1_PATH)/../../..
 MICROFX_DEMO_SITE_METHOD = local
-MICROFX_DEMO_DEPENDENCIES = raylib-drm quickjs libqrencode
+MICROFX_DEMO_DEPENDENCIES = raylib-drm quickjs libqrencode libcurl
 
 define MICROFX_DEMO_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) -I$(@D)/engine/include \
@@ -16,9 +16,10 @@ define MICROFX_DEMO_BUILD_CMDS
 		$(@D)/engine/src/mesh_renderer.c $(@D)/engine/src/text_renderer.c \
 		$(@D)/engine/src/image_renderer.c \
 		$(@D)/engine/src/script.c $(@D)/engine/src/assets.c \
+		$(@D)/engine/src/network.c \
 		$(TARGET_LDFLAGS) -Wl,-rpath,'$$ORIGIN' \
 		-lraylib -lEGL -lGLESv2 -ldrm -lgbm \
-		-L$(STAGING_DIR)/usr/lib/quickjs -lquickjs -lqrencode -lm -lpthread -ldl -latomic
+		-L$(STAGING_DIR)/usr/lib/quickjs -lquickjs -lqrencode -lcurl -lm -lpthread -ldl -latomic
 endef
 
 define MICROFX_DEMO_INSTALL_TARGET_CMDS
