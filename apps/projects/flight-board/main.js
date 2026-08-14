@@ -1129,6 +1129,24 @@ function nextTransitJsonItem(task) {
   return null;
 }
 
+function applyTransitProgress(job, final) {
+  // Put metro first so a dense commuter response cannot consume every shared
+  // rail marker before the subway regions arrive.
+  const rail = mergeTransit(job.metro).concat(mergeTransit(job.trains));
+  applyTransit(transit, rail.slice(0, MAX_RAIL_TRANSIT), true,
+    TRANSIT_HOLD_SECONDS);
+  const buses = mergeTransit(job.buses);
+  applyTransit(busTransit, buses.slice(0, MAX_BUSES), false,
+    TRANSIT_HOLD_SECONDS);
+  if (!final) return;
+  if (rail.length > MAX_RAIL_TRANSIT) {
+    fx.log(`TRANSITOUS RAIL LIMITED ${rail.length}/${MAX_RAIL_TRANSIT}`);
+  }
+  if (buses.length > MAX_BUSES) {
+    fx.log(`TRANSITOUS BUSES LIMITED ${buses.length}/${MAX_BUSES}`);
+  }
+}
+
 function processTransitJob() {
   if (!transitJob) return;
   const job = transitJob;
@@ -1139,6 +1157,7 @@ function processTransitJob() {
       if (!next) return;
       if (next.done) {
         job.tasks.shift();
+        applyTransitProgress(job, false);
         pumpTransitRequests(job);
         return;
       }
@@ -1160,18 +1179,7 @@ function processTransitJob() {
     return;
   }
   if (job.pending === 0) {
-    const rail = mergeTransit(job.trains).concat(mergeTransit(job.metro));
-    applyTransit(transit, rail.slice(0, MAX_RAIL_TRANSIT), true,
-      TRANSIT_HOLD_SECONDS);
-    if (rail.length > MAX_RAIL_TRANSIT) {
-      fx.log(`TRANSITOUS RAIL LIMITED ${rail.length}/${MAX_RAIL_TRANSIT}`);
-    }
-    const buses = mergeTransit(job.buses);
-    applyTransit(busTransit, buses.slice(0, MAX_BUSES), false,
-      TRANSIT_HOLD_SECONDS);
-    if (buses.length > MAX_BUSES) {
-      fx.log(`TRANSITOUS BUSES LIMITED ${buses.length}/${MAX_BUSES}`);
-    }
+    applyTransitProgress(job, true);
     transitJob = null;
     nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
   }
