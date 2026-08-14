@@ -244,7 +244,7 @@ function updateAirportCount(payload) {
   const clusterRadius = AIRPORT_CLUSTER_MIN_RADIUS +
     (AIRPORT_CLUSTER_MAX_RADIUS - AIRPORT_CLUSTER_MIN_RADIUS) * Math.sqrt(growth);
   airportRing.scale(clusterRadius)
-    .color(count > 0 ? 0xffd55aff : 0x585858ff)
+    .color(count > 0 ? 0xb88f32ff : 0x585858ff)
     .visible(true);
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
   airportDots.forEach((dot, index) => {
