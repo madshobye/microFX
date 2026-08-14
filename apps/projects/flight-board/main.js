@@ -39,6 +39,9 @@ const TRANSIT_HOLD_SECONDS = 4 * 60;
 const TRANSIT_CORRECTION_SECONDS = 8;
 const MAX_RAIL_TRANSIT = 224;
 const MAX_BUSES = 128;
+const MAX_TRAIN_MAP_PATHS = 48;
+const MAX_METRO_MAP_PATHS = 16;
+const MAX_RAILWAY_PATH_POINTS = 24;
 const TRANSIT_MODES = new Set([
   "HIGHSPEED_RAIL", "LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN"
 ]);
@@ -103,6 +106,12 @@ scene.add(fx.text("OPENSTREETMAP + CARTO",
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapPoint = (longitude, latitude) => map.project(longitude, latitude);
+const trainMapPaths = Array.from({ length: MAX_TRAIN_MAP_PATHS }, () =>
+  scene.add(fx.outline([[0, 0], [1, 0]], 0, 0, 1, 1,
+    0x29434aff).opacity(0.58).visible(false)));
+const metroMapPaths = Array.from({ length: MAX_METRO_MAP_PATHS }, () =>
+  scene.add(fx.outline([[0, 0], [1, 0]], 0, 0, 1, 1.25,
+    0x6b5426ff).opacity(0.72).visible(false)));
 const landmarks = PLACE.landmarks.map(landmark => {
   const point = mapPoint(landmark.longitude, landmark.latitude);
   return {
@@ -210,6 +219,11 @@ let nextAisConnectTime = 0;
 const shipDetails = new Map();
 let transitRequestInFlight = false;
 let nextTransitRequestTime = 0;
+let transitJob = null;
+const railwaySeen = new Set();
+const railwayQueue = [];
+let trainMapPathCount = 0;
+let metroMapPathCount = 0;
 
 function brightnessColor(color, brightness) {
   const channel = shift => Math.round(clamp(((color >>> shift) & 255) * brightness,
@@ -687,9 +701,60 @@ function transitPath(segment) {
   return { path, cumulative, total };
 }
 
-function normalizeTransit(payload, now, modes) {
+function rememberRailwayPath(segment, kind) {
+  if (!kind || !segment || !segment.polyline) return;
+  const capacity = kind === "metro" ? MAX_METRO_MAP_PATHS : MAX_TRAIN_MAP_PATHS;
+  const used = kind === "metro" ? metroMapPathCount : trainMapPathCount;
+  const pending = railwayQueue.filter(value => value.kind === kind).length;
+  const key = `${kind}:${segment.polyline}`;
+  if (used + pending >= capacity || railwaySeen.has(key)) return;
+  railwaySeen.add(key);
+  railwayQueue.push({ kind, polyline: segment.polyline });
+}
+
+function simplifyRailwayPath(path) {
+  if (path.length < 2) return [];
+  const filtered = [path[0]];
+  for (let index = 1; index < path.length - 1; index++) {
+    const previous = filtered[filtered.length - 1];
+    const current = path[index];
+    const dx = current.x - previous.x;
+    const dy = current.y - previous.y;
+    if (dx * dx + dy * dy >= 9) filtered.push(current);
+  }
+  const last = path[path.length - 1];
+  const previous = filtered[filtered.length - 1];
+  if (last.x !== previous.x || last.y !== previous.y) filtered.push(last);
+  if (filtered.length <= MAX_RAILWAY_PATH_POINTS) {
+    return filtered.map(point => [point.x, point.y]);
+  }
+  return Array.from({ length: MAX_RAILWAY_PATH_POINTS }, (_, index) => {
+    const point = filtered[Math.round(index * (filtered.length - 1) /
+      (MAX_RAILWAY_PATH_POINTS - 1))];
+    return [point.x, point.y];
+  });
+}
+
+function processRailwayQueue() {
+  if (!railwayQueue.length) return;
+  const item = railwayQueue.shift();
+  const path = simplifyRailwayPath(decodeTransitPath(item.polyline));
+  if (path.length < 2) return;
+  if (item.kind === "metro") {
+    if (metroMapPathCount < metroMapPaths.length) {
+      metroMapPaths[metroMapPathCount++].points(path).visible(true);
+    }
+  } else if (trainMapPathCount < trainMapPaths.length) {
+    trainMapPaths[trainMapPathCount++].points(path).visible(true);
+  }
+}
+
+function normalizeTransit(payload, now, modes, mapKind) {
   const grouped = new Map();
   payload.forEach(segment => {
+    if (segment && modes.has(segment.mode) && segment.polyline) {
+      rememberRailwayPath(segment, mapKind);
+    }
     const trip = segment && segment.trips && segment.trips[0];
     if (!trip || !trip.tripId || !segment.polyline ||
         !modes.has(segment.mode)) return;
@@ -829,7 +894,7 @@ function applyTransit(slots, values, styleMarkers, holdSeconds) {
 }
 
 function requestTransit() {
-  if (transitRequestInFlight) return;
+  if (transitRequestInFlight || transitJob) return;
   transitRequestInFlight = true;
   const now = Date.now();
   const start = encodeURIComponent(new Date(
@@ -853,40 +918,57 @@ function requestTransit() {
     })))
     .then(payloads => {
       if (!payloads.every(Array.isArray)) throw new Error("invalid Transitous response");
-      const now = Date.now();
-      const trains = mergeTransit(
-        normalizeTransit(payloads[2], now, TRANSIT_MODES),
-        normalizeTransit(payloads[3], now, TRANSIT_MODES),
-        normalizeTransit(payloads[0], now, TRANSIT_MODES),
-        normalizeTransit(payloads[1], now, TRANSIT_MODES)
-      );
-      const metro = mergeTransit(
-        normalizeTransit(payloads[2], now, METRO_MODES),
-        normalizeTransit(payloads[3], now, METRO_MODES)
-      );
-      const rail = trains.concat(metro);
-      if (rail.length > MAX_RAIL_TRANSIT) {
-        throw new Error(`rail marker capacity ${rail.length}/${MAX_RAIL_TRANSIT}`);
-      }
-      applyTransit(transit, rail, true, TRANSIT_HOLD_SECONDS);
-      const buses = mergeTransit(
-        normalizeTransit(payloads[2], now, BUS_MODES),
-        normalizeTransit(payloads[3], now, BUS_MODES)
-      );
-      if (buses.length <= MAX_BUSES) {
-        applyTransit(busTransit, buses, false, TRANSIT_HOLD_SECONDS);
-      } else {
-        applyTransit(busTransit, [], false);
-        fx.log(`TRANSITOUS BUS SET HIDDEN ${buses.length}/${MAX_BUSES}`);
-      }
+      transitJob = {
+        payloads, now: Date.now(), stage: 0,
+        trains: [], metro: [], buses: []
+      };
       transitRequestInFlight = false;
-      nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
     })
     .catch(error => {
       fx.log(`TRANSITOUS ${error.message || error}`);
+      transitJob = null;
       transitRequestInFlight = false;
       nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
     });
+}
+
+function processTransitJob() {
+  if (!transitJob) return;
+  const job = transitJob;
+  if (job.stage === 0) {
+    job.trains.push(normalizeTransit(job.payloads[2], job.now, TRANSIT_MODES, "train"));
+  } else if (job.stage === 1) {
+    job.trains.push(normalizeTransit(job.payloads[3], job.now, TRANSIT_MODES, "train"));
+  } else if (job.stage === 2) {
+    job.trains.push(normalizeTransit(job.payloads[0], job.now, TRANSIT_MODES, "train"));
+  } else if (job.stage === 3) {
+    job.trains.push(normalizeTransit(job.payloads[1], job.now, TRANSIT_MODES, "train"));
+  } else if (job.stage === 4) {
+    job.metro.push(normalizeTransit(job.payloads[2], job.now, METRO_MODES, "metro"));
+  } else if (job.stage === 5) {
+    job.metro.push(normalizeTransit(job.payloads[3], job.now, METRO_MODES, "metro"));
+  } else if (job.stage === 6) {
+    job.buses.push(normalizeTransit(job.payloads[2], job.now, BUS_MODES));
+  } else if (job.stage === 7) {
+    job.buses.push(normalizeTransit(job.payloads[3], job.now, BUS_MODES));
+  } else {
+    const rail = mergeTransit(...job.trains).concat(mergeTransit(...job.metro));
+    applyTransit(transit, rail.slice(0, MAX_RAIL_TRANSIT), true,
+      TRANSIT_HOLD_SECONDS);
+    if (rail.length > MAX_RAIL_TRANSIT) {
+      fx.log(`TRANSITOUS RAIL LIMITED ${rail.length}/${MAX_RAIL_TRANSIT}`);
+    }
+    const buses = mergeTransit(...job.buses);
+    applyTransit(busTransit, buses.slice(0, MAX_BUSES), false,
+      TRANSIT_HOLD_SECONDS);
+    if (buses.length > MAX_BUSES) {
+      fx.log(`TRANSITOUS BUSES LIMITED ${buses.length}/${MAX_BUSES}`);
+    }
+    transitJob = null;
+    nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
+    return;
+  }
+  job.stage++;
 }
 
 function positionTransit(slot, now, delta) {
@@ -955,8 +1037,12 @@ function update(time, delta) {
   clockTime = time;
   scene.show();
   updateLandmarks(time);
+  processTransitJob();
+  processRailwayQueue();
   if (!requestInFlight && time >= nextRequestTime) requestFlights();
-  if (!transitRequestInFlight && time >= nextTransitRequestTime) requestTransit();
+  if (!transitRequestInFlight && !transitJob && time >= nextTransitRequestTime) {
+    requestTransit();
+  }
   requestNextRoute();
   connectAis();
 
