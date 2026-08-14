@@ -463,6 +463,19 @@ static JSValue AddOutline(JSContext *ctx,JSValueConst thisValue,int argc,JSValue
                                               width,ColorArg(ctx,argv[5]),closed));
 }
 
+static JSValue AddPolygon(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    float points[MICROFX_MAX_OUTLINE_POINTS][2];int count=0;
+    double x=0,y=0,scale=0;
+    if(argc!=5||!ReadOutlinePoints(ctx,argv[0],points,&count)||count<3||
+       JS_ToFloat64(ctx,&x,argv[1])||JS_ToFloat64(ctx,&y,argv[2])||
+       JS_ToFloat64(ctx,&scale,argv[3]))
+        return JS_ThrowTypeError(ctx,"polygon(points,x,y,scale,color)");
+    return Handle(ctx,MicroFxSceneAddPolygon(script->scene,points,count,x,y,scale,
+                                              ColorArg(ctx,argv[4])));
+}
+
 static JSValue SetOutlinePoints(JSContext *ctx,JSValueConst thisValue,
                                 int argc,JSValueConst *argv)
 {
@@ -951,6 +964,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_text",JS_NewCFunction(script->context,AddText,"_text",5));
     JS_SetPropertyStr(script->context,fx,"_image",JS_NewCFunction(script->context,AddImage,"_image",5));
     JS_SetPropertyStr(script->context,fx,"_outline",JS_NewCFunction(script->context,AddOutline,"_outline",7));
+    JS_SetPropertyStr(script->context,fx,"_polygon",JS_NewCFunction(script->context,AddPolygon,"_polygon",5));
     JS_SetPropertyStr(script->context,fx,"_outlinePoints",JS_NewCFunction(script->context,SetOutlinePoints,"_outlinePoints",2));
     JS_SetPropertyStr(script->context,fx,"_outlineScale",JS_NewCFunction(script->context,SetOutlineScale,"_outlineScale",2));
     JS_SetPropertyStr(script->context,fx,"_backgroundImage",JS_NewCFunction(script->context,AddBackgroundImage,"_backgroundImage",2));

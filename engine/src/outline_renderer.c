@@ -66,14 +66,70 @@ static void Point(const MicroFxOutlineElement *element,int index,float *x,float 
     *x=element->x+c*px-s*py;*y=element->y+s*px+c*py;
 }
 
+static float Cross(float ax,float ay,float bx,float by,float cx,float cy)
+{
+    return (bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+}
+
+static bool InsideTriangle(float px,float py,float ax,float ay,float bx,float by,
+                           float cx,float cy,float orientation)
+{
+    return Cross(ax,ay,bx,by,px,py)*orientation>=-0.0001f&&
+           Cross(bx,by,cx,cy,px,py)*orientation>=-0.0001f&&
+           Cross(cx,cy,ax,ay,px,py)*orientation>=-0.0001f;
+}
+
+static int FilledVertices(const MicroFxOutlineElement *element,int cursor,
+                          const float color[4])
+{
+    float x[MICROFX_MAX_OUTLINE_POINTS],y[MICROFX_MAX_OUTLINE_POINTS];
+    int indices[MICROFX_MAX_OUTLINE_POINTS];
+    for(int i=0;i<element->pointCount;i++){
+        Point(element,i,&x[i],&y[i]);indices[i]=i;
+    }
+    float area=0.0f;
+    for(int i=0;i<element->pointCount;i++){
+        int next=(i+1)%element->pointCount;
+        area+=x[i]*y[next]-x[next]*y[i];
+    }
+    const float orientation=area>=0.0f?1.0f:-1.0f;
+    int remaining=element->pointCount;
+    while(remaining>2){
+        bool found=false;
+        for(int ear=0;ear<remaining;ear++){
+            int a=indices[(ear+remaining-1)%remaining];
+            int b=indices[ear];
+            int c=indices[(ear+1)%remaining];
+            if(Cross(x[a],y[a],x[b],y[b],x[c],y[c])*orientation<=0.0001f)
+                continue;
+            bool contains=false;
+            for(int other=0;other<remaining;other++){
+                int p=indices[other];
+                if(p==a||p==b||p==c)continue;
+                if(InsideTriangle(x[p],y[p],x[a],y[a],x[b],y[b],x[c],y[c],
+                                  orientation)){contains=true;break;}
+            }
+            if(contains)continue;
+            Vertex(&vertices[cursor++],x[a],y[a],color);
+            Vertex(&vertices[cursor++],x[b],y[b],color);
+            Vertex(&vertices[cursor++],x[c],y[c],color);
+            for(int move=ear;move<remaining-1;move++)indices[move]=indices[move+1];
+            remaining--;found=true;break;
+        }
+        if(!found)break;
+    }
+    return cursor;
+}
+
 static void Rebuild(MicroFxOutlineRenderer *renderer,MicroFxScene *scene)
 {
     int cursor=0;
     for(int i=0;i<scene->outlineCount;i++){
         const MicroFxOutlineElement *element=&scene->outline[i];
         if(!element->visible)continue;
-        int segments=element->closed?element->pointCount:element->pointCount-1;
         float color[4];Color(color,element->color,element->opacity);
+        if(element->filled){cursor=FilledVertices(element,cursor,color);continue;}
+        int segments=element->closed?element->pointCount:element->pointCount-1;
         for(int segment=0;segment<segments;segment++){
             float ax,ay,bx,by;Point(element,segment,&ax,&ay);
             Point(element,(segment+1)%element->pointCount,&bx,&by);

@@ -7,7 +7,8 @@ const PLACE = {
     iata: "CPH",
     icao: "EKCH",
     latitude: 55.6181,
-    longitude: 12.6561
+    longitude: 12.6561,
+    markerOffset: [-55, 40]
   },
   mapCenter: {
     latitude: 55.67,
@@ -16,12 +17,19 @@ const PLACE = {
   mapZoom: 11.45,
   searchRadiusNm: 25,
   airportGroundRadiusKm: 3,
+  landmarks: [
+    { latitude: 55.65211374559996, longitude: 12.610871553308385,
+      radius: 3, color: 0xef4444ff }
+  ],
   aisBounds: [[55.36, 12.10], [55.98, 13.18]]
 };
 
 const POLL_SECONDS = 5;
 const CORRECTION_SECONDS = 8;
 const MAX_FLIGHTS = 50;
+const MAX_AIRPORT_DOTS = 50;
+const AIRPORT_CLUSTER_MIN_RADIUS = 9;
+const AIRPORT_CLUSTER_MAX_RADIUS = 24;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
@@ -94,13 +102,25 @@ scene.add(fx.text("OPENSTREETMAP + CARTO",
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapPoint = (longitude, latitude) => map.project(longitude, latitude);
+PLACE.landmarks.forEach(landmark => {
+  const point = mapPoint(landmark.longitude, landmark.latitude);
+  scene.add(fx.circle(point.x, point.y, landmark.radius, landmark.color));
+});
 const airportPoint = mapPoint(PLACE.airport.longitude, PLACE.airport.latitude);
 const airportX = airportPoint.x;
 const airportY = airportPoint.y;
-const airportDot = scene.add(fx.sdfCircle(airportX, airportY, 11, 0xffd55aff)
-  .visible(false));
-const airportCount = scene.add(fx.text("x 0", airportX + 20, airportY - 10,
-  18, 0xffd55aff).antialias(false).visible(false));
+const airportClusterX = airportX + PLACE.airport.markerOffset[0];
+const airportClusterY = airportY + PLACE.airport.markerOffset[1];
+const airportCirclePoints = Array.from({ length: 32 }, (_, index) => {
+  const angle = index / 32 * Math.PI * 2;
+  return [Math.cos(angle), Math.sin(angle)];
+});
+const airportRing = scene.add(fx.outline(airportCirclePoints,
+  airportClusterX, airportClusterY, AIRPORT_CLUSTER_MAX_RADIUS, 1.5,
+  0xffd55aff, { closed: true }).visible(false));
+const airportDots = Array.from({ length: MAX_AIRPORT_DOTS }, () =>
+  scene.add(fx.circle(airportClusterX, airportClusterY, 2.2, 0xffd55aff)
+    .visible(false)));
 
 // The retained slot count is bounded by the 64-element text batch. Geometry
 // and labels are allocated once; network responses only update their state.
@@ -111,6 +131,8 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
       (5 - segment) * 0.5, 0x38bce8ff)
       .opacity(0.8 - segment * 0.2).visible(false)));
   const trailState = trail.map(() => ({ x: 0, y: 0, spacing: 0 }));
+  const shadow = scene.add(fx.polygon(AIRCRAFT_SHAPES.small,
+    0, 0, 16, 0x000000ff).opacity(0.52).visible(false));
   const outline = marker.add(fx.outline(AIRCRAFT_SHAPES.small,
     0, 0, 16, 1.6, 0xffd55aff, { closed: true }));
   const label = fx.text("---", 0, 0, 18, 0xffffffff).antialias(false);
@@ -118,9 +140,9 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
   scene.add(label);
   return {
     id: "", callsign: "", active: false, onGround: false,
-    aircraftKind: "small", markerRadius: 7,
+    aircraftKind: "small", markerRadius: 7, altitudeFeet: 0,
     marker, trail, trailState, trailInitialized: false, headingAngle: 0,
-    outline, label,
+    shadow, outline, label,
     labelX: NaN, labelY: NaN,
     positionTime: 0,
     currentX: 0, currentY: 0, velocityX: 0, velocityY: 0,
@@ -194,10 +216,21 @@ function updateAirportCount(payload) {
     Number.isFinite(row.lon) && Number.isFinite(row.lat) &&
     distanceKm(Number(row.lon), Number(row.lat), PLACE.airport.longitude,
       PLACE.airport.latitude) <= PLACE.airportGroundRadiusKm &&
-    row.t !== "TWR" && !String(row.category || "").startsWith("C")).length;
-  const visible = landed > 0;
-  airportDot.visible(visible);
-  airportCount.visible(visible).text(`x ${landed}`);
+    row.t !== "TWR" && !String(row.category || "").startsWith("C"));
+  const count = Math.min(landed.length, airportDots.length);
+  const growth = clamp((count - 9) / (MAX_AIRPORT_DOTS - 9), 0, 1);
+  const clusterRadius = AIRPORT_CLUSTER_MIN_RADIUS +
+    (AIRPORT_CLUSTER_MAX_RADIUS - AIRPORT_CLUSTER_MIN_RADIUS) * Math.sqrt(growth);
+  airportRing.scale(clusterRadius).visible(count > 0);
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  airportDots.forEach((dot, index) => {
+    if (index >= count) { dot.visible(false); return; }
+    const radius = Math.max(2, clusterRadius - 4) *
+      Math.sqrt((index + 0.5) / count);
+    const angle = index * goldenAngle;
+    dot.position(airportClusterX + Math.cos(angle) * radius,
+      airportClusterY + Math.sin(angle) * radius).visible(true);
+  });
 }
 
 function positionLabel(slot) {
@@ -295,6 +328,13 @@ function setHeading(slot, heading, speed) {
     segment.visible(slot.aircraftKind !== "helicopter" && speed >= speedThreshold);
   });
   slot.outline.rotation(angle);
+  slot.shadow.rotation(angle);
+}
+
+function positionShadow(slot) {
+  const distance = 3 + Math.sqrt(clamp(slot.altitudeFeet, 0, 40000) / 40000) * 34;
+  slot.shadow.position(slot.currentX + distance * 0.78,
+    slot.currentY + distance * 0.63);
 }
 
 function updateTrail(slot) {
@@ -367,8 +407,12 @@ function styleMarker(slot, item) {
   const kindChanged = slot.aircraftKind !== kind;
   slot.aircraftKind = kind;
   slot.markerRadius = radius;
-  if (kindChanged) slot.outline.points(style[0]);
+  if (kindChanged) {
+    slot.outline.points(style[0]);
+    slot.shadow.points(style[0]);
+  }
   slot.outline.scale(radius * style[2]).color(style[1]);
+  slot.shadow.scale(radius * style[2] * 0.94);
 }
 
 function applyFlights(values, live) {
@@ -393,6 +437,7 @@ function applyFlights(values, live) {
     slot.id = item.id;
     slot.callsign = item.callsign || `AIRCRAFT ${index + 1}`;
     slot.onGround = Boolean(item.onGround);
+    slot.altitudeFeet = item.altitudeFeet;
     styleMarker(slot, item);
     if (sameAircraft && hasFreshPosition) {
       slot.correctionX = x - slot.currentX;
@@ -411,6 +456,8 @@ function applyFlights(values, live) {
     slot.velocityY = velocity.y;
     slot.active = true;
     slot.marker.visible(true).position(slot.currentX, slot.currentY);
+    slot.shadow.visible(!slot.onGround);
+    positionShadow(slot);
     slot.label.visible(!slot.onGround).text(labelText(slot));
     positionLabel(slot);
     if (!slot.onGround) queueRoute(slot.callsign);
@@ -428,6 +475,7 @@ function applyFlights(values, live) {
     slot.positionTime = 0;
     slot.trailInitialized = false;
     slot.marker.visible(false);
+    slot.shadow.visible(false);
     slot.trail.forEach(segment => segment.visible(false));
     slot.label.visible(false);
   });
@@ -473,6 +521,7 @@ function normalizeFlights(payload) {
         heading,
         aircraftKind: aircraftKind(item),
         markerRadius: markerRadius(altitudeFeet),
+        altitudeFeet,
         onGround: false
       };
     });
@@ -902,6 +951,7 @@ function update(time, delta) {
       slot.correctionRemaining = Math.max(0, slot.correctionRemaining - step);
     }
     slot.marker.position(slot.currentX, slot.currentY);
+    positionShadow(slot);
     updateTrail(slot);
     positionLabel(slot);
   });

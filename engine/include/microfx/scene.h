@@ -13,7 +13,7 @@
 #define MICROFX_MAX_MESH_ELEMENTS 256
 #define MICROFX_MAX_TEXT_ELEMENTS 64
 #define MICROFX_MAX_IMAGE_ELEMENTS 16
-#define MICROFX_MAX_OUTLINE_ELEMENTS 96
+#define MICROFX_MAX_OUTLINE_ELEMENTS 160
 #define MICROFX_MAX_OUTLINE_POINTS 64
 #define MICROFX_MAX_TEXT_BYTES 128
 #define MICROFX_MAX_ASSET_PATH 256
@@ -130,6 +130,7 @@ typedef struct {
     float opacity;
     bool visible;
     bool closed;
+    bool filled;
 } MicroFxOutlineElement;
 
 typedef struct {
@@ -271,6 +272,9 @@ bool MicroFxSceneSetImageScale(MicroFxScene *scene, int handle, float scale);
 int MicroFxSceneAddOutline(MicroFxScene *scene, const float points[][2],
                            int pointCount, float x, float y, float scale,
                            float width, uint32_t color, bool closed);
+int MicroFxSceneAddPolygon(MicroFxScene *scene, const float points[][2],
+                           int pointCount, float x, float y, float scale,
+                           uint32_t color);
 bool MicroFxSceneSetOutlinePoints(MicroFxScene *scene, int handle,
                                   const float points[][2], int pointCount);
 bool MicroFxSceneSetOutlineScale(MicroFxScene *scene, int handle, float scale);

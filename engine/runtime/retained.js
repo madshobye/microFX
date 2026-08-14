@@ -323,6 +323,16 @@
     return element(fx._outline(normalizePath(points), x, y, scale, width, color, closed),
                    2, { x, y, scale, kind: "outline" });
   };
+  fx.polygon = function polygon(points, x, y, scale, color) {
+    if (arguments.length !== 5 || !Number.isFinite(x) || !Number.isFinite(y) ||
+        !Number.isFinite(scale) || scale <= 0) {
+      throw new TypeError("polygon(points,x,y,scale,color)");
+    }
+    const path = normalizePath(points);
+    if (path.length < 6) throw new TypeError("polygon requires at least 3 points");
+    return element(fx._polygon(path, x, y, scale, color),
+                   2, { x, y, scale, kind: "outline" });
+  };
   fx.gradientRect = function gradientRect(x, y, width, height, top, bottom) {
     return make2d(fx._gradientRect, arguments, { x, y });
   };

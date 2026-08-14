@@ -12,7 +12,7 @@ function runtime() {
   for (const name of [
     "circle", "sdfCircle", "sdfRoundedRect", "rect", "gradientRect",
     "background", "cube", "sphere", "wireCube", "grid", "model", "text", "image",
-    "outline"
+    "outline", "polygon"
   ]) {
     fx[`_${name}`] = (...args) => {
       calls.push([`_${name}`, ...args]);
@@ -103,6 +103,19 @@ test("outlines retain point arrays as one native cached element", () => {
     ["_outlinePoints", 1, [-2, 1, 0, -2, 2, 1]],
     ["_outlineScale", 1, 15],
     ["_move", 1, 20, 30, 0.5]
+  ]);
+});
+
+test("filled polygons use the retained 2D transform and opacity API", () => {
+  const { fx, calls } = runtime();
+  const polygon = fx.polygon([[-1, 1], [0, -1], [1, 1]], 20, 30, 12,
+                             0x102030ff);
+  polygon.opacity(0.4).rotation(0.5).points([[-2, 1], [0, -2], [2, 1]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["_polygon", [-1, 1, 0, -1, 1, 1], 20, 30, 12, 0x102030ff],
+    ["_opacity", 1, 0.4],
+    ["_move", 1, 20, 30, 0.5],
+    ["_outlinePoints", 1, [-2, 1, 0, -2, 2, 1]]
   ]);
 });
 

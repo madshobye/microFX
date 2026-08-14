@@ -315,6 +315,23 @@ int MicroFxSceneAddOutline(MicroFxScene *scene, const float points[][2],
     return MICROFX_HANDLE_OUTLINE|index;
 }
 
+int MicroFxSceneAddPolygon(MicroFxScene *scene, const float points[][2],
+                           int pointCount, float x, float y, float scale,
+                           uint32_t color)
+{
+    if(!points||pointCount<3||pointCount>MICROFX_MAX_OUTLINE_POINTS||
+       scale<=0.0f||scene->outlineCount>=MICROFX_MAX_OUTLINE_ELEMENTS)
+        return -1;
+    int index=scene->outlineCount++;
+    MicroFxOutlineElement *element=&scene->outline[index];
+    memcpy(element->points,points,(size_t)pointCount*sizeof(element->points[0]));
+    element->pointCount=pointCount;element->x=x;element->y=y;element->scale=scale;
+    element->width=0.0f;element->color=color;element->opacity=1.0f;
+    element->visible=true;element->closed=true;element->filled=true;
+    scene->outlineDirty=true;
+    return MICROFX_HANDLE_OUTLINE|index;
+}
+
 bool MicroFxSceneSetOutlinePoints(MicroFxScene *scene, int handle,
                                   const float points[][2], int pointCount)
 {

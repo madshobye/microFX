@@ -76,6 +76,7 @@ relative offset. Both are fluent and return the same object.
 | `line(x1,y1,x2,y2,width,color)` | Add a cheap retained line as a rotated quad |
 | `polyline(points,width,color[,options])` | Build an open/closed retained path from the same quad batch |
 | `outline(points,x,y,scale,width,color[,options])` | Cache one 2D point array as a native batched outline |
+| `polygon(points,x,y,scale,color)` | Cache one simple filled polygon; supports concave outlines and normal 2D opacity/blending |
 | `gradientRect(x,y,w,h,top,bottom)` | Add a cheap vertical-gradient quad |
 | `background(top,bottom)` | Add a gradient rendered before the 3D scene |
 | `circle(x,y,r,color)` | Add a fast retained triangle-fan circle |

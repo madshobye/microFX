@@ -13,7 +13,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-enum { HTTP_LIMIT=4, SOCKET_LIMIT=16, WEBSOCKET_LIMIT=4,
+enum { HTTP_LIMIT=8, SOCKET_LIMIT=16, WEBSOCKET_LIMIT=4,
        WEBSOCKET_QUEUE_LIMIT=32, WEBSOCKET_MESSAGES_PER_PUMP=8,
        BODY_LIMIT=256*1024, IO_LIMIT=64*1024, WEBSOCKET_HANDLE_BASE=1000 };
 typedef enum { NET_UNUSED, NET_UDP, NET_TCP_CONNECTING, NET_TCP, NET_TCP_LISTENER } NetKind;
@@ -241,7 +241,7 @@ static JSValue Fetch(JSContext *ctx,JSValueConst thisValue,int argc,
     }
     HttpRequest *request=NULL;
     for(int i=0;i<HTTP_LIMIT;i++)if(!network->http[i].easy){request=&network->http[i];break;}
-    if(!request){curl_slist_free_all(headers);JS_FreeCString(ctx,url);return JS_ThrowRangeError(ctx,"maximum 4 HTTP requests in flight");}
+    if(!request){curl_slist_free_all(headers);JS_FreeCString(ctx,url);return JS_ThrowRangeError(ctx,"maximum 8 HTTP requests in flight");}
     JSValue functions[2];
     JSValue promise=JS_NewPromiseCapability(ctx,functions);
     if(JS_IsException(promise)){curl_slist_free_all(headers);JS_FreeCString(ctx,url);return promise;}

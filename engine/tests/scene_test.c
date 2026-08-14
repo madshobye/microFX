@@ -154,6 +154,11 @@ int main(void)
     assert(MicroFxSceneSetOpacity(&scene,outline,0.5f));
     assert(MicroFxSceneSetVisible(&scene,outline,false));
     assert(!scene.outline[0].visible);
+    int polygon=MicroFxSceneAddPolygon(&scene,outlinePoints,3,20,30,12,
+                                       0x10203080);
+    assert((polygon&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_OUTLINE);
+    assert(scene.outline[1].filled&&scene.outline[1].closed);
+    assert(MicroFxSceneSetOpacity(&scene,polygon,0.25f));
 
     assert(!MicroFxSceneMove(&scene,cube,0,0,0));
     assert(!MicroFxSceneTransform(&scene,circle,0,0,0,0,0,0,1));
