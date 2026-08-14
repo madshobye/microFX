@@ -52,7 +52,7 @@ const scene = fx.scenes.add(fx.scene({ name: "flight-board" }));
 
 const map = scene.add(fx.tileMap({
   source: {
-    url: "https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
+    url: "https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png",
     tileSize: 256,
     attribution: "© OpenStreetMap contributors · © CARTO"
   },
@@ -61,10 +61,10 @@ const map = scene.add(fx.tileMap({
   cacheDays: 7,
   filter: {
     grayscale: 1,
-    invert: 1,
-    contrast: 1.35,
-    brightness: 0.84,
-    tint: 0x505a64ff
+    invert: 0,
+    contrast: 1.05,
+    brightness: 0.68,
+    tint: 0xffffffff
   }
 }));
 scene.add(fx.text(`${PLACE.label} AIRSPACE`, 55, 45, 28, 0x7ee5ffff));
