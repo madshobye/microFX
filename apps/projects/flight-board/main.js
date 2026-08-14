@@ -19,6 +19,12 @@ const status = scene.add(fx.text("OFFLINE SNAPSHOT", 1530, 50, 18, 0x6e8ca8ff));
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapX = longitude => clamp((longitude - LON_MIN) / (LON_MAX - LON_MIN), 0, 1) * 1920;
 const mapY = latitude => (1 - clamp((latitude - LAT_MIN) / (LAT_MAX - LAT_MIN), 0, 1)) * 1080;
+const airportX = mapX(12.6561);
+const airportY = mapY(55.6181);
+const airportDot = scene.add(fx.sdfCircle(airportX, airportY, 11, 0xffd55aff)
+  .visible(false));
+const airportCount = scene.add(fx.text("x 0", airportX + 20, airportY - 10,
+  18, 0xffd55aff).antialias(false).visible(false));
 
 // The retained slot count is bounded by the 64-element text batch. Geometry
 // and labels are allocated once; network responses only update their state.
@@ -55,7 +61,15 @@ let nextRouteRequestTime = 0;
 
 function labelText(slot) {
   const route = routeCache.get(slot.callsign);
-  return route ? `${slot.callsign}  ${route}` : slot.callsign;
+  return route ? `${slot.callsign}: ${route}` : slot.callsign;
+}
+
+function updateAirportCount(payload) {
+  const landed = payload.states.filter(row => Array.isArray(row) &&
+    row[8] === true && Number(row[17]) !== 16 && Number(row[17]) !== 17).length;
+  const visible = landed > 0;
+  airportDot.visible(visible);
+  airportCount.visible(visible).text(`x ${landed}`);
 }
 
 function positionLabel(slot) {
@@ -250,7 +264,9 @@ function requestFlights() {
       return response.json();
     })
     .then(payload => {
-      applyFlights(normalizeFlights(payload), true);
+      const airborne = normalizeFlights(payload);
+      updateAirportCount(payload);
+      applyFlights(airborne, true);
       requestInFlight = false;
       nextRequestTime = clockTime + POLL_SECONDS;
     })
