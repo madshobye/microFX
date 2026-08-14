@@ -186,7 +186,7 @@ let nextTransitRequestTime = 0;
 
 function labelText(slot) {
   const route = routeCache.get(slot.callsign);
-  return route ? `${slot.callsign}: ${route}` : slot.callsign;
+  return route || "";
 }
 
 function updateAirportCount(payload) {
