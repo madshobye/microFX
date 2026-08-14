@@ -39,9 +39,10 @@ const TRANSIT_HOLD_SECONDS = 4 * 60;
 const TRANSIT_CORRECTION_SECONDS = 8;
 const MAX_RAIL_TRANSIT = 224;
 const MAX_BUSES = 128;
-const MAX_TRAIN_MAP_PATHS = 48;
-const MAX_METRO_MAP_PATHS = 16;
-const MAX_RAILWAY_PATH_POINTS = 24;
+const MAX_TRAIN_MAP_PATHS = 88;
+const MAX_METRO_MAP_PATHS = 32;
+const RAILWAY_MERGE_PIXELS = 5;
+const RAILWAY_MAX_EDGE_PIXELS = 80;
 const TRANSIT_MODES = new Set([
   "HIGHSPEED_RAIL", "LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN"
 ]);
@@ -222,8 +223,13 @@ let nextTransitRequestTime = 0;
 let transitJob = null;
 const railwaySeen = new Set();
 const railwayQueue = [];
+const railwayNodes = [];
+const railwayNodeCells = new Map();
+const railwayEdges = new Set();
 let trainMapPathCount = 0;
 let metroMapPathCount = 0;
+let pendingTrainMapPaths = 0;
+let pendingMetroMapPaths = 0;
 
 function brightnessColor(color, brightness) {
   const channel = shift => Math.round(clamp(((color >>> shift) & 255) * brightness,
@@ -705,48 +711,93 @@ function rememberRailwayPath(segment, kind) {
   if (!kind || !segment || !segment.polyline) return;
   const capacity = kind === "metro" ? MAX_METRO_MAP_PATHS : MAX_TRAIN_MAP_PATHS;
   const used = kind === "metro" ? metroMapPathCount : trainMapPathCount;
-  const pending = railwayQueue.filter(value => value.kind === kind).length;
+  const pending = kind === "metro" ? pendingMetroMapPaths : pendingTrainMapPaths;
   const key = `${kind}:${segment.polyline}`;
-  if (used + pending >= capacity || railwaySeen.has(key)) return;
+  if (used >= capacity || pending >= capacity * 2 || railwaySeen.has(key)) {
+    return;
+  }
   railwaySeen.add(key);
   railwayQueue.push({ kind, polyline: segment.polyline });
+  if (kind === "metro") pendingMetroMapPaths++;
+  else pendingTrainMapPaths++;
 }
 
-function simplifyRailwayPath(path) {
-  if (path.length < 2) return [];
-  const filtered = [path[0]];
-  for (let index = 1; index < path.length - 1; index++) {
-    const previous = filtered[filtered.length - 1];
-    const current = path[index];
-    const dx = current.x - previous.x;
-    const dy = current.y - previous.y;
-    if (dx * dx + dy * dy >= 9) filtered.push(current);
+function railwayNode(point) {
+  const cellX = Math.floor(point.x / RAILWAY_MERGE_PIXELS);
+  const cellY = Math.floor(point.y / RAILWAY_MERGE_PIXELS);
+  let nearest = null;
+  let nearestDistance = RAILWAY_MERGE_PIXELS * RAILWAY_MERGE_PIXELS;
+  for (let y = cellY - 1; y <= cellY + 1; y++) {
+    for (let x = cellX - 1; x <= cellX + 1; x++) {
+      const candidates = railwayNodeCells.get(`${x}:${y}`) || [];
+      candidates.forEach(candidate => {
+        const dx = candidate.x - point.x;
+        const dy = candidate.y - point.y;
+        const distance = dx * dx + dy * dy;
+        if (distance <= nearestDistance) {
+          nearest = candidate;
+          nearestDistance = distance;
+        }
+      });
+    }
   }
-  const last = path[path.length - 1];
-  const previous = filtered[filtered.length - 1];
-  if (last.x !== previous.x || last.y !== previous.y) filtered.push(last);
-  if (filtered.length <= MAX_RAILWAY_PATH_POINTS) {
-    return filtered.map(point => [point.x, point.y]);
+  if (nearest) return nearest;
+  const node = { id: railwayNodes.length, x: point.x, y: point.y };
+  railwayNodes.push(node);
+  const key = `${cellX}:${cellY}`;
+  if (!railwayNodeCells.has(key)) railwayNodeCells.set(key, []);
+  railwayNodeCells.get(key).push(node);
+  return node;
+}
+
+function drawRailwayRun(kind, nodes) {
+  if (nodes.length < 2) return;
+  const paths = kind === "metro" ? metroMapPaths : trainMapPaths;
+  while (nodes.length >= 2) {
+    const count = kind === "metro" ? metroMapPathCount : trainMapPathCount;
+    if (count >= paths.length) return;
+    const chunk = nodes.slice(0, 64).map(node => [node.x, node.y]);
+    paths[count].points(chunk).visible(true);
+    if (kind === "metro") metroMapPathCount++;
+    else trainMapPathCount++;
+    if (nodes.length <= 64) return;
+    nodes = nodes.slice(63);
   }
-  return Array.from({ length: MAX_RAILWAY_PATH_POINTS }, (_, index) => {
-    const point = filtered[Math.round(index * (filtered.length - 1) /
-      (MAX_RAILWAY_PATH_POINTS - 1))];
-    return [point.x, point.y];
-  });
 }
 
 function processRailwayQueue() {
   if (!railwayQueue.length) return;
   const item = railwayQueue.shift();
-  const path = simplifyRailwayPath(decodeTransitPath(item.polyline));
-  if (path.length < 2) return;
-  if (item.kind === "metro") {
-    if (metroMapPathCount < metroMapPaths.length) {
-      metroMapPaths[metroMapPathCount++].points(path).visible(true);
+  if (item.kind === "metro") pendingMetroMapPaths--;
+  else pendingTrainMapPaths--;
+  const nodes = [];
+  decodeTransitPath(item.polyline).forEach(point => {
+    const node = railwayNode(point);
+    if (!nodes.length || nodes[nodes.length - 1].id !== node.id) nodes.push(node);
+  });
+  let run = [];
+  for (let index = 1; index < nodes.length; index++) {
+    const first = nodes[index - 1];
+    const second = nodes[index];
+    const dx = second.x - first.x;
+    const dy = second.y - first.y;
+    if (dx * dx + dy * dy > RAILWAY_MAX_EDGE_PIXELS * RAILWAY_MAX_EDGE_PIXELS) {
+      drawRailwayRun(item.kind, run);
+      run = [];
+      continue;
     }
-  } else if (trainMapPathCount < trainMapPaths.length) {
-    trainMapPaths[trainMapPathCount++].points(path).visible(true);
+    const edge = first.id < second.id ?
+      `${item.kind}:${first.id}:${second.id}` : `${item.kind}:${second.id}:${first.id}`;
+    if (railwayEdges.has(edge)) {
+      drawRailwayRun(item.kind, run);
+      run = [];
+      continue;
+    }
+    railwayEdges.add(edge);
+    if (!run.length) run.push(first);
+    run.push(second);
   }
+  drawRailwayRun(item.kind, run);
 }
 
 function normalizeTransit(payload, now, modes, mapKind) {
