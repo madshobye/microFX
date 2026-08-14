@@ -30,6 +30,9 @@ const MAX_FLIGHTS = 50;
 const MAX_AIRPORT_DOTS = 50;
 const AIRPORT_CLUSTER_MIN_RADIUS = 9;
 const AIRPORT_CLUSTER_MAX_RADIUS = 24;
+const SYMBOLIC_SUN_DIRECTION = { x: -0.72, y: -0.69 };
+const SHADOW_MIN_OFFSET = 7;
+const SHADOW_MAX_OFFSET = 62;
 const LANDMARK_BREATH_SECONDS = 3;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
@@ -147,7 +150,7 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
       .opacity(0.8 - segment * 0.2).visible(false)));
   const trailState = trail.map(() => ({ x: 0, y: 0, spacing: 0 }));
   const shadow = scene.add(fx.polygon(AIRCRAFT_SHAPES.small,
-    0, 0, 16, 0x000000ff).opacity(0.52).visible(false));
+    0, 0, 16, 0x8b98a1ff).opacity(0.60).visible(false));
   const outline = marker.add(fx.outline(AIRCRAFT_SHAPES.small,
     0, 0, 16, 1.6, 0xffd55aff, { closed: true }));
   const label = fx.text("---", 0, 0, 18, 0xffffffff).antialias(false);
@@ -376,9 +379,11 @@ function setHeading(slot, heading, speed) {
 }
 
 function positionShadow(slot) {
-  const distance = 3 + Math.sqrt(clamp(slot.altitudeFeet, 0, 40000) / 40000) * 34;
-  slot.shadow.position(slot.currentX + distance * 0.78,
-    slot.currentY + distance * 0.63);
+  const height = Math.sqrt(clamp(slot.altitudeFeet, 0, 40000) / 40000);
+  const distance = SHADOW_MIN_OFFSET + height *
+    (SHADOW_MAX_OFFSET - SHADOW_MIN_OFFSET);
+  slot.shadow.position(slot.currentX - SYMBOLIC_SUN_DIRECTION.x * distance,
+    slot.currentY - SYMBOLIC_SUN_DIRECTION.y * distance);
 }
 
 function updateTrail(slot) {
