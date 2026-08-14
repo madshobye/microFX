@@ -9,7 +9,7 @@
       "markerOffset": [-45, 35]
     },
     "mapCenter": { "latitude": 40.715, "longitude": -73.93 },
-    "mapZoom": 10.65,
+    "mapZoom": 11.0,
     "searchRadiusNm": 45,
     "airportGroundRadiusKm": 4,
     "localAirports": ["JFK", "KJFK", "LGA", "KLGA", "EWR", "KEWR", "TEB", "KTEB"],
