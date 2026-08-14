@@ -300,6 +300,17 @@ static JSValue SetFont(JSContext *ctx,JSValueConst thisValue,int argc,JSValueCon
     return JS_UNDEFINED;
 }
 
+static JSValue SetTextAntialias(JSContext *ctx,JSValueConst thisValue,int argc,
+                                JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc<2||JS_ToInt32(ctx,&handle,argv[0]))
+        return JS_ThrowTypeError(ctx,"textAntialias(handle,enabled)");
+    if(!MicroFxSceneSetTextAntialias(script->scene,handle,JS_ToBool(ctx,argv[1])>0))
+        return JS_ThrowTypeError(ctx,"antialias() is only available on text elements");
+    return JS_UNDEFINED;
+}
+
 static JSValue SetColor(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
 {
     (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
@@ -656,6 +667,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_imageScale",JS_NewCFunction(script->context,SetImageScale,"_imageScale",2));
     JS_SetPropertyStr(script->context,fx,"_setText",JS_NewCFunction(script->context,SetText,"_setText",2));
     JS_SetPropertyStr(script->context,fx,"_font",JS_NewCFunction(script->context,SetFont,"_font",2));
+    JS_SetPropertyStr(script->context,fx,"_textAntialias",JS_NewCFunction(script->context,SetTextAntialias,"_textAntialias",2));
     JS_SetPropertyStr(script->context,fx,"_color",JS_NewCFunction(script->context,SetColor,"_color",2));
     JS_SetPropertyStr(script->context,fx,"_visible",JS_NewCFunction(script->context,SetVisible,"_visible",2));
     JS_SetPropertyStr(script->context,fx,"_opacity",JS_NewCFunction(script->context,SetOpacity,"_opacity",2));

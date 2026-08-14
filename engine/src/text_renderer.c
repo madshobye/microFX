@@ -9,6 +9,7 @@ typedef struct {
     float position[2];
     float uv[2];
     float color[4];
+    float antialias;
 } TextVertex;
 
 static GLuint Compile(GLenum type, const char *source)
@@ -30,13 +31,15 @@ bool MicroFxTextRendererInit(MicroFxTextRenderer *renderer, Font font)
     renderer->fonts[0]=font;renderer->fontCount=1;
     static const char *vs=
         "#version 100\nprecision highp float;attribute vec2 aPosition;attribute vec2 aUv;"
-        "attribute vec4 aColor;uniform vec2 uViewport;varying vec2 vUv;varying lowp vec4 vColor;"
+        "attribute vec4 aColor;attribute float aAntialias;uniform vec2 uViewport;"
+        "varying vec2 vUv;varying lowp vec4 vColor;varying lowp float vAntialias;"
         "void main(){vec2 p=vec2(aPosition.x/uViewport.x*2.0-1.0,1.0-aPosition.y/uViewport.y*2.0);"
-        "gl_Position=vec4(p,0.0,1.0);vUv=aUv;vColor=aColor;}\n";
+        "gl_Position=vec4(p,0.0,1.0);vUv=aUv;vColor=aColor;vAntialias=aAntialias;}\n";
     static const char *fs=
         "#version 100\nprecision mediump float;uniform sampler2D uTexture;"
-        "varying vec2 vUv;varying lowp vec4 vColor;"
-        "void main(){float a=texture2D(uTexture,vUv).a;gl_FragColor=vec4(vColor.rgb,vColor.a*a);}\n";
+        "varying vec2 vUv;varying lowp vec4 vColor;varying lowp float vAntialias;"
+        "void main(){float a=texture2D(uTexture,vUv).a;"
+        "a=mix(step(0.5,a),a,vAntialias);gl_FragColor=vec4(vColor.rgb,vColor.a*a);}\n";
     GLuint vertex=Compile(GL_VERTEX_SHADER,vs),fragment=Compile(GL_FRAGMENT_SHADER,fs);
     if (!vertex || !fragment) return false;
     renderer->program=glCreateProgram(); glAttachShader(renderer->program,vertex);
@@ -44,6 +47,7 @@ bool MicroFxTextRendererInit(MicroFxTextRenderer *renderer, Font font)
     glBindAttribLocation(renderer->program,0,"aPosition");
     glBindAttribLocation(renderer->program,1,"aUv");
     glBindAttribLocation(renderer->program,2,"aColor");
+    glBindAttribLocation(renderer->program,3,"aAntialias");
     glLinkProgram(renderer->program); glDeleteShader(vertex); glDeleteShader(fragment);
     GLint linked=GL_FALSE; glGetProgramiv(renderer->program,GL_LINK_STATUS,&linked);
     if (!linked) return false;
@@ -59,17 +63,21 @@ static void DecodeColor(float *out,uint32_t color)
     out[2]=((color>>8)&255)/255.0f;out[3]=(color&255)/255.0f;
 }
 
-static void Vertex(TextVertex *out,float x,float y,float u,float v,const float *color)
+static void Vertex(TextVertex *out,float x,float y,float u,float v,const float *color,
+                   float antialias)
 {
     out->position[0]=x;out->position[1]=y;out->uv[0]=u;out->uv[1]=v;
     for(int i=0;i<4;i++)out->color[i]=color[i];
+    out->antialias=antialias;
 }
 
 static void RotatedVertex(TextVertex *out,float x,float y,float originX,float originY,
-                          float cosine,float sine,float u,float v,const float *color)
+                          float cosine,float sine,float u,float v,const float *color,
+                          float antialias)
 {
     float dx=x-originX,dy=y-originY;
-    Vertex(out,originX+cosine*dx-sine*dy,originY+sine*dx+cosine*dy,u,v,color);
+    Vertex(out,originX+cosine*dx-sine*dy,originY+sine*dx+cosine*dy,u,v,color,
+           antialias);
 }
 
 static bool ResolveFonts(MicroFxTextRenderer *renderer,MicroFxScene *scene)
@@ -127,12 +135,13 @@ static bool Rebuild(MicroFxTextRenderer *renderer,MicroFxScene *scene)
             float u1=(rec.x+rec.width)/font.texture.width;
             float v1=(rec.y+rec.height)/font.texture.height;
             TextVertex *q=&vertices[cursor];
-            RotatedVertex(&q[0],x0,y0,originX,e->y,cosine,sine,u0,v0,color);
-            RotatedVertex(&q[1],x1,y0,originX,e->y,cosine,sine,u1,v0,color);
-            RotatedVertex(&q[2],x1,y1,originX,e->y,cosine,sine,u1,v1,color);
-            RotatedVertex(&q[3],x0,y0,originX,e->y,cosine,sine,u0,v0,color);
-            RotatedVertex(&q[4],x1,y1,originX,e->y,cosine,sine,u1,v1,color);
-            RotatedVertex(&q[5],x0,y1,originX,e->y,cosine,sine,u0,v1,color);cursor+=6;
+            float antialias=e->antialias?1.0f:0.0f;
+            RotatedVertex(&q[0],x0,y0,originX,e->y,cosine,sine,u0,v0,color,antialias);
+            RotatedVertex(&q[1],x1,y0,originX,e->y,cosine,sine,u1,v0,color,antialias);
+            RotatedVertex(&q[2],x1,y1,originX,e->y,cosine,sine,u1,v1,color,antialias);
+            RotatedVertex(&q[3],x0,y0,originX,e->y,cosine,sine,u0,v0,color,antialias);
+            RotatedVertex(&q[4],x1,y1,originX,e->y,cosine,sine,u1,v1,color,antialias);
+            RotatedVertex(&q[5],x0,y1,originX,e->y,cosine,sine,u0,v1,color,antialias);cursor+=6;
             x+=(info.advanceX?info.advanceX:rec.width)*scale+e->size*.08f;
         }
         renderer->vertexCounts[t]=cursor-renderer->firstVertex[t];
@@ -152,10 +161,11 @@ bool MicroFxTextRendererDraw(MicroFxTextRenderer *renderer,MicroFxScene *scene,
     glUseProgram(renderer->program);glUniform2f(renderer->viewportLocation,(float)width,(float)height);
     glActiveTexture(GL_TEXTURE0);glUniform1i(renderer->textureLocation,0);
     glBindBuffer(GL_ARRAY_BUFFER,renderer->vertexBuffer);
-    for(int i=0;i<3;i++)glEnableVertexAttribArray((GLuint)i);
+    for(int i=0;i<4;i++)glEnableVertexAttribArray((GLuint)i);
     glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(TextVertex),(void *)offsetof(TextVertex,position));
     glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,sizeof(TextVertex),(void *)offsetof(TextVertex,uv));
     glVertexAttribPointer(2,4,GL_FLOAT,GL_FALSE,sizeof(TextVertex),(void *)offsetof(TextVertex,color));
+    glVertexAttribPointer(3,1,GL_FLOAT,GL_FALSE,sizeof(TextVertex),(void *)offsetof(TextVertex,antialias));
     // Establish all raster state used by this overlay. raylib's preceding 3D
     // pass may leave culling and depth writes enabled on the DRM/GLES backend.
     glDisable(GL_CULL_FACE);glDisable(GL_DEPTH_TEST);glDepthMask(GL_FALSE);
@@ -176,7 +186,7 @@ bool MicroFxTextRendererDraw(MicroFxTextRenderer *renderer,MicroFxScene *scene,
         glBindTexture(GL_TEXTURE_2D,renderer->fonts[runFont].texture.id);
         glDrawArrays(GL_TRIANGLES,runFirst,runCount);
     }
-    for(int i=0;i<3;i++)glDisableVertexAttribArray((GLuint)i);
+    for(int i=0;i<4;i++)glDisableVertexAttribArray((GLuint)i);
     glBindBuffer(GL_ARRAY_BUFFER,0);glBindTexture(GL_TEXTURE_2D,0);glUseProgram(0);
     return true;
 }

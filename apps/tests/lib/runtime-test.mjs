@@ -38,7 +38,7 @@ function instrumentedNativeFx(root, capacities) {
   const handles = new Map();
   const counts = { sdf: 0, quad: 0, mesh: 0, text: 0, image: 0 };
   const mutations = {
-    move: 0, transform: 0, text: 0, font: 0, color: 0,
+    move: 0, transform: 0, text: 0, font: 0, textAntialias: 0, color: 0,
     effect: 0, visible: 0, opacity: 0
   };
 
@@ -127,6 +127,13 @@ function instrumentedNativeFx(root, capacities) {
       knownHandle(handle, "font");
       assert.equal(typeof path, "string", "font path must be a string");
       mutations.font += 1;
+      if (phase === "update") frameCalls += 1;
+      return true;
+    },
+    _textAntialias(handle, enabled) {
+      knownHandle(handle, "text antialias");
+      assert.equal(typeof enabled, "boolean", "text antialias must be boolean");
+      mutations.textAntialias += 1;
       if (phase === "update") frameCalls += 1;
       return true;
     },

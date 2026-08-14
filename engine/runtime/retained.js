@@ -136,6 +136,12 @@
         if (state.kind !== "text") throw new TypeError("font() is only available on text elements");
         fx._font(handle, path === undefined || path === null ? "" : String(path));
         return object;
+      },
+
+      antialias(enabled) {
+        if (state.kind !== "text") throw new TypeError("antialias() is only available on text elements");
+        fx._textAntialias(handle, Boolean(enabled));
+        return object;
       }
     };
 
@@ -377,6 +383,9 @@
   fx.font = function font(target, path) {
     return fx._font(numericHandle(target),
                     path === undefined || path === null ? "" : String(path));
+  };
+  fx.textAntialias = function textAntialias(target, enabled) {
+    return fx._textAntialias(numericHandle(target), Boolean(enabled));
   };
   fx.color = function color(target, value) {
     return fx._color(numericHandle(target), value);

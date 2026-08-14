@@ -1,4 +1,4 @@
-fx.configure({ targetFps: 60, pixelDensity: 1, debugBar: 10 });
+fx.configure({ targetFps: 60, pixelDensity: 1, debugBar: 1 });
 
 const LON_MIN = 12.16;
 const LON_MAX = 13.11;
@@ -29,11 +29,12 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
       (5 - segment) * 0.5, 0x38bce8ff)
       .opacity(0.8 - segment * 0.2)));
   marker.add(fx.sdfCircle(0, 0, 10, 0xffd55aff));
-  const label = fx.text("---", 0, 0, 18, 0xffffffff);
+  const label = fx.text("---", 0, 0, 18, 0xffffffff).antialias(false);
   scene.add(marker);
   scene.add(label);
   return {
     id: "", callsign: "", active: false, onGround: false, marker, trail, label,
+    labelX: NaN, labelY: NaN,
     currentX: 0, currentY: 0, velocityX: 0, velocityY: 0,
     correctionX: 0, correctionY: 0, correctionRemaining: 0
   };
@@ -42,7 +43,6 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
 let clockTime = 0;
 let requestInFlight = false;
 let nextRequestTime = 0;
-let nextLabelUpdate = 0;
 let hasLiveData = false;
 const routeCache = new Map();
 const routeQueue = [];
@@ -52,6 +52,15 @@ let nextRouteRequestTime = 0;
 function labelText(slot) {
   const route = routeCache.get(slot.callsign);
   return route ? `${slot.callsign}  ${route}` : slot.callsign;
+}
+
+function positionLabel(slot) {
+  const x = Math.round(slot.currentX + 24);
+  const y = Math.round(slot.currentY - 10);
+  if (x === slot.labelX && y === slot.labelY) return;
+  slot.labelX = x;
+  slot.labelY = y;
+  slot.label.position(x, y);
 }
 
 function queueRoute(callsign) {
@@ -166,8 +175,8 @@ function applyFlights(values, live) {
     slot.active = true;
     slot.marker.visible(true).position(slot.currentX, slot.currentY);
     slot.trail.forEach(segment => segment.visible(!slot.onGround));
-    slot.label.visible(!slot.onGround).position(slot.currentX + 18, slot.currentY - 20)
-      .text(labelText(slot));
+    slot.label.visible(!slot.onGround).text(labelText(slot));
+    positionLabel(slot);
     if (!slot.onGround) queueRoute(slot.callsign);
     setHeading(slot, item.heading);
   });
@@ -253,8 +262,6 @@ function update(time, delta) {
   if (!requestInFlight && time >= nextRequestTime) requestFlights();
   requestNextRoute();
 
-  const updateLabels = time >= nextLabelUpdate;
-  if (updateLabels) nextLabelUpdate = time + 1 / 15;
   flights.forEach(slot => {
     if (!slot.active) return;
     const step = clamp(delta, 0, 0.25);
@@ -271,6 +278,6 @@ function update(time, delta) {
       slot.correctionRemaining = Math.max(0, slot.correctionRemaining - step);
     }
     slot.marker.position(slot.currentX, slot.currentY);
-    if (updateLabels) slot.label.position(slot.currentX + 18, slot.currentY - 20);
+    positionLabel(slot);
   });
 }

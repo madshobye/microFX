@@ -239,7 +239,7 @@ int MicroFxSceneAddText(MicroFxScene *scene, const char *text, float x, float y,
     snprintf(element->text, sizeof(element->text), "%s", text ? text : "");
     element->x = x; element->y = y; element->size = size;
     element->color = color; element->visible = true;
-    element->opacity = 1.0f;
+    element->opacity = 1.0f; element->antialias = true;
     scene->textDirty = true;
     return MICROFX_HANDLE_TEXT | index;
 }
@@ -299,6 +299,17 @@ bool MicroFxSceneSetTextFont(MicroFxScene *scene, int handle,
     if (length >= sizeof(scene->text[index].fontPath)) return false;
     if (strcmp(scene->text[index].fontPath, assetPath) == 0) return true;
     memcpy(scene->text[index].fontPath, assetPath, length + 1);
+    scene->textDirty = true;
+    return true;
+}
+
+bool MicroFxSceneSetTextAntialias(MicroFxScene *scene, int handle, bool enabled)
+{
+    if ((handle & MICROFX_HANDLE_KIND_MASK) != MICROFX_HANDLE_TEXT) return false;
+    int index = handle & MICROFX_HANDLE_INDEX_MASK;
+    if (index < 0 || index >= scene->textCount) return false;
+    if (scene->text[index].antialias == enabled) return true;
+    scene->text[index].antialias = enabled;
     scene->textDirty = true;
     return true;
 }

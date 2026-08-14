@@ -96,6 +96,7 @@ typedef struct {
     float rotation;
     uint32_t color;
     float opacity;
+    bool antialias;
     bool visible;
 } MicroFxTextElement;
 
@@ -218,6 +219,7 @@ bool MicroFxSceneSetImageScale(MicroFxScene *scene, int handle, float scale);
 bool MicroFxSceneSetText(MicroFxScene *scene, int handle, const char *text);
 bool MicroFxSceneSetTextFont(MicroFxScene *scene, int handle,
                              const char *assetPath);
+bool MicroFxSceneSetTextAntialias(MicroFxScene *scene, int handle, bool enabled);
 bool MicroFxSceneSetColor(MicroFxScene *scene, int handle, uint32_t color);
 bool MicroFxSceneSetOpacity(MicroFxScene *scene, int handle, float opacity);
 bool MicroFxSceneSetVisible(MicroFxScene *scene, int handle, bool visible);

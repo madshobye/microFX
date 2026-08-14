@@ -18,7 +18,7 @@ function runtime() {
       return nextHandle++;
     };
   }
-  for (const name of ["move", "transform", "setText", "font", "color", "effect", "shader", "visible", "opacity"]) {
+  for (const name of ["move", "transform", "setText", "font", "textAntialias", "color", "effect", "shader", "visible", "opacity"]) {
     fx[`_${name}`] = (...args) => {
       calls.push([`_${name}`, ...args]);
       return true;
@@ -185,6 +185,18 @@ test("text selects project fonts fluently and can reset to the default", () => {
     ["_font", 1, "fonts/display.ttf"]
   ]);
   assert.throws(() => fx.rect(0, 0, 10, 10, 0xffffffff).font("bad.ttf"),
+                /text elements/);
+});
+
+test("text antialiasing is configurable per retained label", () => {
+  const { fx, calls } = runtime();
+  const label = fx.text("one", 0, 0, 12, 0xffffffff);
+  assert.equal(label.antialias(false), label);
+  fx.textAntialias(label, true);
+  assert.deepEqual(calls.slice(1), [
+    ["_textAntialias", 1, false], ["_textAntialias", 1, true]
+  ]);
+  assert.throws(() => fx.rect(0, 0, 10, 10, 0xffffffff).antialias(false),
                 /text elements/);
 });
 
