@@ -2,20 +2,20 @@ fx.configure({ targetFps: 60, pixelDensity: 1, debugBar: 1 });
 
 // Change this block to move the entire sketch to another airport.
 const PLACE = {
-  label: "LONDON",
+  label: "COPENHAGEN",
   airport: {
-    iata: "LHR",
-    icao: "EGLL",
-    latitude: 51.47,
-    longitude: -0.4543
+    iata: "CPH",
+    icao: "EKCH",
+    latitude: 55.6181,
+    longitude: 12.6561
   },
   mapCenter: {
-    latitude: 51.49,
-    longitude: -0.25
+    latitude: 55.67,
+    longitude: 12.635
   },
   mapZoom: 11.45,
   searchRadiusNm: 25,
-  airportGroundRadiusKm: 4
+  airportGroundRadiusKm: 3
 };
 
 const POLL_SECONDS = 5;
@@ -27,9 +27,9 @@ const scene = fx.scenes.add(fx.scene({ name: "flight-board" }));
 
 const map = scene.add(fx.tileMap({
   source: {
-    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    url: "https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
     tileSize: 256,
-    attribution: "© OpenStreetMap contributors"
+    attribution: "© OpenStreetMap contributors · © CARTO"
   },
   center: [PLACE.mapCenter.longitude, PLACE.mapCenter.latitude],
   zoom: PLACE.mapZoom,
@@ -45,8 +45,8 @@ const map = scene.add(fx.tileMap({
 scene.add(fx.text(`${PLACE.label} AIRSPACE`, 55, 45, 28, 0x7ee5ffff));
 scene.add(fx.text("ADSB.FI", 55, 1044, 11, 0x35495eff)
   .antialias(false));
-scene.add(fx.text("© OPENSTREETMAP CONTRIBUTORS",
-  1640, 1044, 11, 0x35495eff).antialias(false));
+scene.add(fx.text("© OPENSTREETMAP CONTRIBUTORS · © CARTO",
+  1580, 1044, 11, 0x35495eff).antialias(false));
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapPoint = (longitude, latitude) => map.project(longitude, latitude);
