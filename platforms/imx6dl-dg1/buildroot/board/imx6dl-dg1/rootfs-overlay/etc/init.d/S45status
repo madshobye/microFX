@@ -9,22 +9,46 @@ status_command=${MICROFX_STATUS_COMMAND:-/usr/sbin/microfx-status}
 connectivity_url=${MICROFX_CONNECTIVITY_URL:-http://connectivitycheck.gstatic.com/generate_204}
 http_command=${MICROFX_HTTP_COMMAND:-wget}
 ip_command=${MICROFX_IP_COMMAND:-ip}
+sys_class_net=${MICROFX_SYS_CLASS_NET:-/sys/class/net}
+wireless_file=${MICROFX_WIRELESS_FILE:-/proc/net/wireless}
 
 write_internet_status() {
   state=$1
-  printf '%s\n' "$state" >"$internet_report.new" &&
+  interface=${2:-}
+  if [ -n "$interface" ] &&
+     { [ -d "$sys_class_net/$interface/wireless" ] ||
+       grep -q "^[[:space:]]*$interface:" "$wireless_file" 2>/dev/null; }; then
+    quality=$(awk -v interface="$interface:" '
+      $1 == interface {
+        value=$3 + 0
+        percent=int((value*100/70)+0.5)
+        if (percent < 0) percent=0
+        if (percent > 100) percent=100
+        print percent
+        exit
+      }
+    ' "$wireless_file" 2>/dev/null)
+    case "$quality" in ''|*[!0-9]*) quality=unknown ;; esac
+    printf 'wifi %s %s\n' "$state" "$quality" >"$internet_report.new"
+  else
+    printf '%s\n' "$state" >"$internet_report.new"
+  fi &&
     mv -f "$internet_report.new" "$internet_report"
 }
 
 check_internet() {
   # A successful default route alone only proves LAN connectivity. Use a small
   # interface-independent HTTP probe so Ethernet and Wi-Fi follow one policy.
-  if ! "$ip_command" -4 route show default 2>/dev/null | grep -q '^default '; then
+  route=$("$ip_command" -4 route show default 2>/dev/null | head -n 1)
+  interface=$(printf '%s\n' "$route" | awk '
+    { for (field=1; field<=NF; field++) if ($field == "dev") { print $(field+1); exit } }
+  ')
+  if [ -z "$route" ] || [ -z "$interface" ]; then
     write_internet_status offline
   elif "$http_command" -q -T 4 --spider "$connectivity_url"; then
-    write_internet_status online
+    write_internet_status online "$interface"
   else
-    write_internet_status offline
+    write_internet_status offline "$interface"
   fi
 }
 

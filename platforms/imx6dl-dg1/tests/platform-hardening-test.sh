@@ -127,6 +127,32 @@ microfx_assert_file_contains '^online$' "$TEMP/run/microfx-internet-status" "gen
 MICROFX_RUN_ROOT="$TEMP/run" MICROFX_STATUS_COMMAND="$TEMP/bin/status-command" \
   "$OVERLAY/etc/init.d/S45status" stop
 status_pid=
+mkdir -p "$TEMP/sys/class/net/wlan0/wireless"
+cat >"$TEMP/wireless" <<'EOF'
+Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE
+ face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22
+ wlan0: 0000   50.  -60.  -256        0      0      0      0      0        0
+EOF
+cat >"$TEMP/bin/internet-route" <<'EOF'
+#!/bin/sh
+printf 'default via 192.0.2.1 dev wlan0\n'
+EOF
+MICROFX_RUN_ROOT="$TEMP/run" MICROFX_STATUS_COMMAND="$TEMP/bin/status-command" \
+MICROFX_IP_COMMAND="$TEMP/bin/internet-route" MICROFX_HTTP_COMMAND="$TEMP/bin/internet-probe" \
+MICROFX_SYS_CLASS_NET="$TEMP/sys/class/net" MICROFX_WIRELESS_FILE="$TEMP/wireless" \
+MICROFX_STATUS_INTERVAL=60 \
+  "$OVERLAY/etc/init.d/S45status" start
+status_pid=$(cat "$TEMP/run/microfx-status.pid")
+attempt=0
+while ! grep -q '^wifi online 71$' "$TEMP/run/microfx-internet-status" 2>/dev/null &&
+      [ "$attempt" -lt 20 ]; do
+  attempt=$((attempt + 1))
+  sleep 0.05
+done
+microfx_assert_file_contains '^wifi online 71$' "$TEMP/run/microfx-internet-status" "Wi-Fi quality report"
+MICROFX_RUN_ROOT="$TEMP/run" MICROFX_STATUS_COMMAND="$TEMP/bin/status-command" \
+  "$OVERLAY/etc/init.d/S45status" stop
+status_pid=
 MICROFX_RUN_ROOT="$TEMP/run" MICROFX_SUPERVISOR="$TEMP/bin/supervisor" \
   "$OVERLAY/etc/init.d/S40canvas" stop
 supervisor_pid=

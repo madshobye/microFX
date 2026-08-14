@@ -407,7 +407,8 @@ static void DrawInterface(float fps, float time,
                           float cpuAverageMs, float gpuAverageMs,
                           bool automaticDensity, float pixelDensity,
                           int outputWidth, int outputHeight,
-                          const char *internetState)
+                          const char *internetState,
+                          bool internetKnown, bool internetOnline)
 {
     const int barX = 38;
     const int barY = DESIGN_HEIGHT - 54;
@@ -444,7 +445,9 @@ static void DrawInterface(float fps, float time,
     int width=padding*2+DebugTabularTextWidth(up,tabularCellWidth)+
       DebugTabularTextWidth(fpsText,tabularCellWidth)+
       MeasureText(resolution,fontSize)+MeasureText(mode,fontSize)+
-      MeasureText(internetState,fontSize)+MeasureText("CPU",fontSize)+
+      (strncmp(internetState,"WIFI ",5)==0
+        ? DebugTabularTextWidth(internetState,tabularCellWidth)
+        : MeasureText(internetState,fontSize))+MeasureText("CPU",fontSize)+
       MeasureText("GPU",fontSize)+meterWidth*2+gap*8;
     DrawRectangle(barX,barY,width,barHeight,(Color){4,8,22,245});
     DrawRectangleLines(barX,barY,width,barHeight,(Color){65,105,145,255});
@@ -459,12 +462,15 @@ static void DrawInterface(float fps, float time,
     x+=DebugTabularTextWidth(fpsText,tabularCellWidth)+gap;
     DRAW_FIELD(resolution,245,245,245);
     DRAW_FIELD(mode,180,205,235);
-    if (strcmp(internetState, "NET ON ") == 0) {
-        DRAW_FIELD(internetState,90,220,145);
-    } else if (strcmp(internetState, "NET OFF") == 0) {
-        DRAW_FIELD(internetState,255,105,105);
+    Color internetColor = !internetKnown ? (Color){165,175,190,255}
+                        : internetOnline ? (Color){90,220,145,255}
+                                         : (Color){255,105,105,255};
+    if (strncmp(internetState,"WIFI ",5)==0) {
+        DrawDebugTabularText(internetState,x,y,fontSize,tabularCellWidth,internetColor);
+        x+=DebugTabularTextWidth(internetState,tabularCellWidth)+gap;
     } else {
-        DRAW_FIELD(internetState,165,175,190);
+        DrawText(internetState,x,y,fontSize,internetColor);
+        x+=MeasureText(internetState,fontSize)+gap;
     }
     DRAW_FIELD("CPU",40,205,255);
     DrawRectangle(x,meterY,meterWidth,meterHeight,(Color){35,42,66,255});
@@ -475,24 +481,45 @@ static void DrawInterface(float fps, float time,
 #undef DRAW_FIELD
 }
 
-static const char *ReadInternetState(float time)
+static const char *ReadInternetState(float time, bool *known, bool *online)
 {
     static float nextRead = 0.0f;
     static char state[16] = "NET ?  ";
-    if (time < nextRead) return state;
+    static bool cachedKnown = false;
+    static bool cachedOnline = false;
+    if (time < nextRead) {
+        *known = cachedKnown;
+        *online = cachedOnline;
+        return state;
+    }
     nextRead = time + 2.0f;
     FILE *input = fopen("/run/microfx-internet-status", "r");
-    char value[24] = { 0 };
+    char value[32] = { 0 };
+    char connectivity[16] = { 0 };
+    char quality[16] = { 0 };
     if (!input || !fgets(value, sizeof(value), input)) {
         snprintf(state, sizeof(state), "NET ?  ");
+        cachedKnown = false;
+    } else if (sscanf(value, "wifi %15s %15s", connectivity, quality) == 2) {
+        cachedKnown = true;
+        cachedOnline = strcmp(connectivity, "online") == 0;
+        if (strcmp(quality, "unknown") == 0) snprintf(state, sizeof(state), "WIFI --%%");
+        else snprintf(state, sizeof(state), "WIFI %3d%%", atoi(quality));
     } else if (strncmp(value, "online", 6) == 0) {
         snprintf(state, sizeof(state), "NET ON ");
+        cachedKnown = true;
+        cachedOnline = true;
     } else if (strncmp(value, "offline", 7) == 0) {
         snprintf(state, sizeof(state), "NET OFF");
+        cachedKnown = true;
+        cachedOnline = false;
     } else {
         snprintf(state, sizeof(state), "NET ?  ");
+        cachedKnown = false;
     }
     if (input) fclose(input);
+    *known = cachedKnown;
+    *online = cachedOnline;
     return state;
 }
 
@@ -676,10 +703,14 @@ int main(void)
             const float displayedFps = averageFrameMs > 0.01f
                                      ? 1000.0f/averageFrameMs
                                      : (float)runtime.targetFps;
+            bool internetKnown = false;
+            bool internetOnline = false;
+            const char *internetState = ReadInternetState(
+                time, &internetKnown, &internetOnline);
             DrawInterface(displayedFps, time, cpuAverageMs, gpuAverageMs,
                           runtime.automaticDensity, runtime.pixelDensity,
                           runtime.outputWidth, runtime.outputHeight,
-                          ReadInternetState(time));
+                          internetState, internetKnown, internetOnline);
             rlPopMatrix();
         }
         if (synchronizedProfiling) glFinish();
