@@ -96,9 +96,10 @@ const airportCount = scene.add(fx.text("x 0", airportX + 20, airportY - 10,
 const flights = Array.from({ length: MAX_FLIGHTS }, () => {
   const marker = fx.group();
   const trail = Array.from({ length: 3 }, (_, segment) =>
-    marker.add(fx.sdfRoundedRect(0, 0, 20, 5 - segment,
+    scene.add(fx.sdfRoundedRect(0, 0, 20, 5 - segment,
       (5 - segment) * 0.5, 0x38bce8ff)
-      .opacity(0.8 - segment * 0.2)));
+      .opacity(0.8 - segment * 0.2).visible(false)));
+  const trailState = trail.map(() => ({ x: 0, y: 0, spacing: 0 }));
   const outline = marker.add(fx.outline(AIRCRAFT_SHAPES.small,
     0, 0, 16, 1.6, 0xffd55aff, { closed: true }));
   const label = fx.text("---", 0, 0, 18, 0xffffffff).antialias(false);
@@ -107,7 +108,8 @@ const flights = Array.from({ length: MAX_FLIGHTS }, () => {
   return {
     id: "", callsign: "", active: false, onGround: false,
     aircraftKind: "small", markerRadius: 7,
-    marker, trail, outline, label,
+    marker, trail, trailState, trailInitialized: false, headingAngle: 0,
+    outline, label,
     labelX: NaN, labelY: NaN,
     positionTime: 0,
     currentX: 0, currentY: 0, velocityX: 0, velocityY: 0,
@@ -237,22 +239,47 @@ function distanceKm(longitudeA, latitudeA, longitudeB, latitudeB) {
 }
 
 function setHeading(slot, heading, speed) {
-    const angle = heading * Math.PI / 180;
-    const trailAngle = angle - Math.PI / 2;
-    const trailScale = clamp(speed / 130, 0.3, 1.5) *
-      (slot.aircraftKind === "fighter" ? 1.35 : 1);
-    // Group children use absolute retained coordinates. Return the group to
-    // its local origin before rebuilding its heading-relative trail layout.
-    slot.marker.position(0, 0);
-    slot.trail.forEach((segment, index) => {
-      const distance = (34 + index * 25) * trailScale;
-      const speedThreshold = 15 + index * 45;
-      segment.position(-Math.sin(angle) * distance,
-                       Math.cos(angle) * distance).rotation(trailAngle)
-        .visible(slot.aircraftKind !== "helicopter" && speed >= speedThreshold);
-    });
-    slot.outline.rotation(angle);
-    slot.marker.position(slot.currentX, slot.currentY);
+  const angle = heading * Math.PI / 180;
+  const trailScale = clamp(speed / 130, 0.3, 1.5) *
+    (slot.aircraftKind === "fighter" ? 1.35 : 1);
+  slot.headingAngle = angle;
+  slot.trail.forEach((segment, index) => {
+    slot.trailState[index].spacing = (index === 0 ? 34 : 25) * trailScale;
+    const speedThreshold = 15 + index * 45;
+    segment.visible(slot.aircraftKind !== "helicopter" && speed >= speedThreshold);
+  });
+  slot.outline.rotation(angle);
+}
+
+function updateTrail(slot) {
+  let leaderX = slot.currentX;
+  let leaderY = slot.currentY;
+  const fallbackX = -Math.sin(slot.headingAngle);
+  const fallbackY = Math.cos(slot.headingAngle);
+
+  slot.trailState.forEach((link, index) => {
+    const segment = slot.trail[index];
+    if (!slot.trailInitialized) {
+      link.x = leaderX + fallbackX * link.spacing;
+      link.y = leaderY + fallbackY * link.spacing;
+    } else {
+      const dx = link.x - leaderX;
+      const dy = link.y - leaderY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance > 0.001) {
+        link.x = leaderX + dx * link.spacing / distance;
+        link.y = leaderY + dy * link.spacing / distance;
+      } else {
+        link.x = leaderX + fallbackX * link.spacing;
+        link.y = leaderY + fallbackY * link.spacing;
+      }
+    }
+    segment.position(link.x, link.y)
+      .rotation(Math.atan2(leaderY - link.y, leaderX - link.x));
+    leaderX = link.x;
+    leaderY = link.y;
+  });
+  slot.trailInitialized = true;
 }
 
 function aircraftKind(item) {
@@ -331,6 +358,7 @@ function applyFlights(values, live) {
       slot.correctionX = 0;
       slot.correctionY = 0;
       slot.correctionRemaining = 0;
+      slot.trailInitialized = false;
     }
     if (hasFreshPosition) slot.positionTime = positionTime;
     slot.velocityX = velocity.x;
@@ -341,6 +369,7 @@ function applyFlights(values, live) {
     positionLabel(slot);
     if (!slot.onGround) queueRoute(slot.callsign);
     setHeading(slot, item.heading, item.velocity);
+    updateTrail(slot);
   });
 
   flights.forEach(slot => {
@@ -351,7 +380,9 @@ function applyFlights(values, live) {
     slot.onGround = false;
     slot.aircraftKind = "";
     slot.positionTime = 0;
+    slot.trailInitialized = false;
     slot.marker.visible(false);
+    slot.trail.forEach(segment => segment.visible(false));
     slot.label.visible(false);
   });
 
@@ -542,6 +573,7 @@ function update(time, delta) {
       slot.correctionRemaining = Math.max(0, slot.correctionRemaining - step);
     }
     slot.marker.position(slot.currentX, slot.currentY);
+    updateTrail(slot);
     positionLabel(slot);
   });
 
