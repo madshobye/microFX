@@ -72,6 +72,27 @@ static JSValue AddRoundedRect(JSContext *ctx, JSValueConst thisValue,
     return Handle(ctx,MicroFxSceneAddRoundedRect(script->scene,x,y,w,h,r,ColorArg(ctx,argv[5])));
 }
 
+static JSValue SetSdfGeometry(JSContext *ctx,JSValueConst thisValue,int argc,
+                              JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    double width=0,height=0,radius=0;
+    if(argc<5||JS_ToInt32(ctx,&handle,argv[0])||JS_ToFloat64(ctx,&width,argv[2])||
+       JS_ToFloat64(ctx,&height,argv[3])||JS_ToFloat64(ctx,&radius,argv[4]))
+        return JS_ThrowTypeError(ctx,"sdfGeometry(handle,kind,width,height,radius)");
+    const char *name=JS_ToCString(ctx,argv[1]);if(!name)return JS_EXCEPTION;
+    MicroFxSdfKind kind=MICROFX_SDF_RECT;bool known=true;
+    if(strcmp(name,"circle")==0)kind=MICROFX_SDF_CIRCLE;
+    else if(strcmp(name,"rounded")==0)kind=MICROFX_SDF_ROUNDED_RECT;
+    else if(strcmp(name,"rect")!=0)known=false;
+    JS_FreeCString(ctx,name);
+    if(!known)return JS_ThrowRangeError(ctx,"SDF shape must be circle, rounded, or rect");
+    if(!MicroFxSceneSetSdfGeometry(script->scene,handle,kind,(float)width,
+                                   (float)height,(float)radius))
+        return JS_ThrowTypeError(ctx,"shape() is only available on SDF elements with positive dimensions");
+    return JS_UNDEFINED;
+}
+
 static JSValue AddRect(JSContext *ctx, JSValueConst thisValue,
                        int argc, JSValueConst *argv)
 {
@@ -649,6 +670,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_circle",JS_NewCFunction(script->context,AddFastCircle,"_circle",4));
     JS_SetPropertyStr(script->context,fx,"_sdfCircle",JS_NewCFunction(script->context,AddSdfCircle,"_sdfCircle",4));
     JS_SetPropertyStr(script->context,fx,"_sdfRoundedRect",JS_NewCFunction(script->context,AddRoundedRect,"_sdfRoundedRect",6));
+    JS_SetPropertyStr(script->context,fx,"_sdfGeometry",JS_NewCFunction(script->context,SetSdfGeometry,"_sdfGeometry",5));
     JS_SetPropertyStr(script->context,fx,"_rect",JS_NewCFunction(script->context,AddRect,"_rect",5));
     JS_SetPropertyStr(script->context,fx,"_gradientRect",JS_NewCFunction(script->context,AddGradientRect,"_gradientRect",6));
     JS_SetPropertyStr(script->context,fx,"_background",JS_NewCFunction(script->context,AddBackground,"_background",2));

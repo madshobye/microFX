@@ -39,7 +39,7 @@ function instrumentedNativeFx(root, capacities) {
   const counts = { sdf: 0, quad: 0, mesh: 0, text: 0, image: 0 };
   const mutations = {
     move: 0, transform: 0, text: 0, font: 0, textAntialias: 0, color: 0,
-    effect: 0, visible: 0, opacity: 0
+    sdfGeometry: 0, effect: 0, visible: 0, opacity: 0
   };
 
   function knownHandle(handle, label) {
@@ -134,6 +134,15 @@ function instrumentedNativeFx(root, capacities) {
       knownHandle(handle, "text antialias");
       assert.equal(typeof enabled, "boolean", "text antialias must be boolean");
       mutations.textAntialias += 1;
+      if (phase === "update") frameCalls += 1;
+      return true;
+    },
+    _sdfGeometry(handle, kind, width, height, radius) {
+      knownHandle(handle, "SDF geometry");
+      assert.ok(["circle", "rounded", "rect"].includes(kind));
+      finite("SDF geometry", [width, height, radius]);
+      assert.ok(width > 0 && height > 0 && radius >= 0);
+      mutations.sdfGeometry += 1;
       if (phase === "update") frameCalls += 1;
       return true;
     },

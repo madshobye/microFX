@@ -142,6 +142,13 @@
         if (state.kind !== "text") throw new TypeError("antialias() is only available on text elements");
         fx._textAntialias(handle, Boolean(enabled));
         return object;
+      },
+
+      shape(kind, width, height, radius) {
+        if (state.kind !== "sdf") throw new TypeError("shape() is only available on SDF elements");
+        fx._sdfGeometry(handle, String(kind), Number(width), Number(height),
+                        radius === undefined ? 0 : Number(radius));
+        return object;
       }
     };
 
@@ -323,10 +330,10 @@
     return make2d(fx._circle, arguments, { x, y });
   };
   fx.sdfCircle = function sdfCircle(x, y, radius, color) {
-    return make2d(fx._sdfCircle, arguments, { x, y });
+    return make2d(fx._sdfCircle, arguments, { x, y, kind: "sdf" });
   };
   fx.sdfRoundedRect = function sdfRoundedRect(x, y, width, height, radius, color) {
-    return make2d(fx._sdfRoundedRect, arguments, { x, y });
+    return make2d(fx._sdfRoundedRect, arguments, { x, y, kind: "sdf" });
   };
   fx.text = function text(value, x, y, size, color, fontPath) {
     const result = element(fx._text(value, x, y, size, color), 2,
@@ -386,6 +393,10 @@
   };
   fx.textAntialias = function textAntialias(target, enabled) {
     return fx._textAntialias(numericHandle(target), Boolean(enabled));
+  };
+  fx.sdfGeometry = function sdfGeometry(target, kind, width, height, radius) {
+    return fx._sdfGeometry(numericHandle(target), String(kind), Number(width),
+                           Number(height), radius === undefined ? 0 : Number(radius));
   };
   fx.color = function color(target, value) {
     return fx._color(numericHandle(target), value);

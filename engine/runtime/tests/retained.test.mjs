@@ -18,7 +18,7 @@ function runtime() {
       return nextHandle++;
     };
   }
-  for (const name of ["move", "transform", "setText", "font", "textAntialias", "color", "effect", "shader", "visible", "opacity"]) {
+  for (const name of ["move", "transform", "setText", "font", "textAntialias", "sdfGeometry", "color", "effect", "shader", "visible", "opacity"]) {
     fx[`_${name}`] = (...args) => {
       calls.push([`_${name}`, ...args]);
       return true;
@@ -54,6 +54,19 @@ test("line is a retained rotated quad without a separate renderer path", () => {
     ["_rect", 25, 40, 50, 6, 0xffffffff],
     ["_move", 1, 25, 40, Math.atan2(40, 30)]
   ]);
+});
+
+test("SDF geometry can change shape without allocating a new element", () => {
+  const { fx, calls } = runtime();
+  const mark = fx.sdfCircle(10, 20, 5, 0xffffffff);
+  assert.equal(mark.shape("rounded", 20, 12, 4), mark);
+  fx.sdfGeometry(mark, "circle", 16, 16, 8);
+  assert.deepEqual(calls.slice(1), [
+    ["_sdfGeometry", 1, "rounded", 20, 12, 4],
+    ["_sdfGeometry", 1, "circle", 16, 16, 8]
+  ]);
+  assert.throws(() => fx.rect(0, 0, 10, 10, 0xffffffff)
+    .shape("rect", 10, 10, 0), /SDF elements/);
 });
 
 test("polyline validates first and constructs one retained quad batch path", () => {

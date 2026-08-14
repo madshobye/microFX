@@ -196,6 +196,9 @@ int MicroFxSceneAddBackground(MicroFxScene *scene, uint32_t topColor,
 bool MicroFxSceneHasOpaqueCoveringBackground(const MicroFxScene *scene);
 bool MicroFxSceneMove(MicroFxScene *scene, int handle, float x, float y,
                      float rotation);
+bool MicroFxSceneSetSdfGeometry(MicroFxScene *scene, int handle,
+                                MicroFxSdfKind kind, float width,
+                                float height, float radius);
 int MicroFxSceneAddCube(MicroFxScene *scene, float x, float y, float z,
                        float scale, uint32_t color);
 int MicroFxSceneAddSphere(MicroFxScene *scene, float x, float y, float z,

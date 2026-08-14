@@ -120,6 +120,7 @@ relative offset. Both are fluent and return the same object.
 See [NETWORK.md](NETWORK.md) for examples, limits, and the no-worker execution model.
 | `debugBar(booleanOrMinutes)` | Disable, persist, or restart the diagnostics timeout |
 | `text.antialias(boolean)` | Keep smooth glyph alpha or use binary opaque/transparent coverage |
+| `sdf.shape(kind,width,height,radius)` | Restyle retained SDF geometry without allocating a new element |
 | `env(name,fallback)` | Read deployment information supplied to the app |
 | `data(path[,fallback])` | Parse a bounded project-relative JSON asset |
 | `feed(path[,fallback])` | Read one cached platform-managed live snapshot per activation |

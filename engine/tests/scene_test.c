@@ -20,6 +20,11 @@ int main(void)
     assert((circle&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_SDF);
     assert(MicroFxSceneMove(&scene,circle,30,40,0.5f));
     assert(scene.sdf[0].x==30 && scene.sdf[0].rotation==0.5f);
+    assert(MicroFxSceneSetSdfGeometry(&scene,circle,
+                                      MICROFX_SDF_ROUNDED_RECT,20,12,4));
+    assert(scene.sdf[0].kind==MICROFX_SDF_ROUNDED_RECT &&
+           scene.sdf[0].width==20 && scene.sdf[0].height==12 &&
+           scene.sdf[0].radius==4);
 
     int plainRect=MicroFxSceneAddRoundedRect(&scene,20,30,40,50,0,0xffffffff);
     int roundedRect=MicroFxSceneAddRoundedRect(&scene,20,30,40,50,6,0xffffffff);

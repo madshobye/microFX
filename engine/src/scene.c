@@ -165,6 +165,21 @@ bool MicroFxSceneMove(MicroFxScene *scene, int handle, float x, float y,
     return false;
 }
 
+bool MicroFxSceneSetSdfGeometry(MicroFxScene *scene, int handle,
+                                MicroFxSdfKind kind, float width,
+                                float height, float radius)
+{
+    if ((handle & MICROFX_HANDLE_KIND_MASK) != MICROFX_HANDLE_SDF ||
+        kind < MICROFX_SDF_CIRCLE || kind > MICROFX_SDF_RECT ||
+        width <= 0.0f || height <= 0.0f || radius < 0.0f) return false;
+    int index = handle & MICROFX_HANDLE_INDEX_MASK;
+    if (index < 0 || index >= scene->sdfCount) return false;
+    MicroFxSdfElement *element = &scene->sdf[index];
+    element->kind = kind; element->width = width; element->height = height;
+    element->radius = radius; scene->sdfDirty = true;
+    return true;
+}
+
 static int AddMesh(MicroFxScene *scene, MicroFxMeshKind kind, float x, float y,
                    float z, float scale, uint32_t color)
 {
