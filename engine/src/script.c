@@ -4,10 +4,14 @@
 #include "microfx/network.h"
 #include <quickjs/quickjs.h>
 #include <qrencode.h>
+#include <dirent.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 
 struct MicroFxScript {
     JSRuntime *runtime;
@@ -91,6 +95,162 @@ static JSValue SetSdfGeometry(JSContext *ctx,JSValueConst thisValue,int argc,
                                    (float)height,(float)radius))
         return JS_ThrowTypeError(ctx,"shape() is only available on SDF elements with positive dimensions");
     return JS_UNDEFINED;
+}
+
+static JSValue AddTileMap(JSContext *ctx,JSValueConst thisValue,int argc,
+                          JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    double grayscale=0,contrast=0,brightness=0,invert=0;
+    if(argc<5||JS_ToFloat64(ctx,&grayscale,argv[0])||
+       JS_ToFloat64(ctx,&contrast,argv[1])||
+       JS_ToFloat64(ctx,&brightness,argv[2])||JS_ToFloat64(ctx,&invert,argv[3]))
+        return JS_ThrowTypeError(ctx,"tileMap(grayscale,contrast,brightness,invert,tint)");
+    return Handle(ctx,MicroFxSceneAddTileMap(script->scene,(float)grayscale,
+        (float)contrast,(float)brightness,(float)invert,ColorArg(ctx,argv[4])));
+}
+
+static JSValue BeginTileMap(JSContext *ctx,JSValueConst thisValue,int argc,
+                            JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0,generation=0,count=0;
+    if(argc<3||JS_ToInt32(ctx,&handle,argv[0])||
+       JS_ToInt32(ctx,&generation,argv[1])||JS_ToInt32(ctx,&count,argv[2])||
+       !MicroFxSceneBeginTileMap(script->scene,handle,generation,count))
+        return JS_ThrowRangeError(ctx,"tile map generation or tile count is invalid");
+    return JS_UNDEFINED;
+}
+
+static JSValue SubmitTileMapTile(JSContext *ctx,JSValueConst thisValue,int argc,
+                                 JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0,generation=0,index=0;double x=0,y=0,size=0;size_t length=0;
+    if(argc<7||JS_ToInt32(ctx,&handle,argv[0])||
+       JS_ToInt32(ctx,&generation,argv[1])||JS_ToInt32(ctx,&index,argv[2])||
+       JS_ToFloat64(ctx,&x,argv[3])||JS_ToFloat64(ctx,&y,argv[4])||
+       JS_ToFloat64(ctx,&size,argv[5]))
+        return JS_ThrowTypeError(ctx,"tileMapTile(handle,generation,index,x,y,size,bytes)");
+    uint8_t *bytes=JS_GetArrayBuffer(ctx,&length,argv[6]);
+    if(!bytes||!MicroFxSceneSubmitTileMapTile(script->scene,handle,generation,
+       index,(float)x,(float)y,(float)size,bytes,length))
+        return JS_ThrowTypeError(ctx,"tile map PNG payload is invalid");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetTileMapVisible(JSContext *ctx,JSValueConst thisValue,int argc,
+                                 JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc<2||JS_ToInt32(ctx,&handle,argv[0])||
+       !MicroFxSceneSetTileMapVisible(script->scene,handle,JS_ToBool(ctx,argv[1])>0))
+        return JS_ThrowRangeError(ctx,"tile map handle is invalid");
+    return JS_UNDEFINED;
+}
+
+static JSValue TileMapReady(JSContext *ctx,JSValueConst thisValue,int argc,
+                            JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc<1||JS_ToInt32(ctx,&handle,argv[0])||handle<0||
+       handle>=script->scene->tileMapCount)return JS_ThrowRangeError(ctx,"tile map handle is invalid");
+    MicroFxTileMap *map=&script->scene->tileMap[handle];
+    return JS_NewBool(ctx,map->generation>0&&map->readyGeneration==map->generation);
+}
+
+static bool CacheNamespace(const char *value)
+{
+    if(!value||!*value)return false;
+    for(const unsigned char *p=(const unsigned char *)value;*p;p++)
+        if(!((*p>='a'&&*p<='z')||(*p>='A'&&*p<='Z')||
+             (*p>='0'&&*p<='9')||*p=='_'||*p=='-'))return false;
+    return true;
+}
+
+static uint64_t CacheHash(const char *value)
+{
+    uint64_t hash=UINT64_C(1469598103934665603);
+    for(const unsigned char *p=(const unsigned char *)value;*p;p++){
+        hash^=*p;hash*=UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static bool CachePath(const char *space,const char *key,char *path,size_t size)
+{
+    if(!CacheNamespace(space)||!key||!*key)return false;
+    if(mkdir("/data/state/microfx-cache",0755)<0&&access("/data/state/microfx-cache",F_OK)!=0)
+        return false;
+    char directory[192];snprintf(directory,sizeof(directory),
+                                "/data/state/microfx-cache/%s",space);
+    if(mkdir(directory,0755)<0&&access(directory,F_OK)!=0)return false;
+    return snprintf(path,size,"%s/%016llx.bin",directory,
+                    (unsigned long long)CacheHash(key))<(int)size;
+}
+
+static void PruneCacheDirectory(const char *filePath)
+{
+    char directory[256];snprintf(directory,sizeof(directory),"%s",filePath);
+    char *slash=strrchr(directory,'/');if(!slash)return;*slash='\0';
+    const off_t limit=(off_t)64*1024*1024;
+    for(;;){
+        DIR *open=opendir(directory);if(!open)return;
+        off_t total=0;time_t oldestTime=0;char oldest[320]={0};
+        struct dirent *entry;
+        while((entry=readdir(open))){
+            if(entry->d_name[0]=='.')continue;
+            char path[320];snprintf(path,sizeof(path),"%s/%s",directory,entry->d_name);
+            struct stat info;if(stat(path,&info)<0||!S_ISREG(info.st_mode))continue;
+            total+=info.st_size;
+            if(!oldest[0]||info.st_mtime<oldestTime){
+                oldestTime=info.st_mtime;snprintf(oldest,sizeof(oldest),"%s",path);
+            }
+        }
+        closedir(open);if(total<=limit||!oldest[0])return;remove(oldest);
+    }
+}
+
+static JSValue CacheRead(JSContext *ctx,JSValueConst thisValue,int argc,
+                         JSValueConst *argv)
+{
+    (void)thisValue;double maxAge=0;
+    if(argc<3||JS_ToFloat64(ctx,&maxAge,argv[2])||maxAge<0)
+        return JS_ThrowTypeError(ctx,"cache.read(namespace,key,maxAgeSeconds)");
+    const char *space=JS_ToCString(ctx,argv[0]),*key=JS_ToCString(ctx,argv[1]);
+    if(!space||!key){if(space)JS_FreeCString(ctx,space);if(key)JS_FreeCString(ctx,key);return JS_EXCEPTION;}
+    char path[256];bool valid=CachePath(space,key,path,sizeof(path));
+    JS_FreeCString(ctx,space);JS_FreeCString(ctx,key);if(!valid)return JS_NULL;
+    struct stat info;if(stat(path,&info)<0)return JS_NULL;
+    if(info.st_size<=0||info.st_size>256*1024)return JS_NULL;
+    if(maxAge>0&&difftime(time(NULL),info.st_mtime)>maxAge){remove(path);return JS_NULL;}
+    FILE *file=fopen(path,"rb");if(!file)return JS_NULL;
+    uint8_t *bytes=malloc((size_t)info.st_size);if(!bytes){fclose(file);return JS_EXCEPTION;}
+    size_t read=fread(bytes,1,(size_t)info.st_size,file);fclose(file);
+    JSValue result=read==(size_t)info.st_size?
+        JS_NewArrayBufferCopy(ctx,bytes,read):JS_NULL;free(bytes);return result;
+}
+
+static JSValue CacheWrite(JSContext *ctx,JSValueConst thisValue,int argc,
+                          JSValueConst *argv)
+{
+    (void)thisValue;size_t length=0;
+    if(argc<3)return JS_ThrowTypeError(ctx,"cache.write(namespace,key,bytes)");
+    uint8_t *bytes=JS_GetArrayBuffer(ctx,&length,argv[2]);
+    if(!bytes||length==0||length>256*1024)
+        return JS_ThrowRangeError(ctx,"cache payload must be an ArrayBuffer up to 256 KiB");
+    const char *space=JS_ToCString(ctx,argv[0]),*key=JS_ToCString(ctx,argv[1]);
+    if(!space||!key){if(space)JS_FreeCString(ctx,space);if(key)JS_FreeCString(ctx,key);return JS_EXCEPTION;}
+    char path[256];bool valid=CachePath(space,key,path,sizeof(path));
+    JS_FreeCString(ctx,space);JS_FreeCString(ctx,key);if(!valid)return JS_NewBool(ctx,false);
+    char temporary[288];snprintf(temporary,sizeof(temporary),"%s.%ld.tmp",path,(long)getpid());
+    FILE *file=fopen(temporary,"wb");if(!file)return JS_NewBool(ctx,false);
+    bool ok=fwrite(bytes,1,length,file)==length;
+    if(ok)ok=fflush(file)==0;
+    if(fclose(file)!=0)ok=false;
+    if(ok)ok=rename(temporary,path)==0;
+    if(!ok)remove(temporary);else PruneCacheDirectory(path);
+    return JS_NewBool(ctx,ok);
 }
 
 static JSValue AddRect(JSContext *ctx, JSValueConst thisValue,
@@ -671,6 +831,13 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_sdfCircle",JS_NewCFunction(script->context,AddSdfCircle,"_sdfCircle",4));
     JS_SetPropertyStr(script->context,fx,"_sdfRoundedRect",JS_NewCFunction(script->context,AddRoundedRect,"_sdfRoundedRect",6));
     JS_SetPropertyStr(script->context,fx,"_sdfGeometry",JS_NewCFunction(script->context,SetSdfGeometry,"_sdfGeometry",5));
+    JS_SetPropertyStr(script->context,fx,"_tileMapCreate",JS_NewCFunction(script->context,AddTileMap,"_tileMapCreate",5));
+    JS_SetPropertyStr(script->context,fx,"_tileMapBegin",JS_NewCFunction(script->context,BeginTileMap,"_tileMapBegin",3));
+    JS_SetPropertyStr(script->context,fx,"_tileMapTile",JS_NewCFunction(script->context,SubmitTileMapTile,"_tileMapTile",7));
+    JS_SetPropertyStr(script->context,fx,"_tileMapVisible",JS_NewCFunction(script->context,SetTileMapVisible,"_tileMapVisible",2));
+    JS_SetPropertyStr(script->context,fx,"_tileMapReady",JS_NewCFunction(script->context,TileMapReady,"_tileMapReady",1));
+    JS_SetPropertyStr(script->context,fx,"_cacheRead",JS_NewCFunction(script->context,CacheRead,"_cacheRead",3));
+    JS_SetPropertyStr(script->context,fx,"_cacheWrite",JS_NewCFunction(script->context,CacheWrite,"_cacheWrite",3));
     JS_SetPropertyStr(script->context,fx,"_rect",JS_NewCFunction(script->context,AddRect,"_rect",5));
     JS_SetPropertyStr(script->context,fx,"_gradientRect",JS_NewCFunction(script->context,AddGradientRect,"_gradientRect",6));
     JS_SetPropertyStr(script->context,fx,"_background",JS_NewCFunction(script->context,AddBackground,"_background",2));

@@ -11,9 +11,13 @@ const runtime = readFileSync(resolve(here, "../../engine/runtime/retained.js"), 
 function networkContext() {
   const callbacks = new Map();
   const sends = [];
+  const tiles = [];
   let nextHandle = 1;
   const fx = {
-    _netFetch: async url => ({ status: 200, url, body: '{"answer":42}' }),
+    width: 1920,
+    height: 1080,
+    _netFetch: async url => ({ status: 200, url, body: '{"answer":42}',
+      bodyBytes: Uint8Array.from([1, 2, 3]).buffer }),
     _netUdpOpen: () => nextHandle++,
     _netTcpConnect: () => nextHandle++,
     _netTcpListen: () => nextHandle++,
@@ -22,11 +26,20 @@ function networkContext() {
       sends.push({ handle, data: new Uint8Array(data), host, port });
       return data.byteLength;
     },
-    _netClose() {}
+    _netClose() {},
+    _tileMapCreate: () => 0,
+    _tileMapBegin(handle, generation, count) { tiles.push(["begin", handle, generation, count]); },
+    _tileMapTile(handle, generation, index, x, y, size, bytes) {
+      tiles.push(["tile", handle, generation, index, x, y, size, bytes.byteLength]);
+    },
+    _tileMapVisible() {},
+    _tileMapReady: () => true,
+    _cacheRead: () => Uint8Array.from([1, 2, 3]).buffer,
+    _cacheWrite: () => true
   };
   const context = vm.createContext({ fx, console });
   vm.runInContext(runtime, context, { filename: "retained.js" });
-  return { context, callbacks, sends };
+  return { context, callbacks, sends, tiles };
 }
 
 test("fetch exposes a standard response surface", async () => {
@@ -35,12 +48,14 @@ test("fetch exposes a standard response surface", async () => {
     fetch("https://example.test/data").then(async response => ({
       ok: response.ok,
       status: response.status,
-      body: await response.json()
+      body: await response.json(),
+      bytes: Array.from(new Uint8Array(await response.arrayBuffer()))
     }))
   `, context);
   assert.equal(result.ok, true);
   assert.equal(result.status, 200);
   assert.equal(result.body.answer, 42);
+  assert.deepEqual(Array.from(result.bytes), [1, 2, 3]);
 });
 
 test("UDP and TCP wrappers carry bytes and peer metadata", () => {
@@ -61,6 +76,25 @@ test("UDP and TCP wrappers carry bytes and peer metadata", () => {
   assert.equal(context.peerPort, 5000);
   assert.equal(Buffer.from(sends[0].data).toString(), "hello");
   assert.equal(sends[0].port, 9001);
+});
+
+test("tile maps project coordinates and submit one atomic cached generation", async () => {
+  const { context, tiles } = networkContext();
+  const result = await vm.runInContext(`
+    (() => {
+      const map = fx.tileMap({
+        source: { url: "https://tiles.test/{z}/{x}/{y}.png", tileSize: 256 },
+        center: [12.635, 55.67], zoom: 11.45, cacheDays: 7
+      });
+      const center = map.project(12.635, 55.67);
+      return map.ready().then(() => ({ center, ready: map.isReady() }));
+    })()
+  `, context);
+  assert.ok(Math.abs(result.center.x - 960) < 0.001);
+  assert.ok(Math.abs(result.center.y - 540) < 0.001);
+  assert.equal(result.ready, true);
+  assert.equal(tiles[0][0], "begin");
+  assert.equal(tiles.filter(value => value[0] === "tile").length, tiles[0][3]);
 });
 
 test("HTTP server parsing and response generation stay in JavaScript", async () => {

@@ -113,6 +113,18 @@ int main(void)
     assert(!scene.imageDirty);
     assert(MicroFxSceneSetColor(&scene,image,0x89abcdef));
     assert(scene.image[0].tint==0x89abcdef);
+
+    int tileMap=MicroFxSceneAddTileMap(&scene,1.0f,1.2f,0.4f,1.0f,0x18283cff);
+    assert(tileMap==0 && scene.tileMapCount==1);
+    assert(MicroFxSceneBeginTileMap(&scene,tileMap,1,1));
+    const uint8_t png[]={1,2,3,4};
+    assert(MicroFxSceneSubmitTileMapTile(&scene,tileMap,1,0,-10,20,256,
+                                         png,sizeof(png)));
+    assert(scene.tileMap[0].tiles[0].received &&
+           scene.tileMap[0].tiles[0].encodedSize==sizeof(png));
+    assert(MicroFxSceneSetTileMapVisible(&scene,tileMap,false));
+    assert(!scene.tileMap[0].visible);
+    assert(MicroFxSceneBeginTileMap(&scene,tileMap,2,1));
     assert(!scene.imageDirty);
     assert(MicroFxSceneSetOpacity(&scene,image,0.5f));
     assert(scene.image[0].opacity==0.5f);

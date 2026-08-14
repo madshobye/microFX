@@ -2,6 +2,7 @@
 #define MICROFX_SCENE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define MICROFX_DESIGN_WIDTH 1920
@@ -15,6 +16,8 @@
 #define MICROFX_MAX_TEXT_BYTES 128
 #define MICROFX_MAX_ASSET_PATH 256
 #define MICROFX_MAX_MESH_SHADERS 8
+#define MICROFX_MAX_TILE_MAPS 2
+#define MICROFX_MAX_TILE_MAP_TILES 64
 
 #define MICROFX_HANDLE_SDF  0x01000000
 #define MICROFX_HANDLE_MESH 0x02000000
@@ -113,6 +116,30 @@ typedef struct {
 } MicroFxImageElement;
 
 typedef struct {
+    float x;
+    float y;
+    float size;
+    uint8_t *encoded;
+    size_t encodedSize;
+    bool received;
+    bool consumed;
+} MicroFxTileMapTile;
+
+typedef struct {
+    bool configured;
+    bool visible;
+    int generation;
+    int readyGeneration;
+    int tileCount;
+    float grayscale;
+    float contrast;
+    float brightness;
+    float invert;
+    uint32_t tint;
+    MicroFxTileMapTile tiles[MICROFX_MAX_TILE_MAP_TILES];
+} MicroFxTileMap;
+
+typedef struct {
     float position[3];
     float target[3];
     float fovY;
@@ -172,6 +199,8 @@ typedef struct {
     MicroFxImageElement image[MICROFX_MAX_IMAGE_ELEMENTS];
     int imageCount;
     bool imageDirty;
+    MicroFxTileMap tileMap[MICROFX_MAX_TILE_MAPS];
+    int tileMapCount;
     MicroFxCamera camera;
     MicroFxRuntimeSettings runtime;
     float clearColor[3];
@@ -219,6 +248,17 @@ int MicroFxSceneAddImage(MicroFxScene *scene, const char *assetPath,
 int MicroFxSceneAddBackgroundImage(MicroFxScene *scene, const char *assetPath,
                                   uint32_t tint);
 bool MicroFxSceneSetImageScale(MicroFxScene *scene, int handle, float scale);
+int MicroFxSceneAddTileMap(MicroFxScene *scene, float grayscale,
+                           float contrast, float brightness, float invert,
+                           uint32_t tint);
+bool MicroFxSceneBeginTileMap(MicroFxScene *scene, int handle,
+                              int generation, int tileCount);
+bool MicroFxSceneSubmitTileMapTile(MicroFxScene *scene, int handle,
+                                   int generation, int index, float x,
+                                   float y, float size, const uint8_t *encoded,
+                                   size_t encodedSize);
+bool MicroFxSceneSetTileMapVisible(MicroFxScene *scene, int handle,
+                                   bool visible);
 bool MicroFxSceneSetText(MicroFxScene *scene, int handle, const char *text);
 bool MicroFxSceneSetTextFont(MicroFxScene *scene, int handle,
                              const char *assetPath);

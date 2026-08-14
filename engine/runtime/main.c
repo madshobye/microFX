@@ -11,6 +11,7 @@
 #include "microfx/mesh_renderer.h"
 #include "microfx/text_renderer.h"
 #include "microfx/image_renderer.h"
+#include "microfx/tile_renderer.h"
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include <math.h>
@@ -603,6 +604,11 @@ int main(void)
         fprintf(stderr, "MICROFX_IMAGE fatal initialization failure\n");
         exit(EXIT_FAILURE);
     }
+    MicroFxTileRenderer tileRenderer;
+    if (!MicroFxTileRendererInit(&tileRenderer)) {
+        fprintf(stderr, "MICROFX_TILE fatal initialization failure\n");
+        exit(EXIT_FAILURE);
+    }
     int renderedFrames = 0;
     float cpuAverageMs = 0.0f;
     float gpuAverageMs = 0.0f;
@@ -627,6 +633,10 @@ int main(void)
             fprintf(stderr, "MICROFX_JS fail-fast update error\n");
             break;
         }
+        if (!MicroFxTileRendererUpdate(&tileRenderer, &scriptScene)) {
+            fprintf(stderr, "MICROFX_TILE fatal cache or texture failure\n");
+            break;
+        }
         double scriptEnd = GetTime();
 
         BeginDrawing();
@@ -643,6 +653,7 @@ int main(void)
             fprintf(stderr, "MICROFX_IMAGE fatal background asset or renderer failure\n");
             break;
         }
+        MicroFxTileRendererDraw(&tileRenderer, &scriptScene);
         if (synchronizedProfiling) glFinish();
         double backgroundEnd = GetTime();
         Matrix scriptView = { 0 };
@@ -806,6 +817,7 @@ int main(void)
     MicroFxQuadRendererDestroy(&quadRenderer);
     MicroFxMeshRendererDestroy(&meshRenderer);
     MicroFxImageRendererDestroy(&imageRenderer);
+    MicroFxTileRendererDestroy(&tileRenderer, &scriptScene);
     MicroFxTextRendererDestroy(&textRenderer);
     CloseWindow();
     if (restartAtChangedResolution) {

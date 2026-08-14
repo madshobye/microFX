@@ -111,7 +111,11 @@ relative offset. Both are fluent and return the same object.
 | `scene.add(elementOrGroup)` | Record explicit membership and return the element or group |
 | `scene.show()` | Select a scene for the current frame |
 | `configure(settings)` | Set startup output/FPS policy from the application |
-| `fetch(url)` / `fx.net.fetch(url)` | Non-blocking HTTP(S) GET with `text()` and `json()` responses |
+| `fetch(url)` / `fx.net.fetch(url)` | Non-blocking HTTP(S) GET with text, JSON, and ArrayBuffer responses |
+| `tileMap(options)` | Cached XYZ raster map with Mercator projection and a GPU color filter |
+| `tileMap.project(lon,lat)` | Project geographic coordinates into the design canvas |
+| `tileMap.center(...)` / `zoom(...)` | Atomically prepare a replacement map texture |
+| `cache.read(...)` / `write(...)` | Bounded persistent binary cache used by tile sources and apps |
 | `fx.net.udp.open(options)` | Open a non-blocking UDP socket with byte-oriented send/message helpers |
 | `fx.net.tcp.connect(options)` | Open a non-blocking TCP client |
 | `fx.net.tcp.listen(options)` | Listen for TCP clients using the same socket interface |

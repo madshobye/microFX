@@ -15,6 +15,7 @@ define MICROFX_DEMO_BUILD_CMDS
 		$(@D)/engine/src/quad_renderer.c \
 		$(@D)/engine/src/mesh_renderer.c $(@D)/engine/src/text_renderer.c \
 		$(@D)/engine/src/image_renderer.c \
+		$(@D)/engine/src/tile_renderer.c \
 		$(@D)/engine/src/script.c $(@D)/engine/src/assets.c \
 		$(@D)/engine/src/network.c \
 		$(TARGET_LDFLAGS) -Wl,-rpath,'$$ORIGIN' \

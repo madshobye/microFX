@@ -11,15 +11,33 @@ const MAX_FLIGHTS = 50;
 const fallback = fx.data("flights.json", { flights: [] });
 const scene = fx.scenes.add(fx.scene({ name: "flight-board" }));
 
-scene.add(fx.backgroundImage("assets/images/copenhagen-map.png", 0xffffffff));
+const map = scene.add(fx.tileMap({
+  source: {
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    tileSize: 256,
+    attribution: "© OpenStreetMap contributors"
+  },
+  center: [12.635, 55.67],
+  zoom: 11.45,
+  cacheDays: 7,
+  filter: {
+    grayscale: 1,
+    invert: 1,
+    contrast: 0.9,
+    brightness: 0.72,
+    tint: 0x25364dff
+  }
+}));
 scene.add(fx.text("CPH LIVE AIRSPACE", 55, 45, 28, 0x7ee5ffff));
 scene.add(fx.text("DATA: ADSB.FI", 55, 1040, 14, 0x6e8ca8ff)
   .antialias(false));
+scene.add(fx.text("© OPENSTREETMAP CONTRIBUTORS · OPENSTREETMAP.ORG/COPYRIGHT",
+  1210, 1040, 12, 0x6e8ca8ff).antialias(false));
 const status = scene.add(fx.text("OFFLINE SNAPSHOT", 1530, 50, 18, 0x6e8ca8ff));
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
-const mapX = longitude => clamp((longitude - LON_MIN) / (LON_MAX - LON_MIN), 0, 1) * 1920;
-const mapY = latitude => (1 - clamp((latitude - LAT_MIN) / (LAT_MAX - LAT_MIN), 0, 1)) * 1080;
+const mapX = longitude => map.project(longitude, 55.67).x;
+const mapY = latitude => map.project(12.635, latitude).y;
 const airportX = mapX(12.6561);
 const airportY = mapY(55.6181);
 const airportDot = scene.add(fx.sdfCircle(airportX, airportY, 11, 0xffd55aff)

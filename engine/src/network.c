@@ -312,6 +312,9 @@ static bool PumpHttp(MicroFxNetwork *network)
             JS_SetPropertyStr(network->context,argument,"status",JS_NewInt32(network->context,(int)code));
             JS_SetPropertyStr(network->context,argument,"url",JS_NewString(network->context,url?url:""));
             JS_SetPropertyStr(network->context,argument,"body",JS_NewStringLen(network->context,request->body?request->body:"",request->size));
+            JS_SetPropertyStr(network->context,argument,"bodyBytes",
+                JS_NewArrayBufferCopy(network->context,
+                    (const uint8_t *)(request->body?request->body:""),request->size));
             function=request->resolve;
         }else{
             const char *detail=request->overflow?"HTTP response exceeds 256 KiB":

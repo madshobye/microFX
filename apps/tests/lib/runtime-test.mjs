@@ -79,11 +79,25 @@ function instrumentedNativeFx(root, capacities) {
             { TimeUTC: "2026-08-14T00:00:00", DayAheadPriceDKK: 320 },
             { TimeUTC: "2026-08-14T00:15:00", DayAheadPriceDKK: 280 }
           ] })
-        : JSON.stringify({ time: 1786700000, states: [
-            ["abc", "TEST123", null, null, null, 12.5, 55.7, 1000, false, 90, 45]
-          ] });
-      return Promise.resolve({ status: 200, url, body });
+        : url.includes("opendata.adsb.fi")
+        ? JSON.stringify({ now: 1786700000000, ac: [{
+            hex: "abc", flight: "TEST123", lon: 12.5, lat: 55.7,
+            alt_baro: 1000, gs: 90, track: 45, seen_pos: 0.2,
+            category: "A1", t: "C172", desc: "CESSNA 172 Skyhawk"
+          }] })
+        : "tile";
+      const bodyBytes = new TextEncoder().encode(body).buffer;
+      return Promise.resolve({ status: 200, url, body, bodyBytes });
     },
+    _tileMapCreate() { return 0; },
+    _tileMapBegin(handle, generation, count) {
+      assert.equal(handle, 0);assert.ok(generation > 0 && count > 0 && count <= 64);
+    },
+    _tileMapTile() {},
+    _tileMapVisible() {},
+    _tileMapReady() { return true; },
+    _cacheRead() { return null; },
+    _cacheWrite() { return true; },
     _netUdpOpen() { return 1; },
     _netTcpConnect() { return 1; },
     _netTcpListen() { return 1; },

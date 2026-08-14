@@ -5,6 +5,9 @@
   const groupMembers = new WeakMap();
   const groupOwners = new WeakMap();
   const groups = new WeakSet();
+  const tileMaps = new WeakSet();
+  const tileMapOwners = new WeakMap();
+  const activeTileMaps = [];
   const sceneOwners = new WeakMap();
   const feedCache = new Map();
 
@@ -485,9 +488,13 @@
         this.url = raw.url;
         this.ok = raw.status >= 200 && raw.status < 300;
         Object.defineProperty(this, "_body", { value: raw.body });
+        Object.defineProperty(this, "_bodyBytes", { value: raw.bodyBytes });
       }
       text() { return Promise.resolve(this._body); }
       json() { return Promise.resolve().then(() => JSON.parse(this._body)); }
+      arrayBuffer() {
+        return Promise.resolve(this._bodyBytes.slice(0));
+      }
     }
 
     function fetch(input, options) {
@@ -495,7 +502,9 @@
       if (method !== "GET") {
         return Promise.reject(new TypeError("microFX fetch currently supports GET only"));
       }
-      return fx._netFetch(String(input)).then(raw => new MicroFxResponse(raw));
+      return Promise.resolve()
+        .then(() => fx._netFetch(String(input)))
+        .then(raw => new MicroFxResponse(raw));
     }
 
     function on(handle, event, callback) {
@@ -623,15 +632,184 @@
     });
   }
 
+  if (typeof fx._tileMapCreate === "function") {
+    const mercatorY = latitude => {
+      const bounded = Math.max(-85.05112878, Math.min(85.05112878, latitude));
+      const radians = bounded * Math.PI / 180;
+      return (1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) * 0.5;
+    };
+    const cacheBytes = value => {
+      if (value instanceof ArrayBuffer ||
+          (value && Object.prototype.toString.call(value) === "[object ArrayBuffer]")) {
+        return value;
+      }
+      if (ArrayBuffer.isView(value)) {
+        return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+      }
+      throw new TypeError("cache data must be an ArrayBuffer or typed array");
+    };
+
+    fx.cache = Object.freeze({
+      read(namespace, key, maxAgeSeconds) {
+        return fx._cacheRead(String(namespace), String(key), Number(maxAgeSeconds));
+      },
+      write(namespace, key, value) {
+        return fx._cacheWrite(String(namespace), String(key), cacheBytes(value));
+      }
+    });
+
+    fx.tileMap = function tileMap(options) {
+      const settings = options || {};
+      const source = settings.source || {};
+      const template = String(source.url || "");
+      const tileSize = Number(source.tileSize || 256);
+      const cacheSeconds = Number((settings.cacheDays === undefined ? 7 : settings.cacheDays) * 86400);
+      const filter = settings.filter || {};
+      const center = Array.isArray(settings.center) ? settings.center : [0, 0];
+      if (!template.includes("{z}") || !template.includes("{x}") ||
+          !template.includes("{y}")) {
+        throw new TypeError("tileMap source URL requires {z}, {x}, and {y}");
+      }
+      if (!Number.isFinite(tileSize) || tileSize <= 0 ||
+          !Number.isFinite(cacheSeconds) || cacheSeconds < 604800) {
+        throw new RangeError("tileMap requires positive tiles and at least seven cache days");
+      }
+      const handle = fx._tileMapCreate(
+        Number(filter.grayscale === undefined ? 1 : filter.grayscale),
+        Number(filter.contrast === undefined ? 1 : filter.contrast),
+        Number(filter.brightness === undefined ? 1 : filter.brightness),
+        Number(filter.invert || 0),
+        filter.tint === undefined ? 0xffffffff : filter.tint);
+      const state = {
+        handle,
+        longitude: Number(center[0]), latitude: Number(center[1]),
+        zoom: Number(settings.zoom === undefined ? 10 : settings.zoom),
+        generation: 0, visible: true, ready: Promise.resolve(false),
+        loading: false, reloadRequested: false, nextRetry: 0
+      };
+
+      function coordinates() {
+        if (!Number.isFinite(state.longitude) || !Number.isFinite(state.latitude) ||
+            !Number.isFinite(state.zoom) || state.zoom < 0 || state.zoom > 20) {
+          throw new RangeError("tileMap center and zoom must be finite and zoom must be 0..20");
+        }
+        const level = Math.floor(state.zoom);
+        const scale = Math.pow(2, state.zoom - level);
+        const count = Math.pow(2, level);
+        const world = tileSize * count;
+        const centerX = (state.longitude + 180) / 360 * world;
+        const centerY = mercatorY(state.latitude) * world;
+        const displaySize = tileSize * scale;
+        const firstX = Math.floor((centerX - fx.width / (2 * scale)) / tileSize);
+        const lastX = Math.floor((centerX + fx.width / (2 * scale)) / tileSize);
+        const firstY = Math.max(0, Math.floor((centerY - fx.height / (2 * scale)) / tileSize));
+        const lastY = Math.min(count - 1, Math.floor((centerY + fx.height / (2 * scale)) / tileSize));
+        const result = [];
+        for (let y = firstY; y <= lastY; y++) for (let x = firstX; x <= lastX; x++) {
+          const wrappedX = (x % count + count) % count;
+          const url = template.replace("{z}", level).replace("{x}", wrappedX).replace("{y}", y);
+          result.push({
+            url,
+            x: (x * tileSize - centerX) * scale + fx.width * 0.5,
+            y: (y * tileSize - centerY) * scale + fx.height * 0.5,
+            size: displaySize
+          });
+        }
+        if (!result.length || result.length > 64) {
+          throw new RangeError("tileMap viewport requires between 1 and 64 tiles");
+        }
+        return result;
+      }
+
+      function loadTile(descriptor, index, generation) {
+        const cached = fx.cache.read("tiles", descriptor.url, cacheSeconds);
+        const content = cached instanceof ArrayBuffer ? Promise.resolve(cached) :
+          fetch(descriptor.url).then(response => {
+            if (!response.ok) throw new Error(`tile request failed: HTTP ${response.status}`);
+            return response.arrayBuffer().then(buffer => {
+              fx.cache.write("tiles", descriptor.url, buffer);
+              return buffer;
+            });
+          });
+        return content.then(buffer => {
+          if (generation !== state.generation) return;
+          fx._tileMapTile(handle, generation, index, descriptor.x, descriptor.y,
+                          descriptor.size, buffer);
+        });
+      }
+
+      function beginReload() {
+        if (state.loading) { state.reloadRequested = true; return state.ready; }
+        const descriptors = coordinates();
+        const generation = ++state.generation;
+        fx._tileMapBegin(handle, generation, descriptors.length);
+        state.loading = true;state.reloadRequested = false;
+        let cursor = 0;
+        function worker() {
+          if (cursor >= descriptors.length) return Promise.resolve();
+          const index = cursor++;
+          return loadTile(descriptors[index], index, generation).then(worker);
+        }
+        state.ready = Promise.all([worker(), worker(), worker()])
+          .then(() => {
+            state.loading = false;state.nextRetry = 0;
+            if (state.reloadRequested) return beginReload();
+            return true;
+          })
+          .catch(() => {
+            state.loading = false;state.nextRetry = Date.now() + 10000;
+            return false;
+          });
+        return state.ready;
+      }
+      state.beginReload = beginReload;
+
+      const object = {
+        handle,
+        attribution: String(source.attribution || ""),
+        center(longitude, latitude) {
+          state.longitude = Number(longitude);state.latitude = Number(latitude);
+          beginReload();return object;
+        },
+        zoom(value) { state.zoom = Number(value);beginReload();return object; },
+        reload() { return beginReload(); },
+        ready() { return state.ready; },
+        isReady() { return Boolean(fx._tileMapReady(handle)); },
+        project(longitude, latitude) {
+          const level = Math.floor(state.zoom);
+          const scale = Math.pow(2, state.zoom - level);
+          const world = tileSize * Math.pow(2, level);
+          let dx = (Number(longitude) - state.longitude) / 360 * world;
+          if (dx > world * 0.5) dx -= world;
+          if (dx < -world * 0.5) dx += world;
+          return {
+            x: fx.width * 0.5 + dx * scale,
+            y: fx.height * 0.5 +
+              (mercatorY(Number(latitude)) - mercatorY(state.latitude)) * world * scale
+          };
+        },
+        visible(value) { state.visible = Boolean(value);fx._tileMapVisible(handle,state.visible);return object; },
+        show() { return object.visible(true); },
+        hide() { return object.visible(false); }
+      };
+      tileMaps.add(object);activeTileMaps.push(state);beginReload();return object;
+    };
+  }
+
   fx.scene = function scene(options) {
     const members = [];
     const flattened = [];
-    const state = { active: false, requested: false };
+    const state = { active: false, requested: false, maps: [] };
     const object = {
       name: options && options.name ? String(options.name) : "scene",
       add(value) {
+        if (tileMaps.has(value)) {
+          if (tileMapOwners.has(value)) throw new Error("tile map already belongs to a scene");
+          tileMapOwners.set(value, object);state.maps.push(value);members.push(value);
+          value.hide();return value;
+        }
         if (!value || (!elementStates.has(value) && !groups.has(value))) {
-          throw new TypeError("scene.add() expects a retained element or group");
+          throw new TypeError("scene.add() expects a retained element, group, or tile map");
         }
         const additions = groups.has(value) ? groupMembers.get(value) : [value];
         additions.forEach(member => {
@@ -694,6 +872,13 @@
         memberState.sceneVisible = state.active;
         fx._visible(member.handle, memberState.enabled && memberState.sceneVisible);
       });
+      state.maps.forEach(map => map.visible(state.active));
+    });
+    const now = Date.now();
+    activeTileMaps.forEach(state => {
+      if (!state.loading && state.nextRetry > 0 && now >= state.nextRetry) {
+        state.beginReload();
+      }
     });
   };
 })(fx);

@@ -1,6 +1,7 @@
 #include "microfx/scene.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 void MicroFxSceneInit(MicroFxScene *scene)
@@ -290,6 +291,58 @@ bool MicroFxSceneSetImageScale(MicroFxScene *scene, int handle, float scale)
     int index=handle & MICROFX_HANDLE_INDEX_MASK;
     if(index<0 || index>=scene->imageCount)return false;
     scene->image[index].scale=scale;scene->imageDirty=true;return true;
+}
+
+int MicroFxSceneAddTileMap(MicroFxScene *scene, float grayscale,
+                           float contrast, float brightness, float invert,
+                           uint32_t tint)
+{
+    if(scene->tileMapCount>=MICROFX_MAX_TILE_MAPS||grayscale<0.0f||
+       grayscale>1.0f||contrast<0.0f||brightness<0.0f||invert<0.0f||invert>1.0f)
+        return -1;
+    int handle=scene->tileMapCount++;
+    scene->tileMap[handle]=(MicroFxTileMap){.configured=true,.visible=true,
+        .grayscale=grayscale,.contrast=contrast,.brightness=brightness,
+        .invert=invert,.tint=tint};
+    return handle;
+}
+
+bool MicroFxSceneBeginTileMap(MicroFxScene *scene,int handle,int generation,
+                              int tileCount)
+{
+    if(handle<0||handle>=scene->tileMapCount||generation<=0||tileCount<=0||
+       tileCount>MICROFX_MAX_TILE_MAP_TILES)return false;
+    MicroFxTileMap *map=&scene->tileMap[handle];
+    for(int i=0;i<MICROFX_MAX_TILE_MAP_TILES;i++){
+        free(map->tiles[i].encoded);
+        map->tiles[i]=(MicroFxTileMapTile){0};
+    }
+    map->generation=generation;map->tileCount=tileCount;
+    return true;
+}
+
+bool MicroFxSceneSubmitTileMapTile(MicroFxScene *scene,int handle,
+                                   int generation,int index,float x,float y,
+                                   float size,const uint8_t *encoded,
+                                   size_t encodedSize)
+{
+    if(handle<0||handle>=scene->tileMapCount||index<0||
+       index>=scene->tileMap[handle].tileCount||size<=0.0f||!encoded||
+       encodedSize==0||encodedSize>256*1024)return false;
+    MicroFxTileMap *map=&scene->tileMap[handle];
+    if(generation!=map->generation)return false;
+    uint8_t *copy=malloc(encodedSize);if(!copy)return false;
+    memcpy(copy,encoded,encodedSize);
+    MicroFxTileMapTile *tile=&map->tiles[index];
+    free(tile->encoded);*tile=(MicroFxTileMapTile){.x=x,.y=y,.size=size,
+        .encoded=copy,.encodedSize=encodedSize,.received=true};
+    return true;
+}
+
+bool MicroFxSceneSetTileMapVisible(MicroFxScene *scene,int handle,bool visible)
+{
+    if(handle<0||handle>=scene->tileMapCount)return false;
+    scene->tileMap[handle].visible=visible;return true;
 }
 
 bool MicroFxSceneSetText(MicroFxScene *scene, int handle, const char *text)

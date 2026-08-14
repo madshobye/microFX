@@ -21,7 +21,43 @@ fetch("https://example.com/data.json")
   .catch(error => status.text(error.message));
 ```
 
-Responses expose `ok`, `status`, `url`, `text()`, and `json()`.
+Responses expose `ok`, `status`, `url`, `text()`, `json()`, and
+`arrayBuffer()`. The binary response is still subject to the same 256 KiB
+limit.
+
+## Cached raster maps
+
+`fx.tileMap()` accepts any HTTPS XYZ raster source. It loads up to three tiles
+concurrently, caches encoded tiles below persistent platform state, composites
+at most 64 visible tiles into one 1920x1080 texture, and replaces the active
+texture only after the new generation is complete. Normal frames therefore
+draw one GPU texture and perform no tile decoding or composition on the CPU.
+
+```js
+const map = fx.tileMap({
+  source: {
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    tileSize: 256,
+    attribution: "© OpenStreetMap contributors"
+  },
+  center: [12.635, 55.67],
+  zoom: 11.45,
+  cacheDays: 7,
+  filter: {
+    grayscale: 1,
+    invert: 1,
+    contrast: 0.9,
+    brightness: 0.72,
+    tint: 0x25364dff
+  }
+});
+scene.add(map);
+const screenPoint = map.project(12.6561, 55.6181);
+```
+
+Applications remain responsible for provider terms and for displaying the
+source attribution. Tile cache durations shorter than seven days are rejected
+so the default API cannot accidentally violate the OpenStreetMap minimum.
 
 ## UDP
 
