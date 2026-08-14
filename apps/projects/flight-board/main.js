@@ -25,7 +25,7 @@ const MAX_FLIGHTS = 50;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
-const METRO_HOLD_SECONDS = 4 * 60;
+const TRANSIT_HOLD_SECONDS = 4 * 60;
 const MAX_RAIL_TRANSIT = 224;
 const MAX_BUSES = 128;
 const TRANSIT_MODES = new Set([
@@ -146,6 +146,7 @@ const busTransit = Array.from({ length: MAX_BUSES }, () => {
   const marker = scene.add(fx.rect(0, 0, 4, 4, 0xb9c3c9ff).visible(false));
   return {
     id: "", mode: "BUS", active: false, marker,
+    lastSeen: 0,
     path: [], cumulative: [], total: 0, pathIndex: 1,
     departure: 0, arrival: 0, parked: false,
     positionInitialized: false, currentX: 0, currentY: 0
@@ -663,13 +664,17 @@ function styleTransit(slot, mode) {
   }
 }
 
-function applyTransit(slots, values, styleMarkers, holdMode, holdSeconds) {
+function applyTransit(slots, values, styleMarkers, holdSeconds) {
   const now = Date.now();
   const assigned = new Set();
   values.forEach(value => {
     let slot = slots.find(candidate => candidate.active && candidate.id === value.id &&
       !assigned.has(candidate));
     if (!slot) slot = slots.find(candidate => !candidate.active && !assigned.has(candidate));
+    if (!slot) {
+      slot = slots.filter(candidate => !assigned.has(candidate)).reduce((oldest, candidate) =>
+        !oldest || candidate.lastSeen < oldest.lastSeen ? candidate : oldest, null);
+    }
     if (!slot) return;
     const continuing = slot.active && slot.id === value.id;
     assigned.add(slot);
@@ -690,8 +695,7 @@ function applyTransit(slots, values, styleMarkers, holdMode, holdSeconds) {
   });
   slots.forEach(slot => {
     if (assigned.has(slot)) return;
-    if (slot.active && slot.mode === holdMode &&
-        now - slot.lastSeen <= holdSeconds * 1000) return;
+    if (slot.active && now - slot.lastSeen <= holdSeconds * 1000) return;
     slot.active = false;
     slot.id = "";
     slot.marker.visible(false);
@@ -726,10 +730,10 @@ function requestTransit() {
       if (rail.length > MAX_RAIL_TRANSIT) {
         throw new Error(`rail marker capacity ${rail.length}/${MAX_RAIL_TRANSIT}`);
       }
-      applyTransit(transit, rail, true, "SUBWAY", METRO_HOLD_SECONDS);
+      applyTransit(transit, rail, true, TRANSIT_HOLD_SECONDS);
       const buses = normalizeTransit(payloads[1], now, BUS_MODES);
       if (buses.length <= MAX_BUSES) {
-        applyTransit(busTransit, buses, false);
+        applyTransit(busTransit, buses, false, TRANSIT_HOLD_SECONDS);
       } else {
         applyTransit(busTransit, [], false);
         fx.log(`TRANSITOUS BUS SET HIDDEN ${buses.length}/${MAX_BUSES}`);
