@@ -763,12 +763,17 @@ function requestTransit() {
     now - TRANSIT_WINDOW_SECONDS * 1000).toISOString());
   const end = encodeURIComponent(new Date(
     now + TRANSIT_WINDOW_SECONDS * 1000).toISOString());
-  const trainUrl = `${TRANSIT_URL}?zoom=8&min=55.36,13.18&max=55.98,12.10` +
+  const trainWestUrl = `${TRANSIT_URL}?zoom=8&min=55.36,12.64&max=55.98,12.10` +
     `&startTime=${start}&endTime=${end}&precision=4`;
-  const metroUrl = `${TRANSIT_URL}?zoom=9&min=55.64,12.63&max=55.73,12.50` +
+  const trainEastUrl = `${TRANSIT_URL}?zoom=8&min=55.36,13.18&max=55.98,12.64` +
+    `&startTime=${start}&endTime=${end}&precision=4`;
+  const metroWestUrl = `${TRANSIT_URL}?zoom=9&min=55.64,12.565&max=55.73,12.50` +
+    `&startTime=${start}&endTime=${end}&precision=4`;
+  const metroEastUrl = `${TRANSIT_URL}?zoom=9&min=55.64,12.63&max=55.73,12.565` +
     `&startTime=${start}&endTime=${end}&precision=4`;
   const headers = { "User-Agent": TRANSIT_USER_AGENT };
-  Promise.all([fetch(trainUrl, { headers }), fetch(metroUrl, { headers })])
+  Promise.all([fetch(trainWestUrl, { headers }), fetch(trainEastUrl, { headers }),
+    fetch(metroWestUrl, { headers }), fetch(metroEastUrl, { headers })])
     .then(responses => Promise.all(responses.map(response => {
       if (!response.ok) throw new Error(`Transitous HTTP ${response.status}`);
       return response.json();
@@ -777,16 +782,24 @@ function requestTransit() {
       if (!payloads.every(Array.isArray)) throw new Error("invalid Transitous response");
       const now = Date.now();
       const trains = mergeTransit(
-        normalizeTransit(payloads[1], now, TRANSIT_MODES),
-        normalizeTransit(payloads[0], now, TRANSIT_MODES)
+        normalizeTransit(payloads[2], now, TRANSIT_MODES),
+        normalizeTransit(payloads[3], now, TRANSIT_MODES),
+        normalizeTransit(payloads[0], now, TRANSIT_MODES),
+        normalizeTransit(payloads[1], now, TRANSIT_MODES)
       );
-      const metro = normalizeTransit(payloads[1], now, METRO_MODES);
+      const metro = mergeTransit(
+        normalizeTransit(payloads[2], now, METRO_MODES),
+        normalizeTransit(payloads[3], now, METRO_MODES)
+      );
       const rail = trains.concat(metro);
       if (rail.length > MAX_RAIL_TRANSIT) {
         throw new Error(`rail marker capacity ${rail.length}/${MAX_RAIL_TRANSIT}`);
       }
       applyTransit(transit, rail, true, TRANSIT_HOLD_SECONDS);
-      const buses = normalizeTransit(payloads[1], now, BUS_MODES);
+      const buses = mergeTransit(
+        normalizeTransit(payloads[2], now, BUS_MODES),
+        normalizeTransit(payloads[3], now, BUS_MODES)
+      );
       if (buses.length <= MAX_BUSES) {
         applyTransit(busTransit, buses, false, TRANSIT_HOLD_SECONDS);
       } else {
