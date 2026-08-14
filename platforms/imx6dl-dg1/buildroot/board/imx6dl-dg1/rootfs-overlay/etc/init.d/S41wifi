@@ -2,6 +2,7 @@
 
 case "$1" in
   start)
+    [ ! -e /run/microfx-recovery-active ] || { echo "Stored-network recovery owns the radios"; exit 0; }
     echo "Starting Wi-Fi connection in background"
     /usr/sbin/wifi-connect &
     echo $! >/run/wifi-connect.pid

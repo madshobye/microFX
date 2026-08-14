@@ -9,10 +9,12 @@ MICROFX_DEMO_DEPENDENCIES = raylib-drm quickjs
 
 define MICROFX_DEMO_BUILD_CMDS
 	$(TARGET_CC) $(TARGET_CFLAGS) -I$(@D)/engine/include \
-		-o $(@D)/canvas-demo $(@D)/apps/demo/src/main.c \
+		-o $(@D)/canvas-demo $(@D)/engine/runtime/main.c \
 		$(@D)/engine/src/scene.c $(@D)/engine/src/sdf_renderer.c \
+		$(@D)/engine/src/quality.c \
 		$(@D)/engine/src/quad_renderer.c \
 		$(@D)/engine/src/mesh_renderer.c $(@D)/engine/src/text_renderer.c \
+		$(@D)/engine/src/image_renderer.c \
 		$(@D)/engine/src/script.c $(@D)/engine/src/assets.c \
 		$(TARGET_LDFLAGS) -Wl,-rpath,'$$ORIGIN' \
 		-lraylib -lEGL -lGLESv2 -ldrm -lgbm \
@@ -31,6 +33,10 @@ define MICROFX_DEMO_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0644 $(@D)/apps/demo/assets/shaders/Light.vs $(TARGET_DIR)/usr/share/canvas/Light.vs
 	$(INSTALL) -D -m 0644 $(@D)/apps/demo/assets/shaders/Light.fs $(TARGET_DIR)/usr/share/canvas/Light.fs
 	$(INSTALL) -D -m 0644 $(@D)/apps/demo/scripts/main.js $(TARGET_DIR)/usr/share/microfx/main.js
+	$(INSTALL) -D -m 0644 $(@D)/apps/demo/project.json $(TARGET_DIR)/usr/share/microfx/projects/demo/project.json
+	$(INSTALL) -D -m 0644 $(@D)/apps/demo/scripts/main.js $(TARGET_DIR)/usr/share/microfx/projects/demo/main.js
+	$(INSTALL) -D -m 0644 $(@D)/apps/demo/assets/models/icosahedron.obj $(TARGET_DIR)/usr/share/microfx/projects/demo/assets/models/icosahedron.obj
+	cp -R $(@D)/apps/projects/. $(TARGET_DIR)/usr/share/microfx/projects/
 	$(INSTALL) -D -m 0644 $(@D)/apps/onboarding/scripts/main.js $(TARGET_DIR)/usr/share/microfx/onboarding.js
 endef
 

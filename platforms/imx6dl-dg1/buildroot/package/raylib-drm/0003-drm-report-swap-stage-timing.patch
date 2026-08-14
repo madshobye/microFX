@@ -26,8 +26,8 @@
      if (!bo) TRACELOG(LOG_ERROR, "DISPLAY: Failed GBM to lock front buffer");
  
      uint32_t fb = 0;
-@@ -563,5 +578,6 @@ void SwapScreenBuffer(void)
-     int result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, 16, 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
+@@ -574,5 +589,6 @@ void SwapScreenBuffer(void)
+     int result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, highColor? 24 : 16, highColor? 32 : 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
      if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeAddFB() failed with result: %d", result);
 +    double t3 = SwapClockMs();
  

@@ -15,7 +15,7 @@ case "$1" in
       exit 1
     fi
 
-    mkdir -p /data/apps/incoming /data/apps/releases /data/config /data/ssh /data/state
+    mkdir -p /data/apps/incoming /data/apps/releases /data/apps/projects /data/config /data/ssh /data/state
     mkdir -p /data/apps/releases/factory
     if ! cmp -s /usr/bin/canvas-demo /data/apps/releases/factory/canvas-demo; then
       cp /usr/bin/canvas-demo /data/apps/releases/factory/canvas-demo.new
@@ -23,8 +23,37 @@ case "$1" in
       mv /data/apps/releases/factory/canvas-demo.new /data/apps/releases/factory/canvas-demo
       echo "Updated persistent factory application from firmware"
     fi
-    if [ ! -L /data/apps/current ]; then
-      ln -s /data/apps/releases/factory /data/apps/current
+    for bundled in /usr/share/microfx/projects/*; do
+      [ -d "$bundled" ] || continue
+      name=${bundled##*/}
+      project=/data/apps/projects/$name
+      mkdir -p "$project/assets"
+      [ -s "$project/main.js" ] || cp "$bundled/main.js" "$project/main.js"
+      [ -s "$project/project.json" ] || cp "$bundled/project.json" "$project/project.json"
+      if [ -d "$bundled/assets" ]; then
+        # Bundled assets may be organized in nested model, font, image, and
+        # shader folders. Seed missing files without overwriting user edits.
+        (cd "$bundled/assets" && find . -type f -print) | while IFS= read -r relative; do
+          asset=$bundled/assets/$relative
+          destination=$project/assets/$relative
+          [ -f "$destination" ] && continue
+          mkdir -p "${destination%/*}"
+          cp "$asset" "$destination"
+        done
+      fi
+    done
+    demo=/data/apps/projects/demo
+    current=
+    [ ! -L /data/apps/current ] || current=$(readlink /data/apps/current)
+    case "$current" in
+      /data/apps/projects/*) ;;
+      *)
+        rm -f /data/apps/current
+        ln -s "$demo" /data/apps/current
+        ;;
+    esac
+    if [ ! -L /data/apps/current-runtime ]; then
+      ln -s /data/apps/releases/factory /data/apps/current-runtime
     fi
     ;;
 esac

@@ -3,7 +3,17 @@ set -eu
 
 rm -f "${TARGET_DIR}/etc/init.d/S99canvas"
 rm -f "${TARGET_DIR}/etc/init.d/S50dropbear"
+rm -f "${TARGET_DIR}/etc/init.d/S80dnsmasq"
 find "${TARGET_DIR}" -name '._*' -delete
+
+BOARD_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+"${BOARD_DIR}/install-ar6003-board-data.sh" "${TARGET_DIR}"
+"${BOARD_DIR}/verify-target-firmware.sh" "${TARGET_DIR}"
+
+# Buildroot's seed service normally writes to the root filesystem before the
+# persistent partition is mounted. The platform service runs after S39data and
+# keeps both credited seeds and its lock on /data instead.
+rm -f "${TARGET_DIR}/etc/init.d/S01seedrng"
 
 PRIVATE_DIR="${BR2_EXTERNAL_IMX6DL_DG1_PATH}/../private"
 PRIVATE_WIFI="${PRIVATE_DIR}/wpa_supplicant.conf"
@@ -25,6 +35,7 @@ fi
 mkdir -p "${TARGET_DIR}/boot"
 find "${TARGET_DIR}/boot" -mindepth 1 -maxdepth 1 -type f \
     ! -name uEnv.txt \
+    ! -name uEnv-debug.txt \
     ! -name microfx-imx6dl-dg1.img \
     ! -name microfx-imx6dl-dg1.dtb \
     -delete

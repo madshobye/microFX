@@ -1,30 +1,74 @@
 #!/bin/sh
 
-# Recover the client connection without persistent writes. Three consecutive
-# failures avoid disrupting a healthy association during a brief AP roam.
-log=/tmp/microfx-wifi-watchdog.log
-interface=wlan1
-failures=0
+# Recover the client connection without persistent writes. Prefer asking the
+# existing supplicant to reassociate; only rebuild the stack after sustained
+# failure. This avoids turning a short AP roam into a DHCP/network outage.
+log=${MICROFX_WIFI_WATCHDOG_LOG:-/tmp/microfx-wifi-watchdog.log}
+product_config=${MICROFX_PRODUCT_CONFIG:-/etc/microfx-product.conf}
+[ -r "$product_config" ] && . "$product_config"
+interface=${MICROFX_WIFI_INTERFACE:-wlan1}
+run_root=${MICROFX_RUN_ROOT:-/run}
+initial_delay=${MICROFX_WIFI_WATCHDOG_INITIAL_DELAY:-45}
+poll_delay=${MICROFX_WIFI_WATCHDOG_POLL_DELAY:-10}
+rebuild_delay=${MICROFX_WIFI_WATCHDOG_REBUILD_DELAY:-30}
+max_cycles=${MICROFX_WIFI_WATCHDOG_MAX_CYCLES:-0}
+wifi_connect=${MICROFX_WIFI_CONNECT:-/usr/sbin/wifi-connect}
+association_failures=0
+address_failures=0
+cycles=0
+. "${MICROFX_WIFI_POLICY_LIBRARY:-/usr/lib/microfx/wifi-policy.sh}"
+. "${MICROFX_NETWORK_STATUS_LIBRARY:-/usr/lib/microfx/network-status.sh}"
 
 echo "Wi-Fi watchdog started" >"$log"
-sleep 45
+sleep "$initial_delay"
 
 while :; do
   state=$(wpa_cli -i "$interface" status 2>/dev/null | sed -n 's/^wpa_state=//p')
   address=$(ip -4 address show dev "$interface" 2>/dev/null | sed -n 's/.*inet \([^ ]*\).*/\1/p' | head -n 1)
 
-  if [ "$state" = "COMPLETED" ] && [ -n "$address" ]; then
-    failures=0
+  if [ "$state" = "COMPLETED" ]; then
+    association_failures=0
   else
-    failures=$((failures + 1))
-    echo "$(date) unhealthy state=${state:-missing} address=${address:-missing} failures=$failures" >>"$log"
+    association_failures=$((association_failures + 1))
   fi
 
-  if [ "$failures" -ge 3 ]; then
-    echo "$(date) restarting client connection" >>"$log"
-    /usr/sbin/wifi-connect
-    failures=0
-    sleep 30
+  if [ -n "$address" ]; then
+    address_failures=0
+  else
+    address_failures=$((address_failures + 1))
   fi
-  sleep 10
+
+  action=$(microfx_wifi_action "$state" "$([ -n "$address" ] && echo 1 || echo 0)" \
+                                "$association_failures" "$address_failures")
+  if [ "$state" = COMPLETED ] && [ -n "$address" ]; then
+    microfx_write_network_status connected "watchdog healthy" "$interface"
+  elif [ "$state" = COMPLETED ]; then
+    microfx_write_network_status awaiting-address "association healthy; DHCP pending" "$interface"
+  else
+    microfx_write_network_status reconnecting "association state ${state:-missing}" "$interface"
+  fi
+
+  if [ "$action" = reassociate ]; then
+    echo "$(date) requesting reassociation state=${state:-missing}" >>"$log"
+    wpa_cli -i "$interface" reassociate >>"$log" 2>&1 || true
+  fi
+
+  if [ "$action" = renew-dhcp ]; then
+    echo "$(date) association healthy but address missing; renewing DHCP" >>"$log"
+    dhcp_pid=$run_root/udhcpc-${interface}.pid
+    [ -r "$dhcp_pid" ] && kill "$(cat "$dhcp_pid")" 2>/dev/null || true
+    rm -f "$dhcp_pid"
+    udhcpc -b -p "$dhcp_pid" -i "$interface" -x hostname:microfx >>"$log" 2>&1 || true
+  fi
+
+  if [ "$action" = rebuild ]; then
+    echo "$(date) sustained association failure; rebuilding client connection" >>"$log"
+    "$wifi_connect"
+    association_failures=0
+    address_failures=0
+    sleep "$rebuild_delay"
+  fi
+  cycles=$((cycles + 1))
+  [ "$max_cycles" -gt 0 ] && [ "$cycles" -ge "$max_cycles" ] && break
+  sleep "$poll_delay"
 done

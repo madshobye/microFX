@@ -1,0 +1,19 @@
+#!/bin/sh
+
+seed_dir=${MICROFX_SEED_DIR:-/data/state/seedrng}
+mounts_file=${MICROFX_MOUNTS_FILE:-/proc/mounts}
+
+case "$1" in
+  start|stop|restart|reload)
+    if ! grep -q ' /data ' "$mounts_file" 2>/dev/null; then
+      echo "Persistent data is not mounted; random seed update skipped"
+      exit 0
+    fi
+    mkdir -p "$seed_dir"
+    seedrng --seed-dir="$seed_dir" || true
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|reload}"
+    exit 1
+    ;;
+esac

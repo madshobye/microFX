@@ -106,12 +106,14 @@ project. The scene is regular JavaScript; only the supervisor's environment
 values are platform-specific. Restarting the canvas service does not replay it
 because `/run/microfx-onboarding-shown` survives until reboot.
 
-Provisioning uses the otherwise-idle `wlan0` PHY as a WPA2 setup AP and reserves
-`wlan1` for managed client connections. The captive portal appends validated
-networks transactionally to `/data/config/wpa_supplicant.conf`; wpa_supplicant
-chooses among all saved networks. The configurable peer ID is stored at
-`/data/config/peer-id`. Captive HTTP/DNS are platform services and must remain
-outside the renderer.
+Provisioning is an optional platform feature and is disabled by default in the
+development image until its radio path completes hardware validation. When
+explicitly enabled, it uses the otherwise-idle `wlan0` PHY as a WPA2 setup AP
+and reserves `wlan1` for managed client connections. The captive portal appends
+validated networks transactionally to `/data/config/wpa_supplicant.conf`;
+wpa_supplicant chooses among all saved networks. The configurable peer ID is
+stored at `/data/config/peer-id`. Captive HTTP/DNS are platform services and
+must remain outside the renderer.
 
 Remote editing is also optional and separate. `services/peer-bridge` answers
 PeerJS DataChannels through pinned `sepfy/libpeer`, stores `main.js` and assets
@@ -144,6 +146,11 @@ Application changes should be uploaded transactionally and verified from
 stalls frame timing. Test both native density and any changed fixed/automatic
 density path on hardware. VM/desktop tests cannot prove DRM page flips, Vivante
 shader behavior, HDMI mode selection, SDIO Wi-Fi or the DG1 device tree.
+
+The development-only active-root updater has a narrow, tested whitelist for
+init/configuration hardening. It must preserve the client Wi-Fi and SSH services,
+create a persistent backup, verify live health, and never be treated as an A/B
+firmware installer. Release images are still written to both root slots from SD.
 
 ## Device-side audit baseline
 

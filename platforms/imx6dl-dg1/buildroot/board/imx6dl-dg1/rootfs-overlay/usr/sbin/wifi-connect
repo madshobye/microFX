@@ -7,6 +7,13 @@ product_config=/etc/microfx-product.conf
 CANVAS_DEBUG=${CANVAS_DEBUG:-0}
 CANVAS_PERSIST_LOGS=${CANVAS_PERSIST_LOGS:-0}
 MICROFX_SETUP_SSID=${MICROFX_SETUP_SSID:-graphics-setup}
+interface=${MICROFX_WIFI_INTERFACE:-wlan1}
+provision_interface=${MICROFX_PROVISION_INTERFACE:-wlan0}
+[ "$interface" != "$provision_interface" ] || {
+  echo "Client and provisioning radios must use distinct interfaces" >&2
+  exit 1
+}
+. /usr/lib/microfx/network-status.sh
 
 config=/data/config/wpa_supplicant.conf
 [ -r "$config" ] || config=/etc/wpa_supplicant.conf
@@ -27,15 +34,15 @@ trap 'rmdir "$lock" 2>/dev/null || true' EXIT
 trap 'exit 0' INT TERM
 
 tries=0
-while [ ! -d /sys/class/net/wlan1 ] && [ "$tries" -lt 20 ]; do
+while [ ! -d "/sys/class/net/$interface" ] && [ "$tries" -lt 20 ]; do
   tries=$((tries + 1)); sleep 1
 done
-[ -d /sys/class/net/wlan1 ] || { echo "Client radio wlan1 unavailable"; exit 1; }
-[ -r "$config" ] || { echo "No saved Wi-Fi networks; use $MICROFX_SETUP_SSID"; exit 0; }
+[ -d "/sys/class/net/$interface" ] || { microfx_write_network_status radio-unavailable "client radio $interface unavailable" "$interface"; echo "Client radio $interface unavailable"; exit 1; }
+[ -r "$config" ] || { microfx_write_network_status unconfigured "use setup network $MICROFX_SETUP_SSID"; echo "No saved Wi-Fi networks; use $MICROFX_SETUP_SSID"; exit 0; }
 
-interface=wlan1
 iw reg set DK || true
 ip link set "$interface" up
+iw dev "$interface" set power_save off 2>/dev/null || true
 wpa_pid="/run/wpa_supplicant-${interface}.pid"
 dhcp_pid="/run/udhcpc-${interface}.pid"
 for pidfile in "$dhcp_pid" "$wpa_pid"; do
@@ -58,7 +65,14 @@ while [ "$tries" -lt 30 ]; do
 done
 wpa_cli -i "$interface" status || true
 if [ "$state" = "COMPLETED" ]; then
-  udhcpc -b -p "$dhcp_pid" -i "$interface" -x hostname:microfx
+  address=$(ip -4 address show dev "$interface" 2>/dev/null | sed -n 's/.*inet \([^ ]*\).*/\1/p' | head -n 1)
+  if [ -z "$address" ]; then
+    udhcpc -b -p "$dhcp_pid" -i "$interface" -x hostname:microfx
+  else
+    echo "Keeping existing address $address"
+  fi
+  microfx_write_network_status connected "client associated" "$interface"
 else
+  microfx_write_network_status disconnected "no configured network associated" "$interface"
   echo "No configured network associated; setup AP remains available"
 fi

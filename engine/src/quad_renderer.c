@@ -74,6 +74,7 @@ static void SetVertex(QuadVertex *vertex, const MicroFxQuadElement *element,
     vertex->position[0] = element->x + c*localX - s*localY;
     vertex->position[1] = element->y + s*localX + c*localY;
     Color(vertex->color, color);
+    vertex->color[3] *= element->opacity;
 }
 
 static void Rebuild(MicroFxQuadRenderer *renderer, MicroFxScene *scene)

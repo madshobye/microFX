@@ -20,9 +20,10 @@ extern "C" {
 #include <vector>
 
 namespace {
-constexpr const char* kProjectRoot = "/data/apps/current";
+constexpr const char* kProjectRoot = "/data/apps";
 constexpr const char* kPeerIdPath = "/data/config/peer-id";
 constexpr const char* kReloadSignal = "/run/microfx-project-reload";
+constexpr const char* kReloadStatus = "/run/microfx-project-status";
 constexpr const char* kPeerHost = "0.peerjs.com";
 constexpr int kPeerPort = 443;
 
@@ -141,9 +142,34 @@ void send_peer_json(cJSON* value, uint16_t sid) {
 }
 
 void on_data(char* message, size_t length, void*, uint16_t sid) {
-  std::fprintf(stderr, "NEGOTIATION %u DEVICE data-in sid=%u bytes=%zu\n",
-               g.negotiation, sid, length);
-  send_peer_json(microfx::handle_project_command(message, length, kProjectRoot, kReloadSignal), sid);
+  std::string request_type = "<invalid>";
+  std::string request_id = "<none>";
+  if (cJSON* request = cJSON_ParseWithLength(message, length)) {
+    if (cJSON* type = cJSON_GetObjectItemCaseSensitive(request, "type"); cJSON_IsString(type))
+      request_type = type->valuestring;
+    if (cJSON* id = cJSON_GetObjectItemCaseSensitive(request, "id"); cJSON_IsString(id))
+      request_id = id->valuestring;
+    cJSON_Delete(request);
+  }
+  std::fprintf(stderr,
+               "PROTOCOL %u DEVICE request sid=%u id=%s type=%s bytes=%zu\n",
+               g.negotiation, sid, request_id.c_str(), request_type.c_str(), length);
+  cJSON* response = microfx::handle_project_command(
+      message, length, kProjectRoot, kReloadSignal, "/tmp/canvas.log", kReloadStatus);
+  const char* response_type = "<missing>";
+  const char* response_id = "<none>";
+  bool ok = false;
+  if (response) {
+    if (cJSON* type = cJSON_GetObjectItemCaseSensitive(response, "type"); cJSON_IsString(type))
+      response_type = type->valuestring;
+    if (cJSON* id = cJSON_GetObjectItemCaseSensitive(response, "id"); cJSON_IsString(id))
+      response_id = id->valuestring;
+    ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "ok"));
+  }
+  std::fprintf(stderr,
+               "PROTOCOL %u DEVICE response sid=%u id=%s type=%s ok=%d\n",
+               g.negotiation, sid, response_id, response_type, ok ? 1 : 0);
+  send_peer_json(response, sid);
 }
 
 void on_open(void*) { std::fprintf(stderr, "peer data channel open\n"); }

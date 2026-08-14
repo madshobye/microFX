@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+name=${0##*/}
+printf '%s %s\n' "$name" "$*" >>"$MOCK_ACTIONS"
+
+start_process() {
+  pidfile=$1
+  /bin/sleep 60 &
+  printf '%s\n' "$!" >"$pidfile"
+}
+
+case "$name" in
+  hostapd)
+    pidfile=
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = -P ]; then pidfile=$2; shift 2; else shift; fi
+    done
+    count=$(cat "$MOCK_HOSTAPD_ATTEMPTS" 2>/dev/null || echo 0)
+    count=$((count + 1))
+    printf '%s\n' "$count" >"$MOCK_HOSTAPD_ATTEMPTS"
+    start_process "$pidfile"
+    ;;
+  hostapd_cli)
+    count=$(cat "$MOCK_HOSTAPD_ATTEMPTS" 2>/dev/null || echo 0)
+    if [ "$count" -ge 2 ]; then printf 'state=ENABLED\n'; else printf 'state=DISABLED\n'; fi
+    ;;
+  dnsmasq)
+    pidfile=
+    for argument in "$@"; do
+      case "$argument" in --pid-file=*) pidfile=${argument#--pid-file=} ;; esac
+    done
+    start_process "$pidfile"
+    ;;
+  httpd)
+    exec /bin/sleep 60
+    ;;
+  ip|iw)
+    ;;
+  sleep)
+    ;;
+esac

@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/dts-v1/;
+
+#include "imx6dl.dtsi"
+
+/ {
+	model = "microFX i.MX6DL DG1 boot prototype";
+	compatible = "microfx,imx6dl-dg1", "fsl,imx6dl";
+
+	aliases {
+		mmc0 = &usdhc3;
+		serial0 = &uart1;
+	};
+
+	chosen {
+		stdout-path = &uart1;
+	};
+
+	memory@10000000 {
+		device_type = "memory";
+		reg = <0x10000000 0x20000000>;
+	};
+};
+
+&iomuxc {
+	pinctrl_uart1: uart1grp {
+		fsl,pins = <
+			0x04c 0x360 0x000 0x3 0x0 0x1b0b1
+			0x050 0x364 0x8fc 0x3 0x1 0x1b0b1
+		>;
+	};
+
+	pinctrl_usdhc3: usdhc3grp {
+		fsl,pins = <
+			0x310 0x6f8 0x000 0x0 0x0 0x17059
+			0x30c 0x6f4 0x934 0x0 0x1 0x10059
+			0x314 0x6fc 0x000 0x0 0x0 0x17059
+			0x318 0x700 0x000 0x0 0x0 0x17059
+			0x31c 0x704 0x000 0x0 0x0 0x17059
+			0x320 0x708 0x000 0x0 0x0 0x17059
+		>;
+	};
+};
+
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_uart1>;
+	status = "okay";
+};
+
+&usdhc3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_usdhc3>;
+	bus-width = <4>;
+	no-1-8-v;
+	status = "okay";
+};

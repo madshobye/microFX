@@ -1,0 +1,34 @@
+===== identity =====
+hostname=microfx
+clock_sane=yes
+root_slot=2
+image_schema=1
+image_platform=imx6dl-dg1
+image_boot_model=existing-ab
+===== persistence =====
+data_device=/dev/mmcblk0p4
+/data/apps/projects=present
+/data/config=present
+/data/state=present
+===== renderer =====
+renderer=running
+===== wifi_client =====
+client_interface=wlan1
+wpa_state=COMPLETED
+===== setup_ap =====
+provision_interface=wlan0
+hostapd=running
+dnsmasq=running
+httpd=running
+state=ENABLED
+portal_http=ok
+===== services =====
+peer_bridge=running
+time_service=running
+time_sync=valid
+===== firmware_diagnostics =====
+board_data_file=present
+board_data_target=bdata.SD31.bin
+board_data_bytes=1792
+board_data_sha256=2bd79ecb33d7644702e250cb544c8a4dfcb73f4264b47b445ee94467b1d9d2f2
+board_data_fallback_warnings=0

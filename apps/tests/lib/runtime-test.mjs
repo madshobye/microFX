@@ -1,0 +1,234 @@
+import assert from "node:assert/strict";
+import vm from "node:vm";
+import { isAbsolute, join, resolve, sep } from "node:path";
+import { readFileSync } from "node:fs";
+
+export const defaultCapacities = Object.freeze({
+  sdf: 256,
+  quad: 256,
+  mesh: 16,
+  text: 32,
+  image: 16
+});
+
+function finite(label, values) {
+  values.forEach((value, index) => {
+    assert.equal(typeof value, "number", `${label}[${index}] must be numeric`);
+    assert.ok(Number.isFinite(value), `${label}[${index}] must be finite`);
+  });
+}
+
+function confinedAsset(root, path) {
+  assert.equal(typeof path, "string", "asset path must be a string");
+  assert.ok(path.length > 0, "asset path must not be empty");
+  assert.ok(!isAbsolute(path), `asset path must be relative: ${path}`);
+  const assetRoot = resolve(root, "assets");
+  const target = resolve(assetRoot, path);
+  assert.ok(target === assetRoot || target.startsWith(`${assetRoot}${sep}`),
+            `asset path leaves project: ${path}`);
+  return target;
+}
+
+function instrumentedNativeFx(root, capacities) {
+  let nextHandle = 1;
+  let phase = "construction";
+  let frameCalls = 0;
+  let maximumFrameCalls = 0;
+  let totalUpdateCalls = 0;
+  const handles = new Map();
+  const counts = { sdf: 0, quad: 0, mesh: 0, text: 0, image: 0 };
+  const mutations = {
+    move: 0, transform: 0, text: 0, font: 0, color: 0,
+    effect: 0, visible: 0, opacity: 0
+  };
+
+  function knownHandle(handle, label) {
+    assert.equal(typeof handle, "number", `${label} handle must be numeric`);
+    assert.ok(handles.has(handle), `${label} received unknown handle ${handle}`);
+  }
+
+  function mutation(label, handle, values) {
+    knownHandle(handle, label);
+    if (values) finite(label, values);
+    mutations[label] += 1;
+    if (phase === "update") frameCalls += 1;
+    return true;
+  }
+
+  function add(kind) {
+    return (...args) => {
+      assert.equal(phase, "construction",
+                   `${kind} GPU objects must be retained, not allocated by update()`);
+      counts[kind] += 1;
+      assert.ok(counts[kind] <= capacities[kind], `${kind} capacity exceeded`);
+      const handle = nextHandle++;
+      handles.set(handle, { kind, args });
+      return handle;
+    };
+  }
+
+  const fx = {
+    _rect: add("quad"),
+    _gradientRect: add("quad"),
+    _background: add("quad"),
+    _circle: add("quad"),
+    _sdfCircle: add("sdf"),
+    _sdfRoundedRect: add("sdf"),
+    _text: add("text"),
+    _image: add("image"),
+    _cube: add("mesh"),
+    _sphere: add("mesh"),
+    _wireCube: add("mesh"),
+    _grid: add("mesh"),
+    _model: add("mesh"),
+    _move(handle, x, y, rotation) {
+      return mutation("move", handle, [x, y, rotation]);
+    },
+    _transform(handle, x, y, z, rx, ry, rz, scale) {
+      return mutation("transform", handle, [x, y, z, rx, ry, rz, scale]);
+    },
+    _setText(handle, value) {
+      knownHandle(handle, "text");
+      assert.ok(typeof value === "string" || typeof value === "number",
+                "text value must be a string or number");
+      mutations.text += 1;
+      if (phase === "update") frameCalls += 1;
+      return true;
+    },
+    _font(handle, path) {
+      knownHandle(handle, "font");
+      assert.equal(typeof path, "string", "font path must be a string");
+      mutations.font += 1;
+      if (phase === "update") frameCalls += 1;
+      return true;
+    },
+    _color(handle, value) {
+      return mutation("color", handle, [value]);
+    },
+    _effect(handle, kind, amount, scale) {
+      return mutation("effect", handle, [kind, amount, scale]);
+    },
+    _visible(handle, value) {
+      knownHandle(handle, "visible");
+      assert.equal(typeof value, "boolean", "visibility must be boolean");
+      mutations.visible += 1;
+      if (phase === "update") frameCalls += 1;
+      return true;
+    },
+    _opacity(handle, value) {
+      assert.ok(value >= 0 && value <= 1, "opacity must be between zero and one");
+      return mutation("opacity", handle, [value]);
+    },
+    configure(settings) {
+      assert.equal(phase, "construction", "fx.configure() belongs at application construction");
+      assert.equal(typeof settings, "object");
+      assert.ok((settings.targetFps ?? 30) > 0, "target FPS must be positive");
+    },
+    debugBar(value) {
+      assert.equal(typeof value, "boolean", "debugBar() expects a boolean");
+    },
+    camera(...values) {
+      finite("camera", values);
+    },
+    data(path, fallback) {
+      try {
+        return JSON.parse(readFileSync(confinedAsset(root, path), "utf8"));
+      } catch (error) {
+        if (arguments.length > 1) return fallback;
+        throw error;
+      }
+    },
+    product: Object.freeze({
+      name: "microFX",
+      slug: "microfx",
+      defaultPeerId: "microfx-demo",
+      defaultSetupSsid: "microfx-setup",
+      defaultSetupPassword: "microfxsetup"
+    }),
+    effects: Object.freeze({ none: 0, gradient: 1, noise: 2, bands: 3 }),
+    math: Object.freeze({
+      noise2(x, y) {
+        finite("noise2", [x, y]);
+        const value = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+        return value - Math.floor(value);
+      }
+    })
+  };
+
+  return {
+    fx,
+    beginFrame() {
+      phase = "update";
+      frameCalls = 0;
+    },
+    endFrame() {
+      maximumFrameCalls = Math.max(maximumFrameCalls, frameCalls);
+      totalUpdateCalls += frameCalls;
+    },
+    report(frames) {
+      return Object.freeze({
+        frames,
+        counts: Object.freeze({ ...counts }),
+        handles: handles.size,
+        mutations: Object.freeze({ ...mutations }),
+        maximumFrameCalls,
+        averageFrameCalls: frames ? totalUpdateCalls / frames : 0
+      });
+    }
+  };
+}
+
+export function createAppRuntimeTest({
+  root,
+  source,
+  filename = "main.js",
+  runtimeSource,
+  capacities = defaultCapacities,
+  timeout = 1000
+}) {
+  assert.equal(typeof source, "string", "application source is required");
+  assert.equal(typeof runtimeSource, "string", "retained runtime source is required");
+  const native = instrumentedNativeFx(root, capacities);
+  const context = vm.createContext({ fx: native.fx, console, Math, Date });
+  vm.runInContext(runtimeSource, context, { filename: "retained.js", timeout });
+  vm.runInContext(
+    `${source}\n;globalThis.__microfxUpdate = typeof update === "function" ? update : null;`,
+    context,
+    { filename, timeout }
+  );
+  assert.equal(typeof context.__microfxUpdate, "function", `${filename}: update() missing`);
+
+  let frames = 0;
+  return Object.freeze({
+    runFrame(time, delta) {
+      finite("frame", [time, delta]);
+      assert.ok(delta >= 0, "frame delta must not be negative");
+      context.__microfxTime = time;
+      context.__microfxDelta = delta;
+      native.beginFrame();
+      vm.runInContext("__microfxUpdate(__microfxTime, __microfxDelta)", context,
+                      { filename: `${filename}:update`, timeout });
+      native.endFrame();
+      frames += 1;
+    },
+    runFrames(count, fps = 30) {
+      assert.ok(Number.isInteger(count) && count >= 0, "frame count must be non-negative");
+      assert.ok(Number.isFinite(fps) && fps > 0, "test FPS must be positive");
+      for (let frame = 0; frame < count; frame += 1) {
+        this.runFrame(frame / fps, 1 / fps);
+      }
+      return this.report();
+    },
+    report() { return native.report(frames); }
+  });
+}
+
+export function loadAppRuntimeTest({ root, script, runtimeSource, ...options }) {
+  return createAppRuntimeTest({
+    root,
+    source: readFileSync(script, "utf8"),
+    filename: script,
+    runtimeSource,
+    ...options
+  });
+}

@@ -15,6 +15,11 @@ struct MicroFxScript {
     char projectRoot[MICROFX_MAX_ASSET_PATH];
 };
 
+static void DumpException(JSContext *ctx);
+
+// Generated from engine/runtime/retained.js by engine/tools/embed-runtime.py.
+#include "runtime_js.inc"
+
 static uint32_t ColorArg(JSContext *ctx, JSValueConst value)
 {
     uint32_t color = 0xffffffffu;
@@ -160,6 +165,26 @@ static JSValue AddText(JSContext *ctx,JSValueConst thisValue,int argc,JSValueCon
     JS_FreeCString(ctx,value);return Handle(ctx,handle);
 }
 
+static JSValue AddImage(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;
+    MicroFxScript *script=JS_GetContextOpaque(ctx);
+    double x=0,y=0,width=0,height=0;
+    if(argc<6||JS_ToFloat64(ctx,&x,argv[1])||JS_ToFloat64(ctx,&y,argv[2])||
+       JS_ToFloat64(ctx,&width,argv[3])||JS_ToFloat64(ctx,&height,argv[4]))
+        return JS_ThrowTypeError(ctx,"image(asset,x,y,width,height,tint)");
+    const char *asset=JS_ToCString(ctx,argv[0]);
+    if(!asset)return JS_EXCEPTION;
+    char path[MICROFX_MAX_ASSET_PATH];
+    char error[128];
+    bool resolved=MicroFxResolveAsset(script->projectRoot,asset,path,sizeof(path),
+                                     error,sizeof(error));
+    JS_FreeCString(ctx,asset);
+    if(!resolved)return JS_ThrowReferenceError(ctx,"image asset rejected: %s",error);
+    return Handle(ctx,MicroFxSceneAddImage(script->scene,path,x,y,width,height,
+                                          ColorArg(ctx,argv[5])));
+}
+
 static JSValue SetText(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
 {
     (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
@@ -169,11 +194,51 @@ static JSValue SetText(JSContext *ctx,JSValueConst thisValue,int argc,JSValueCon
     return JS_NewBool(ctx,ok);
 }
 
+static JSValue SetFont(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc<2||JS_ToInt32(ctx,&handle,argv[0]))return JS_ThrowTypeError(ctx,"font(handle,path)");
+    const char *asset=JS_ToCString(ctx,argv[1]);if(!asset)return JS_EXCEPTION;
+    if(!asset[0]){
+        bool ok=MicroFxSceneSetTextFont(script->scene,handle,"");
+        JS_FreeCString(ctx,asset);
+        if(!ok)return JS_ThrowTypeError(ctx,"font() is only available on text elements");
+        return JS_UNDEFINED;
+    }
+    char path[MICROFX_MAX_ASSET_PATH];char error[128];
+    bool resolved=MicroFxResolveAsset(script->projectRoot,asset,path,sizeof(path),
+                                     error,sizeof(error));
+    JS_FreeCString(ctx,asset);
+    if(!resolved)return JS_ThrowReferenceError(ctx,"font asset rejected: %s",error);
+    if(!MicroFxSceneSetTextFont(script->scene,handle,path))
+        return JS_ThrowTypeError(ctx,"font() is only available on text elements");
+    return JS_UNDEFINED;
+}
+
 static JSValue SetColor(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
 {
     (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
     if(argc<2||JS_ToInt32(ctx,&handle,argv[0]))return JS_ThrowTypeError(ctx,"color(handle,rgba)");
     return JS_NewBool(ctx,MicroFxSceneSetColor(script->scene,handle,ColorArg(ctx,argv[1])));
+}
+
+static JSValue SetVisible(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc<2||JS_ToInt32(ctx,&handle,argv[0]))return JS_ThrowTypeError(ctx,"visible(handle,value)");
+    return JS_NewBool(ctx,MicroFxSceneSetVisible(script->scene,handle,JS_ToBool(ctx,argv[1])>0));
+}
+
+static JSValue SetOpacity(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    double opacity=1.0;
+    if(argc<2||JS_ToInt32(ctx,&handle,argv[0])||JS_ToFloat64(ctx,&opacity,argv[1]))
+        return JS_ThrowTypeError(ctx,"opacity(handle,value)");
+    if(opacity<0.0||opacity>1.0)return JS_ThrowRangeError(ctx,"opacity must be 0..1");
+    if(!MicroFxSceneSetOpacity(script->scene,handle,(float)opacity))
+        return JS_ThrowTypeError(ctx,"opacity is available on 2D elements");
+    return JS_UNDEFINED;
 }
 
 static JSValue SetEffect(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
@@ -202,6 +267,16 @@ static bool NumberProperty(JSContext *ctx,JSValueConst object,const char *name,d
     bool ok=JS_ToFloat64(ctx,value,property)==0;JS_FreeValue(ctx,property);return ok;
 }
 
+static int StringProperty(JSContext *ctx,JSValueConst object,const char *name,
+                          const char **value,JSValue *property)
+{
+    *property=JS_GetPropertyStr(ctx,object,name);
+    if(JS_IsUndefined(*property))return 0;
+    if(!JS_IsString(*property))return -1;
+    *value=JS_ToCString(ctx,*property);
+    return *value?1:-1;
+}
+
 static JSValue Configure(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
 {
     (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
@@ -209,13 +284,58 @@ static JSValue Configure(JSContext *ctx,JSValueConst thisValue,int argc,JSValueC
     MicroFxRuntimeSettings settings=script->scene->runtime;
     double outputWidth=settings.outputWidth,outputHeight=settings.outputHeight;
     double targetFps=settings.targetFps,minimum=settings.minimumPixelDensity;
+    double profileInterval=settings.profileIntervalFrames;
+    double densitySampleFrames=settings.densitySampleFrames;
+    double densityStep=settings.densityStep;
+    double densityDownThreshold=settings.densityDownThreshold;
+    double densityUpThreshold=settings.densityUpThreshold;
+    double densityUpSamples=settings.densityUpSamples;
     double duration=settings.durationSeconds;
+    double depthBits=settings.depthBits;
     if(!NumberProperty(ctx,argv[0],"outputWidth",&outputWidth)||
        !NumberProperty(ctx,argv[0],"outputHeight",&outputHeight)||
        !NumberProperty(ctx,argv[0],"targetFps",&targetFps)||
        !NumberProperty(ctx,argv[0],"minimumPixelDensity",&minimum)||
-       !NumberProperty(ctx,argv[0],"durationSeconds",&duration))
+       !NumberProperty(ctx,argv[0],"durationSeconds",&duration)||
+       !NumberProperty(ctx,argv[0],"profileIntervalFrames",&profileInterval)||
+       !NumberProperty(ctx,argv[0],"densitySampleFrames",&densitySampleFrames)||
+       !NumberProperty(ctx,argv[0],"densityStep",&densityStep)||
+       !NumberProperty(ctx,argv[0],"densityDownThreshold",&densityDownThreshold)||
+       !NumberProperty(ctx,argv[0],"densityUpThreshold",&densityUpThreshold)||
+       !NumberProperty(ctx,argv[0],"densityUpSamples",&densityUpSamples))
         return JS_ThrowTypeError(ctx,"configure numeric setting is invalid");
+    const char *value=NULL;JSValue property;
+    int present=StringProperty(ctx,argv[0],"quality",&value,&property);
+    if(present<0){JS_FreeValue(ctx,property);return JS_ThrowTypeError(ctx,"quality must be performance, balanced, or quality");}
+    if(present){
+        if(strcmp(value,"performance")==0){settings.colorFormat=MICROFX_COLOR_RGB565;settings.depthBits=16;settings.dithering=true;settings.antialiasing=MICROFX_ANTIALIAS_NONE;}
+        else if(strcmp(value,"balanced")==0){settings.colorFormat=MICROFX_COLOR_RGB565;settings.depthBits=24;settings.dithering=true;settings.antialiasing=MICROFX_ANTIALIAS_NONE;}
+        else if(strcmp(value,"quality")==0){settings.colorFormat=MICROFX_COLOR_RGBA8888;settings.depthBits=24;settings.dithering=true;settings.antialiasing=MICROFX_ANTIALIAS_MSAA4;}
+        else {JS_FreeCString(ctx,value);JS_FreeValue(ctx,property);return JS_ThrowRangeError(ctx,"quality must be performance, balanced, or quality");}
+        JS_FreeCString(ctx,value);
+    }
+    JS_FreeValue(ctx,property);
+    depthBits=settings.depthBits;
+    if(!NumberProperty(ctx,argv[0],"depthBits",&depthBits))
+        return JS_ThrowTypeError(ctx,"depthBits must be 16 or 24");
+    present=StringProperty(ctx,argv[0],"colorFormat",&value,&property);
+    if(present<0){JS_FreeValue(ctx,property);return JS_ThrowTypeError(ctx,"colorFormat must be rgb565 or rgba8888");}
+    if(present){
+        if(strcmp(value,"rgb565")==0)settings.colorFormat=MICROFX_COLOR_RGB565;
+        else if(strcmp(value,"rgba8888")==0)settings.colorFormat=MICROFX_COLOR_RGBA8888;
+        else {JS_FreeCString(ctx,value);JS_FreeValue(ctx,property);return JS_ThrowRangeError(ctx,"colorFormat must be rgb565 or rgba8888");}
+        JS_FreeCString(ctx,value);
+    }
+    JS_FreeValue(ctx,property);
+    present=StringProperty(ctx,argv[0],"antialiasing",&value,&property);
+    if(present<0){JS_FreeValue(ctx,property);return JS_ThrowTypeError(ctx,"antialiasing must be none or msaa4");}
+    if(present){
+        if(strcmp(value,"none")==0)settings.antialiasing=MICROFX_ANTIALIAS_NONE;
+        else if(strcmp(value,"msaa4")==0)settings.antialiasing=MICROFX_ANTIALIAS_MSAA4;
+        else {JS_FreeCString(ctx,value);JS_FreeValue(ctx,property);return JS_ThrowRangeError(ctx,"antialiasing must be none or msaa4");}
+        JS_FreeCString(ctx,value);
+    }
+    JS_FreeValue(ctx,property);
     JSValue density=JS_GetPropertyStr(ctx,argv[0],"pixelDensity");
     if(!JS_IsUndefined(density)){
         if(JS_IsString(density)){
@@ -231,12 +351,32 @@ static JSValue Configure(JSContext *ctx,JSValueConst thisValue,int argc,JSValueC
     JSValue debug=JS_GetPropertyStr(ctx,argv[0],"debugBar");
     if(!JS_IsUndefined(debug))settings.debugBar=JS_ToBool(ctx,debug)>0;
     JS_FreeValue(ctx,debug);
+    JSValue profiling=JS_GetPropertyStr(ctx,argv[0],"profiling");
+    if(!JS_IsUndefined(profiling))settings.profiling=JS_ToBool(ctx,profiling)>0;
+    JS_FreeValue(ctx,profiling);
+    JSValue dithering=JS_GetPropertyStr(ctx,argv[0],"dithering");
+    if(!JS_IsUndefined(dithering))settings.dithering=JS_ToBool(ctx,dithering)>0;
+    JS_FreeValue(ctx,dithering);
     settings.outputWidth=(int)outputWidth;settings.outputHeight=(int)outputHeight;
     settings.targetFps=(int)targetFps;settings.minimumPixelDensity=(float)minimum;
     settings.durationSeconds=(float)duration;
+    settings.profileIntervalFrames=(int)profileInterval;
+    settings.densitySampleFrames=(int)densitySampleFrames;
+    settings.densityStep=(float)densityStep;
+    settings.densityDownThreshold=(float)densityDownThreshold;
+    settings.densityUpThreshold=(float)densityUpThreshold;
+    settings.densityUpSamples=(int)densityUpSamples;
+    settings.depthBits=(int)depthBits;
     if(settings.targetFps<1||settings.minimumPixelDensity<0.25f||settings.minimumPixelDensity>1.0f||
        settings.pixelDensity<settings.minimumPixelDensity||settings.pixelDensity>1.0f||
-       settings.durationSeconds<0.0f||
+       settings.durationSeconds<0.0f||settings.profileIntervalFrames<30||
+       settings.densitySampleFrames<30||
+       settings.densityStep<0.01f||settings.densityStep>0.25f||
+       settings.densityDownThreshold<1.0f||settings.densityDownThreshold>2.0f||
+       settings.densityUpThreshold<0.25f||
+       settings.densityUpThreshold>=settings.densityDownThreshold||
+       settings.densityUpSamples<1||settings.densityUpSamples>100||
+       (settings.depthBits!=16&&settings.depthBits!=24)||
        settings.outputWidth<0||settings.outputHeight<0||
        ((settings.outputWidth==0)!=(settings.outputHeight==0)))
         return JS_ThrowRangeError(ctx,"invalid output, density, or target FPS settings");
@@ -262,6 +402,42 @@ static JSValue Environment(JSContext *ctx,JSValueConst thisValue,int argc,JSValu
         result=JS_NewString(ctx,"");
     }
     JS_FreeCString(ctx,name);
+    return result;
+}
+
+static JSValue ProjectData(JSContext *ctx,JSValueConst thisValue,int argc,
+                           JSValueConst *argv)
+{
+    (void)thisValue;
+    MicroFxScript *script=JS_GetContextOpaque(ctx);
+    if(argc<1)return JS_ThrowTypeError(ctx,"data(asset, fallback=undefined)");
+    const char *asset=JS_ToCString(ctx,argv[0]);
+    if(!asset)return JS_EXCEPTION;
+    char path[MICROFX_MAX_ASSET_PATH],error[128];
+    bool resolved=MicroFxResolveDataAsset(script->projectRoot,asset,path,sizeof(path),
+                                          error,sizeof(error));
+    JS_FreeCString(ctx,asset);
+    if(!resolved){
+        if(argc>1)return JS_DupValue(ctx,argv[1]);
+        return JS_ThrowReferenceError(ctx,"data asset rejected: %s",error);
+    }
+    FILE *file=fopen(path,"rb");
+    if(!file){
+        if(argc>1)return JS_DupValue(ctx,argv[1]);
+        return JS_ThrowReferenceError(ctx,"data asset cannot be opened");
+    }
+    enum { MAX_DATA_BYTES=64*1024 };
+    char *source=malloc(MAX_DATA_BYTES+1);
+    size_t size=source?fread(source,1,MAX_DATA_BYTES+1,file):0;
+    bool failed=ferror(file)!=0;
+    fclose(file);
+    if(!source||failed||size>MAX_DATA_BYTES){
+        free(source);
+        return JS_ThrowRangeError(ctx,"data asset exceeds 64 KiB or cannot be read");
+    }
+    source[size]='\0';
+    JSValue result=JS_ParseJSON(ctx,source,size,path);
+    free(source);
     return result;
 }
 
@@ -333,6 +509,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     fclose(file); source[size]='\0';
     MicroFxScript *script=calloc(1,sizeof(*script));
     if(!script){free(source);return NULL;}
+    script->update=JS_UNDEFINED;
     char rootError[128];
     if(!MicroFxProjectRoot(path,script->projectRoot,sizeof(script->projectRoot),
                           rootError,sizeof(rootError))){
@@ -345,27 +522,32 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetContextOpaque(script->context,script);
     JSValue global=JS_GetGlobalObject(script->context);
     JSValue fx=JS_NewObject(script->context);
-    JS_SetPropertyStr(script->context,fx,"circle",JS_NewCFunction(script->context,AddFastCircle,"circle",4));
-    JS_SetPropertyStr(script->context,fx,"sdfCircle",JS_NewCFunction(script->context,AddSdfCircle,"sdfCircle",4));
-    JS_SetPropertyStr(script->context,fx,"sdfRoundedRect",JS_NewCFunction(script->context,AddRoundedRect,"sdfRoundedRect",6));
-    JS_SetPropertyStr(script->context,fx,"rect",JS_NewCFunction(script->context,AddRect,"rect",5));
-    JS_SetPropertyStr(script->context,fx,"gradientRect",JS_NewCFunction(script->context,AddGradientRect,"gradientRect",6));
-    JS_SetPropertyStr(script->context,fx,"background",JS_NewCFunction(script->context,AddBackground,"background",2));
-    JS_SetPropertyStr(script->context,fx,"move",JS_NewCFunction(script->context,Move,"move",4));
-    JS_SetPropertyStr(script->context,fx,"cube",JS_NewCFunction(script->context,AddCube,"cube",5));
-    JS_SetPropertyStr(script->context,fx,"sphere",JS_NewCFunction(script->context,AddSphere,"sphere",5));
-    JS_SetPropertyStr(script->context,fx,"wireCube",JS_NewCFunction(script->context,AddWireCube,"wireCube",5));
-    JS_SetPropertyStr(script->context,fx,"grid",JS_NewCFunction(script->context,AddGrid,"grid",5));
-    JS_SetPropertyStr(script->context,fx,"model",JS_NewCFunction(script->context,AddModel,"model",6));
-    JS_SetPropertyStr(script->context,fx,"transform",JS_NewCFunction(script->context,Transform,"transform",8));
-    JS_SetPropertyStr(script->context,fx,"text",JS_NewCFunction(script->context,AddText,"text",5));
-    JS_SetPropertyStr(script->context,fx,"setText",JS_NewCFunction(script->context,SetText,"setText",2));
-    JS_SetPropertyStr(script->context,fx,"color",JS_NewCFunction(script->context,SetColor,"color",2));
-    JS_SetPropertyStr(script->context,fx,"effect",JS_NewCFunction(script->context,SetEffect,"effect",4));
+    JS_SetPropertyStr(script->context,fx,"_circle",JS_NewCFunction(script->context,AddFastCircle,"_circle",4));
+    JS_SetPropertyStr(script->context,fx,"_sdfCircle",JS_NewCFunction(script->context,AddSdfCircle,"_sdfCircle",4));
+    JS_SetPropertyStr(script->context,fx,"_sdfRoundedRect",JS_NewCFunction(script->context,AddRoundedRect,"_sdfRoundedRect",6));
+    JS_SetPropertyStr(script->context,fx,"_rect",JS_NewCFunction(script->context,AddRect,"_rect",5));
+    JS_SetPropertyStr(script->context,fx,"_gradientRect",JS_NewCFunction(script->context,AddGradientRect,"_gradientRect",6));
+    JS_SetPropertyStr(script->context,fx,"_background",JS_NewCFunction(script->context,AddBackground,"_background",2));
+    JS_SetPropertyStr(script->context,fx,"_move",JS_NewCFunction(script->context,Move,"_move",4));
+    JS_SetPropertyStr(script->context,fx,"_cube",JS_NewCFunction(script->context,AddCube,"_cube",5));
+    JS_SetPropertyStr(script->context,fx,"_sphere",JS_NewCFunction(script->context,AddSphere,"_sphere",5));
+    JS_SetPropertyStr(script->context,fx,"_wireCube",JS_NewCFunction(script->context,AddWireCube,"_wireCube",5));
+    JS_SetPropertyStr(script->context,fx,"_grid",JS_NewCFunction(script->context,AddGrid,"_grid",5));
+    JS_SetPropertyStr(script->context,fx,"_model",JS_NewCFunction(script->context,AddModel,"_model",6));
+    JS_SetPropertyStr(script->context,fx,"_transform",JS_NewCFunction(script->context,Transform,"_transform",8));
+    JS_SetPropertyStr(script->context,fx,"_text",JS_NewCFunction(script->context,AddText,"_text",5));
+    JS_SetPropertyStr(script->context,fx,"_image",JS_NewCFunction(script->context,AddImage,"_image",6));
+    JS_SetPropertyStr(script->context,fx,"_setText",JS_NewCFunction(script->context,SetText,"_setText",2));
+    JS_SetPropertyStr(script->context,fx,"_font",JS_NewCFunction(script->context,SetFont,"_font",2));
+    JS_SetPropertyStr(script->context,fx,"_color",JS_NewCFunction(script->context,SetColor,"_color",2));
+    JS_SetPropertyStr(script->context,fx,"_visible",JS_NewCFunction(script->context,SetVisible,"_visible",2));
+    JS_SetPropertyStr(script->context,fx,"_opacity",JS_NewCFunction(script->context,SetOpacity,"_opacity",2));
+    JS_SetPropertyStr(script->context,fx,"_effect",JS_NewCFunction(script->context,SetEffect,"_effect",4));
     JS_SetPropertyStr(script->context,fx,"camera",JS_NewCFunction(script->context,SetCamera,"camera",7));
     JS_SetPropertyStr(script->context,fx,"configure",JS_NewCFunction(script->context,Configure,"configure",1));
     JS_SetPropertyStr(script->context,fx,"debugBar",JS_NewCFunction(script->context,DebugBar,"debugBar",1));
     JS_SetPropertyStr(script->context,fx,"env",JS_NewCFunction(script->context,Environment,"env",2));
+    JS_SetPropertyStr(script->context,fx,"data",JS_NewCFunction(script->context,ProjectData,"data",2));
     JSValue product=JS_NewObject(script->context);
     JS_SetPropertyStr(script->context,product,"name",JS_NewString(script->context,MICROFX_PRODUCT_NAME));
     JS_SetPropertyStr(script->context,product,"slug",JS_NewString(script->context,MICROFX_PRODUCT_SLUG));
@@ -386,6 +568,13 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"effects",effects);
     JS_SetPropertyStr(script->context,global,"fx",fx);
     JS_FreeValue(script->context,global);
+    JSValue runtimeResult=JS_Eval(script->context,MICROFX_RUNTIME_JS,strlen(MICROFX_RUNTIME_JS),
+                                  "microfx-runtime.js",JS_EVAL_TYPE_GLOBAL);
+    if(JS_IsException(runtimeResult)){
+        DumpException(script->context);JS_FreeValue(script->context,runtimeResult);
+        free(source);MicroFxScriptDestroy(script);return NULL;
+    }
+    JS_FreeValue(script->context,runtimeResult);
     JSValue result=JS_Eval(script->context,source,(size_t)size,path,JS_EVAL_TYPE_GLOBAL);
     free(source);
     if (JS_IsException(result)) { DumpException(script->context); JS_FreeValue(script->context,result); MicroFxScriptDestroy(script); return NULL; }
@@ -394,8 +583,9 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     script->update=JS_GetPropertyStr(script->context,global,"update");
     JS_FreeValue(script->context,global);
     if (!JS_IsFunction(script->context,script->update)) { fprintf(stderr,"MICROFX_JS update(time,delta) missing\n"); MicroFxScriptDestroy(script); return NULL; }
-    printf("MICROFX_JS loaded=%s sdf=%d quads=%d mesh=%d text=%d\n", path,
-           scene->sdfCount, scene->quadCount, scene->meshCount, scene->textCount);
+    printf("MICROFX_JS loaded=%s sdf=%d quads=%d mesh=%d text=%d image=%d\n", path,
+           scene->sdfCount, scene->quadCount, scene->meshCount, scene->textCount,
+           scene->imageCount);
     return script;
 }
 

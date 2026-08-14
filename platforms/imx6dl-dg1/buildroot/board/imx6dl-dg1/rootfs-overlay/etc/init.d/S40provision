@@ -1,77 +1,241 @@
 #!/bin/sh
 
-product_config=/etc/microfx-product.conf
+runtime_config=${MICROFX_RUNTIME_CONFIG:-/etc/microfx.conf}
+provisioning_override=${MICROFX_PROVISIONING-}
+[ -r "$runtime_config" ] && . "$runtime_config"
+[ -z "$provisioning_override" ] || MICROFX_PROVISIONING=$provisioning_override
+provisioning_enabled=${MICROFX_PROVISIONING:-0}
+
+run_root=${MICROFX_RUN_ROOT:-/run}
+sys_class_net=${MICROFX_SYS_CLASS_NET:-/sys/class/net}
+product_config=${MICROFX_PRODUCT_CONFIG:-/etc/microfx-product.conf}
 [ -r "$product_config" ] && . "$product_config"
+provision_interface=${MICROFX_PROVISION_INTERFACE:-wlan0}
+client_interface=${MICROFX_WIFI_INTERFACE:-wlan1}
+[ "$provision_interface" != "$client_interface" ] || {
+  echo "Provisioning and client radios must use distinct interfaces" >&2
+  exit 1
+}
+hostapd_template=${MICROFX_HOSTAPD_TEMPLATE:-/etc/hostapd-microfx.conf}
+hostapd_runtime=${MICROFX_HOSTAPD_RUNTIME:-$run_root/hostapd-microfx.conf}
+hostapd_control=${MICROFX_HOSTAPD_CONTROL:-$run_root/hostapd}
+dnsmasq_template=${MICROFX_DNSMASQ_CONFIG:-/etc/dnsmasq-microfx.conf}
+dnsmasq_runtime=${MICROFX_DNSMASQ_RUNTIME:-$run_root/dnsmasq-microfx.conf}
+www_source=${MICROFX_WWW_SOURCE:-/www}
+studio_source=${MICROFX_STUDIO_SOURCE:-$www_source/studio}
+www_runtime=${MICROFX_WWW_RUNTIME:-$run_root/microfx-www}
+wifi_service=${MICROFX_WIFI_SERVICE:-/etc/init.d/S41wifi}
+provision_watchdog=${MICROFX_PROVISION_WATCHDOG:-/usr/sbin/provision-watchdog}
+recovery_active=${MICROFX_RECOVERY_ACTIVE_FLAG:-$run_root/microfx-recovery-active}
+mkdir -p "$run_root"
 MICROFX_PRODUCT_NAME=${MICROFX_PRODUCT_NAME:-Graphics}
 MICROFX_SETUP_SSID=${MICROFX_SETUP_SSID:-graphics-setup}
 MICROFX_SETUP_PASSWORD=${MICROFX_SETUP_PASSWORD:-graphicssetup}
+. "${MICROFX_PROVISION_HEALTH_LIBRARY:-/usr/lib/microfx/provision-health.sh}"
+. "${MICROFX_PROVISION_CONTENT_LIBRARY:-/usr/lib/microfx/provision-content.sh}"
+
+pid_alive() {
+  [ -r "$1" ] || return 1
+  pid=$(cat "$1" 2>/dev/null || true)
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null
+}
+
+stop_pidfile() {
+  pidfile=$1
+  if pid_alive "$pidfile"; then
+    pid=$(cat "$pidfile")
+    kill "$pid" 2>/dev/null || true
+    tries=0
+    while kill -0 "$pid" 2>/dev/null && [ "$tries" -lt 10 ]; do
+      tries=$((tries + 1)); sleep 1
+    done
+  fi
+  rm -f "$pidfile"
+}
+
+close_services() {
+  for pidfile in "$run_root/hostapd-microfx.pid" "$run_root/dnsmasq-microfx.pid" "$run_root/httpd-microfx.pid"; do
+    stop_pidfile "$pidfile"
+  done
+  ip address flush dev "$provision_interface" 2>/dev/null || true
+  ip link set "$provision_interface" down 2>/dev/null || true
+}
 
 close_portal() {
-  for pidfile in /run/hostapd-microfx.pid /run/dnsmasq-microfx.pid; do
-    [ -r "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
-    rm -f "$pidfile"
-  done
-  killall httpd 2>/dev/null || true
-  if [ -r /run/microfx-provision-watch.pid ]; then
-    kill "$(cat /run/microfx-provision-watch.pid)" 2>/dev/null || true
-    rm -f /run/microfx-provision-watch.pid
+  if [ -r "$run_root/microfx-provision-watch.pid" ]; then
+    stop_pidfile "$run_root/microfx-provision-watch.pid"
   fi
-  ip address flush dev wlan0 2>/dev/null || true
-  ip link set wlan0 down 2>/dev/null || true
+  if [ -r "$run_root/microfx-provision-control.pid" ]; then
+    stop_pidfile "$run_root/microfx-provision-control.pid"
+  fi
+  close_services
+}
+
+prepare_radio() {
+  tries=0
+  while [ ! -d "$sys_class_net/$provision_interface" ] && [ "$tries" -lt 20 ]; do
+    tries=$((tries + 1)); sleep 1
+  done
+  [ -d "$sys_class_net/$provision_interface" ] || { echo "Provisioning radio $provision_interface unavailable"; return 1; }
+  ip link set "$provision_interface" down 2>/dev/null || true
+  if [ -r "$sys_class_net/$client_interface/address" ]; then
+    . "${MICROFX_RADIO_POLICY_LIBRARY:-/usr/lib/microfx/radio-policy.sh}"
+    client_mac=$(cat "$sys_class_net/$client_interface/address")
+    ap_mac=$(microfx_ap_mac "$client_mac" 2>/dev/null || true)
+    if [ -n "$ap_mac" ] && [ "$ap_mac" != "$client_mac" ]; then
+      ip link set "$provision_interface" address "$ap_mac" 2>/dev/null ||
+        echo "Warning: could not assign distinct provisioning MAC $ap_mac"
+    fi
+  fi
+  iw dev "$provision_interface" set type __ap 2>/dev/null || true
+  ip link set "$provision_interface" up
+  ip address add 10.42.0.1/24 dev "$provision_interface" 2>/dev/null || true
+}
+
+start_services() {
+  sed -e "s|@SETUP_SSID@|$MICROFX_SETUP_SSID|g" \
+      -e "s|@SETUP_PASSWORD@|$MICROFX_SETUP_PASSWORD|g" \
+      -e "s|@PROVISION_INTERFACE@|$provision_interface|g" \
+      "$hostapd_template" >"$hostapd_runtime"
+  sed -e "s|@PROVISION_INTERFACE@|$provision_interface|g" \
+      "$dnsmasq_template" >"$dnsmasq_runtime"
+
+  # AR6003 may still be completing its country update when SysV reaches us.
+  # Retry the AP daemon without touching the independent client radio.
+  attempt=0
+  while :; do
+    attempt=$((attempt + 1))
+    ready=0
+    if hostapd -B -P "$run_root/hostapd-microfx.pid" "$hostapd_runtime"; then
+      ready_attempt=0
+      while [ "$ready_attempt" -lt 10 ]; do
+        if microfx_provision_beacon_ready "$provision_interface" "$hostapd_control"; then
+          ready=1
+          break
+        fi
+        ready_attempt=$((ready_attempt + 1))
+        sleep 1
+      done
+    fi
+    [ "$ready" = 1 ] && break
+    stop_pidfile "$run_root/hostapd-microfx.pid"
+    [ "$attempt" -lt 5 ] || { echo "hostapd failed after $attempt attempts"; return 1; }
+    echo "hostapd beacon not ready; retrying ($attempt/5)"
+    sleep 3
+  done
+  dnsmasq --conf-file="$dnsmasq_runtime" --pid-file="$run_root/dnsmasq-microfx.pid"
+  mkdir -p "$www_runtime/cgi-bin"
+  sed -e "s|@PRODUCT_NAME@|$MICROFX_PRODUCT_NAME|g" \
+      -e "s|@SETUP_SSID@|$MICROFX_SETUP_SSID|g" \
+      -e "s|@SETUP_PASSWORD@|$MICROFX_SETUP_PASSWORD|g" \
+      "$www_source/index.html" >"$www_runtime/index.html"
+  ln -sf "$www_source/portal-app.js" "$www_runtime/portal-app.js"
+  ln -sf "$www_source/cgi-bin/save" "$www_runtime/cgi-bin/save"
+  ln -sf "$www_source/cgi-bin/control" "$www_runtime/cgi-bin/control"
+  ln -sf "$www_source/cgi-bin/index.cgi" "$www_runtime/cgi-bin/index.cgi"
+  if [ -d "$studio_source" ]; then
+    ln -sfn "$studio_source" "$www_runtime/studio"
+  fi
+  # Connectivity probes must receive content other than their expected
+  # internet-success response. Combined with wildcard DNS this makes older
+  # Android, Apple, Windows and Chromium clients open their captive assistant.
+  microfx_prepare_captive_content "$www_runtime"
+  printf '%s\n' 'I:__microfx_root__' >"$www_runtime/httpd.conf"
+  httpd -f -p 80 -h "$www_runtime" -c "$www_runtime/httpd.conf" &
+  echo $! >"$run_root/httpd-microfx.pid"
+  sleep 1
+  kill -0 "$(cat "$run_root/httpd-microfx.pid")" 2>/dev/null || {
+    echo "setup HTTP server failed to start"
+    rm -f "$run_root/httpd-microfx.pid"
+    return 1
+  }
+}
+
+start_control_watcher() {
+  if pid_alive "$run_root/microfx-provision-control.pid"; then
+    return 0
+  fi
+  rm -f "$run_root/microfx-provision-control.pid"
+  (
+    while :; do
+      if [ -e "$run_root/microfx-wifi-reload" ]; then
+        rm -f "$run_root/microfx-wifi-reload"
+        "$wifi_service" restart >/tmp/wifi-restart.log 2>&1 || true
+      fi
+      sleep 2
+    done
+  ) &
+  echo $! >"$run_root/microfx-provision-control.pid"
+}
+
+start_watchdog() {
+  if ! pid_alive "$run_root/microfx-provision-watch.pid"; then
+    "$provision_watchdog" &
+    echo $! >"$run_root/microfx-provision-watch.pid"
+  fi
+}
+
+portal_running() {
+  for pidfile in \
+    "$run_root/hostapd-microfx.pid" \
+    "$run_root/dnsmasq-microfx.pid" \
+    "$run_root/httpd-microfx.pid" \
+    "$run_root/microfx-provision-control.pid" \
+    "$run_root/microfx-provision-watch.pid"; do
+    pid_alive "$pidfile" || return 1
+  done
+}
+
+start_portal() {
+  lock=$run_root/microfx-provision-start.lock
+  if ! mkdir "$lock" 2>/dev/null; then
+    echo "Setup service transition already active"
+    return 0
+  fi
+  trap 'rmdir "$lock" 2>/dev/null || true' EXIT INT TERM
+  close_services
+  prepare_radio || { rmdir "$lock" 2>/dev/null || true; trap - EXIT INT TERM; return 1; }
+  start_services || { close_services; rmdir "$lock" 2>/dev/null || true; trap - EXIT INT TERM; return 1; }
+  rmdir "$lock" 2>/dev/null || true
+  trap - EXIT INT TERM
 }
 
 case "$1" in
   start)
-    tries=0
-    while [ ! -d /sys/class/net/wlan0 ] && [ "$tries" -lt 20 ]; do
-      tries=$((tries + 1)); sleep 1
-    done
-    [ -d /sys/class/net/wlan0 ] || { echo "Provisioning radio wlan0 unavailable"; exit 1; }
-    ip link set wlan0 down 2>/dev/null || true
-    iw dev wlan0 set type __ap 2>/dev/null || true
-    ip link set wlan0 up
-    ip address add 10.42.0.1/24 dev wlan0 2>/dev/null || true
-    sed -e "s|@SETUP_SSID@|$MICROFX_SETUP_SSID|g" \
-        -e "s|@SETUP_PASSWORD@|$MICROFX_SETUP_PASSWORD|g" \
-        /etc/hostapd-microfx.conf >/run/hostapd-microfx.conf
-    hostapd -B -P /run/hostapd-microfx.pid /run/hostapd-microfx.conf
-    dnsmasq --conf-file=/etc/dnsmasq-microfx.conf --pid-file=/run/dnsmasq-microfx.pid
-    mkdir -p /run/microfx-www/cgi-bin
-    sed -e "s|@PRODUCT_NAME@|$MICROFX_PRODUCT_NAME|g" \
-        -e "s|@SETUP_SSID@|$MICROFX_SETUP_SSID|g" \
-        -e "s|@SETUP_PASSWORD@|$MICROFX_SETUP_PASSWORD|g" \
-        /www/index.html >/run/microfx-www/index.html
-    ln -sf /www/cgi-bin/save /run/microfx-www/cgi-bin/save
-    httpd -p 80 -h /run/microfx-www
-    (
-      while :; do
-        if [ -e /run/microfx-wifi-reload ]; then
-          rm -f /run/microfx-wifi-reload
-          /etc/init.d/S41wifi restart >/tmp/wifi-restart.log 2>&1 || true
-        fi
-        sleep 2
-      done
-    ) &
-    echo $! >/run/microfx-provision-watch.pid
-    echo "Setup AP ready at http://10.42.0.1"
-    if [ -r /data/config/wpa_supplicant.conf ] || [ -r /etc/wpa_supplicant.conf ]; then
-      (
-        sleep 40
-        /etc/init.d/S40provision close
-      ) &
-      echo $! >/run/microfx-provision-expire.pid
-      echo "Setup AP will close after the 40-second onboarding window"
+    [ "$provisioning_enabled" = 1 ] || {
+      close_portal
+      echo "Setup network disabled by MICROFX_PROVISIONING=0"
+      exit 0
+    }
+    [ ! -e "$recovery_active" ] || { echo "Stored-network recovery owns the radios"; exit 0; }
+    if portal_running; then
+      echo "Setup network already running"
+      exit 0
     fi
+    if start_portal; then
+      echo "Setup AP ready at http://10.42.0.1"
+      echo "Setup AP remains available for recovery and management"
+    else
+      echo "Setup AP is not ready; recovery watchdog will keep retrying"
+    fi
+    [ ! -e "$recovery_active" ] || exit 0
+    start_control_watcher
+    start_watchdog
+    ;;
+  repair)
+    [ "$provisioning_enabled" = 1 ] || exit 0
+    [ ! -e "$recovery_active" ] || exit 0
+    start_portal
     ;;
   close)
     close_portal
-    rm -f /run/microfx-provision-expire.pid
+    rm -f "$run_root/microfx-provision-expire.pid"
     ;;
   stop)
     close_portal
-    if [ -r /run/microfx-provision-expire.pid ]; then
-      kill "$(cat /run/microfx-provision-expire.pid)" 2>/dev/null || true
-      rm -f /run/microfx-provision-expire.pid
+    if [ -r "$run_root/microfx-provision-expire.pid" ]; then
+      stop_pidfile "$run_root/microfx-provision-expire.pid"
     fi
     ;;
   restart) "$0" stop; "$0" start ;;

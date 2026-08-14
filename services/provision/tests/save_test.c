@@ -20,6 +20,14 @@ static char *ReadFile(const char *path)
     return content;
 }
 
+static int Count(const char *text, const char *needle)
+{
+    int count=0;
+    size_t length=strlen(needle);
+    while ((text=strstr(text,needle))) { count++; text+=length; }
+    return count;
+}
+
 int main(void)
 {
     unlink(MICROFX_CONFIG_DIR "/wpa_supplicant.conf");
@@ -33,16 +41,26 @@ int main(void)
     assert(!ValidPeerId("bad/id"));
     assert(SaveNetwork("First Network","first\\\"password") == 0);
     assert(SaveNetwork("Second Network","second-password") == 0);
+    assert(SaveNetwork("First Network","replacement-password") == 0);
+    assert(SaveNetwork("Studio \"Lab\"\\5","first-special-password") == 0);
+    assert(SaveNetwork("Studio \"Lab\"\\5","second-special-password") == 0);
     assert(SavePeerId("microfx-demo_1.dk") == 0);
 
     char *networks=ReadFile(MICROFX_CONFIG_DIR "/wpa_supplicant.conf");
+    assert(Count(networks,"network={") == 3);
+    assert(Count(networks,"ssid=\"First Network\"") == 1);
+    assert(Count(networks,"ssid=\"Second Network\"") == 1);
+    assert(Count(networks,"ssid=\"Studio \\\"Lab\\\"\\\\5\"") == 1);
     assert(strstr(networks,"ssid=\"First Network\"") != NULL);
-    assert(strstr(networks,"psk=\"first\\\\\\\"password\"") != NULL);
+    assert(strstr(networks,"psk=\"replacement-password\"") != NULL);
+    assert(strstr(networks,"first\\\\\\\"password") == NULL);
     assert(strstr(networks,"ssid=\"Second Network\"") != NULL);
     assert(strstr(networks,"psk=\"second-password\"") != NULL);
+    assert(strstr(networks,"psk=\"first-special-password\"") == NULL);
+    assert(strstr(networks,"psk=\"second-special-password\"") != NULL);
     const char *first=strstr(networks,"First Network");
     const char *second=strstr(networks,"Second Network");
-    assert(first && second && first < second);
+    assert(first && second && second < first);
     free(networks);
 
     char *peer=ReadFile(MICROFX_CONFIG_DIR "/peer-id");

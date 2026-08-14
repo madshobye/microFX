@@ -1,0 +1,183 @@
+#!/bin/sh
+set -u
+
+config_file=${MICROFX_CONFIG_FILE:-/etc/microfx.conf}
+[ ! -r "$config_file" ] || . "$config_file"
+[ "${MICROFX_DATA_ADAPTERS:-0}" = 1 ] || exit 0
+
+runtime_root=${MICROFX_DATA_RUNTIME_ROOT:-/run/microfx-data}
+state_root=${MICROFX_DATA_STATE_ROOT:-/run/microfx-data-state}
+projects_root=${MICROFX_PROJECTS_ROOT:-/data/apps/projects}
+current_link=${MICROFX_CURRENT_PROJECT_LINK:-/data/apps/current}
+pid_file=${MICROFX_DATA_PID_FILE:-/run/microfx-data-adapters.pid}
+adapter_root=${MICROFX_ADAPTER_ROOT:-/usr/lib/microfx/data-adapters}
+curl_command=${MICROFX_CURL_COMMAND:-curl}
+qjs_command=${MICROFX_QJS_COMMAND:-qjs}
+reload_command=${MICROFX_RELOAD_COMMAND:-microfx-reload-project}
+date_command=${MICROFX_DATE_COMMAND:-date}
+loop_seconds=${MICROFX_DATA_LOOP_SECONDS:-15}
+retry_seconds=${MICROFX_DATA_RETRY_SECONDS:-30}
+max_bytes=${MICROFX_DATA_MAX_BYTES:-262144}
+min_epoch=${MICROFX_DATA_MIN_EPOCH:-1609459200}
+once=${MICROFX_DATA_ONCE:-0}
+
+flight_url=${MICROFX_FLIGHT_URL:-https://opensky-network.org/api/states/all?lamin=55.3\&lomin=11.4\&lamax=56.2\&lomax=13.3}
+energy_url=${MICROFX_ENERGY_URL:-https://api.energidataservice.dk/dataset/Elspotprices?filter=%7B%22PriceArea%22:%5B%22DK2%22%5D%7D\&sort=HourUTC%20desc\&limit=24}
+flight_interval=${MICROFX_FLIGHT_REFRESH_SECONDS:-300}
+energy_interval=${MICROFX_ENERGY_REFRESH_SECONDS:-3600}
+
+for numeric in "$loop_seconds" "$retry_seconds" "$max_bytes" "$min_epoch" "$flight_interval" "$energy_interval"; do
+  case "$numeric" in ''|*[!0-9]*) echo "Invalid data-adapter numeric policy" >&2; exit 1;; esac
+done
+
+mkdir -p "$runtime_root" "$state_root"
+if [ -r "$pid_file" ]; then
+  read -r previous_pid <"$pid_file" || previous_pid=
+  case "$previous_pid" in ''|*[!0-9]*) :;; *) kill -0 "$previous_pid" 2>/dev/null && exit 0;; esac
+fi
+printf '%s\n' "$$" >"$pid_file"
+
+raw_temp=
+json_temp=
+cleanup() {
+  [ -z "$raw_temp" ] || rm -f "$raw_temp"
+  [ -z "$json_temp" ] || rm -f "$json_temp"
+  rm -f "$pid_file"
+}
+trap 'cleanup' EXIT
+trap 'exit 0' INT TERM
+
+epoch() {
+  "$date_command" +%s
+}
+
+active_project() {
+  target=$(readlink -f "$current_link" 2>/dev/null || true)
+  case "$target" in "$projects_root"/*) printf '%s\n' "${target##*/}";; esac
+}
+
+read_timestamp() {
+  timestamp=0
+  [ ! -r "$1" ] || read -r timestamp <"$1" || timestamp=0
+  case "$timestamp" in ''|*[!0-9]*) timestamp=0;; esac
+  printf '%s\n' "$timestamp"
+}
+
+write_timestamp() {
+  timestamp_temp=$(mktemp "$state_root/.timestamp.XXXXXX") || return 1
+  printf '%s\n' "$2" >"$timestamp_temp"
+  mv -f "$timestamp_temp" "$1"
+}
+
+write_status() {
+  status_temp=$(mktemp "$state_root/.status.XXXXXX") || return 1
+  {
+    printf 'state\t%s\n' "$2"
+    printf 'project\t%s\n' "$1"
+    printf 'updated\t%s\n' "$3"
+    printf 'detail\t%s\n' "$4"
+  } >"$status_temp"
+  mv -f "$status_temp" "$state_root/$1.status"
+}
+
+due() {
+  due_project=$1
+  due_interval=$2
+  due_now=$3
+  last_success=$(read_timestamp "$state_root/$due_project.last-success")
+  last_attempt=$(read_timestamp "$state_root/$due_project.last-attempt")
+
+  if [ "$last_success" -gt 0 ] && [ "$due_now" -ge "$last_success" ] &&
+     [ $((due_now - last_success)) -lt "$due_interval" ]; then
+    return 1
+  fi
+  if [ "$last_attempt" -gt 0 ] && [ "$due_now" -ge "$last_attempt" ] &&
+     [ $((due_now - last_attempt)) -lt "$retry_seconds" ]; then
+    return 1
+  fi
+  return 0
+}
+
+refresh() {
+  refresh_project=$1
+  refresh_asset=$2
+  refresh_adapter=$3
+  refresh_url=$4
+  refresh_interval=$5
+  refresh_now=$(epoch) || return 1
+  case "$refresh_now" in ''|*[!0-9]*) return 1;; esac
+
+  if [ "$refresh_now" -lt "$min_epoch" ]; then
+    write_status "$refresh_project" waiting-clock "$refresh_now" clock-not-synchronized
+    return 0
+  fi
+  due "$refresh_project" "$refresh_interval" "$refresh_now" || return 0
+  write_timestamp "$state_root/$refresh_project.last-attempt" "$refresh_now" || return 1
+  write_status "$refresh_project" fetching "$refresh_now" request-started
+
+  destination=$runtime_root/$refresh_project/$refresh_asset
+  destination_dir=${destination%/*}
+  mkdir -p "$destination_dir"
+  raw_temp=$(mktemp "$runtime_root/.raw-$refresh_project.XXXXXX") || return 1
+  json_temp=$(mktemp "$destination_dir/.next-$refresh_asset.XXXXXX") || return 1
+
+  if ! "$curl_command" --fail --silent --show-error --location --max-time 20 \
+      --max-filesize "$max_bytes" "$refresh_url" >"$raw_temp"; then
+    write_status "$refresh_project" error "$refresh_now" fetch-failed
+    rm -f "$raw_temp" "$json_temp"
+    raw_temp= json_temp=
+    return 0
+  fi
+  raw_size=$(wc -c <"$raw_temp" | tr -d ' ')
+  if [ "$raw_size" -gt "$max_bytes" ]; then
+    write_status "$refresh_project" error "$refresh_now" response-too-large
+    rm -f "$raw_temp" "$json_temp"
+    raw_temp= json_temp=
+    return 0
+  fi
+  if ! "$qjs_command" --std -m "$adapter_root/runner.js" "$refresh_adapter" "$raw_temp" >"$json_temp"; then
+    write_status "$refresh_project" error "$refresh_now" normalization-failed
+    rm -f "$raw_temp" "$json_temp"
+    raw_temp= json_temp=
+    return 0
+  fi
+  json_size=$(wc -c <"$json_temp" | tr -d ' ')
+  if [ "$json_size" -eq 0 ] || [ "$json_size" -gt "$max_bytes" ]; then
+    write_status "$refresh_project" error "$refresh_now" normalized-data-invalid
+    rm -f "$raw_temp" "$json_temp"
+    raw_temp= json_temp=
+    return 0
+  fi
+
+  changed=0
+  if [ ! -f "$destination" ] || ! cmp -s "$json_temp" "$destination"; then
+    mv -f "$json_temp" "$destination"
+    json_temp=
+    changed=1
+  fi
+  write_timestamp "$state_root/$refresh_project.last-success" "$refresh_now"
+  if [ "$changed" -eq 1 ]; then
+    write_status "$refresh_project" fresh "$refresh_now" data-published
+    if [ "$(active_project)" = "$refresh_project" ]; then
+      "$reload_command" "$refresh_project" "data-$refresh_project-$refresh_now" >/dev/null 2>&1 || true
+    fi
+  else
+    write_status "$refresh_project" unchanged "$refresh_now" data-current
+  fi
+  rm -f "$raw_temp" "$json_temp"
+  raw_temp= json_temp=
+}
+
+while :; do
+  project=$(active_project)
+  case "$project" in
+    flight-board)
+      refresh "$project" flights.json flight "$flight_url" "$flight_interval"
+      ;;
+    energy-clock)
+      refresh "$project" prices.json energy "$energy_url" "$energy_interval"
+      ;;
+  esac
+  [ "$once" = 1 ] && break
+  sleep "$loop_seconds"
+done

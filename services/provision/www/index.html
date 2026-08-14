@@ -3,14 +3,22 @@
 <title>@PRODUCT_NAME@ setup</title><style>
 body{font:16px system-ui;background:#080c1d;color:#e8f5ff;max-width:34rem;margin:3rem auto;padding:1rem}
 h1{color:#ffdc64}form{display:grid;gap:.8rem;background:#111a34;padding:1.5rem;border:1px solid #55dfff}
-input,button{font:inherit;padding:.75rem;border-radius:.3rem;border:1px solid #527;background:#080c1d;color:white}
-button{background:#19a8cc;border:0;font-weight:700}.note{color:#9bc1d8;font-size:.9rem}
+input,select,button{font:inherit;padding:.75rem;border-radius:.3rem;border:1px solid #527;background:#080c1d;color:white}
+button,.button{background:#19a8cc;border:0;font-weight:700}.button{font:inherit;padding:.75rem;border-radius:.3rem;color:white;text-align:center;text-decoration:none}
+.note{color:#9bc1d8;font-size:.9rem}
+.control{margin-top:1rem;background:#111a34;padding:1.5rem;border:1px solid #527;display:grid;gap:.8rem}.row{display:flex;gap:.6rem}.row select{flex:1}#control-status{min-height:1.2em}
+.health{display:grid;grid-template-columns:auto 1fr;gap:.35rem .8rem}.health dt{color:#9bc1d8}.health dd{margin:0;text-align:right}
 </style></head><body><h1>@PRODUCT_NAME@ setup</h1>
-<p>Add a Wi-Fi network and choose the device peer ID. The setup network stays available so more networks can be added.</p>
+<p>Add a Wi-Fi network and choose the device peer ID. This management page remains available from the setup network and from the device address on your normal Wi-Fi network.</p>
 <form method="post" action="/cgi-bin/save">
 <label>Wi-Fi SSID<input name="ssid" maxlength="32" required></label>
 <label>Wi-Fi password<input name="password" type="password" minlength="8" maxlength="63" required></label>
-<label>Peer ID<input name="peer_id" maxlength="64" value="microfx-demo" pattern="[A-Za-z0-9._-]+" required></label>
+<label>Peer ID<input id="peer-id-input" name="peer_id" maxlength="64" value="microfx-demo" pattern="[A-Za-z0-9._-]+" required></label>
 <button type="submit">Save and connect</button></form>
+<section class="control"><h2>Graphics</h2><label>Project<select id="project"></select></label>
+<div class="row"><button id="activate" type="button">Run project</button><button id="restart" type="button">Restart renderer</button></div>
+<span id="control-status" class="note">Loading projects…</span><a id="studio-link" class="button" href="/studio/">Open microFX Studio</a></section>
+<section class="control"><h2>Network</h2><dl class="health"><dt>Client</dt><dd id="net-state">Loading…</dd><dt>Network</dt><dd id="net-ssid">—</dd><dt>Address</dt><dd id="net-address">—</dd><dt>Signal</dt><dd id="net-signal">—</dd><dt>TX rate</dt><dd id="net-bitrate">—</dd><dt>TX power</dt><dd id="net-power">—</dd><dt>Peer ID</dt><dd id="peer-id-status">—</dd><dt>Setup AP</dt><dd id="setup-state">Loading…</dd><dt>Setup checks</dt><dd id="setup-checks">—</dd></dl><span id="net-detail" class="note"></span></section>
 <p class="note">Setup AP: @SETUP_SSID@ · password: @SETUP_PASSWORD@ · local address: 10.42.0.1</p>
+<script src="/portal-app.js" defer></script>
 </body></html>

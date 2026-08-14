@@ -1,0 +1,9 @@
+--- a/src/platforms/rcore_drm.c
++++ b/src/platforms/rcore_drm.c
+@@ -658 +658,2 @@ void SwapScreenBuffer(void)
+-    if ((swapCount % 120) == 0)
++    if ((swapCount % 120) == 0 && getenv("MICROFX_PROFILE") &&
++        strcmp(getenv("MICROFX_PROFILE"), "1") == 0)
+@@ -660 +661 @@ void SwapScreenBuffer(void)
+-        fprintf(stderr, "DRM_TIMING egl=%.2f lock=%.2f addfb=%.2f "
++        fprintf(stderr, "DRM_TIMING swaps=120 egl=%.2f lock=%.2f addfb=%.2f "

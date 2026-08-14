@@ -1,0 +1,75 @@
+#!/bin/sh
+
+log=${MICROFX_PROVISION_WATCHDOG_LOG:-/tmp/microfx-provision-watchdog.log}
+product_config=${MICROFX_PRODUCT_CONFIG:-/etc/microfx-product.conf}
+[ -r "$product_config" ] && . "$product_config"
+provision_interface=${MICROFX_PROVISION_INTERFACE:-wlan0}
+run_root=${MICROFX_RUN_ROOT:-/run}
+sys_class_net=${MICROFX_SYS_CLASS_NET:-/sys/class/net}
+initial_delay=${MICROFX_PROVISION_WATCHDOG_INITIAL_DELAY:-20}
+poll_delay=${MICROFX_PROVISION_WATCHDOG_POLL_DELAY:-5}
+repair_delay=${MICROFX_PROVISION_WATCHDOG_REPAIR_DELAY:-20}
+max_cycles=${MICROFX_PROVISION_WATCHDOG_MAX_CYCLES:-0}
+provision_service=${MICROFX_PROVISION_SERVICE:-/etc/init.d/S40provision}
+status_file=${MICROFX_PROVISION_STATUS:-$run_root/microfx-provision-status}
+failures=0
+cycles=0
+. "${MICROFX_PROVISION_POLICY_LIBRARY:-/usr/lib/microfx/provision-policy.sh}"
+. "${MICROFX_PROVISION_HEALTH_LIBRARY:-/usr/lib/microfx/provision-health.sh}"
+
+pid_alive() {
+  [ -r "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null
+}
+
+write_status() {
+  temporary="${status_file}.new"
+  {
+    printf 'state\t%s\n' "$1"
+    printf 'radio\t%s\n' "$radio"
+    printf 'hostapd\t%s\n' "$hostapd"
+    printf 'dnsmasq\t%s\n' "$dnsmasq"
+    printf 'httpd\t%s\n' "$httpd"
+    printf 'ap_mode\t%s\n' "$ap_mode"
+    printf 'link\t%s\n' "$link"
+    printf 'address\t%s\n' "$address"
+    printf 'portal\t%s\n' "$portal"
+    printf 'beacon\t%s\n' "$beacon"
+    printf 'failures\t%s\n' "$failures"
+  } >"$temporary" && mv -f "$temporary" "$status_file"
+}
+
+echo "Setup service watchdog started" >"$log"
+sleep "$initial_delay"
+while :; do
+  [ -d "$sys_class_net/$provision_interface" ] && radio=1 || radio=0
+  pid_alive "$run_root/hostapd-microfx.pid" && hostapd=1 || hostapd=0
+  pid_alive "$run_root/dnsmasq-microfx.pid" && dnsmasq=1 || dnsmasq=0
+  pid_alive "$run_root/httpd-microfx.pid" && httpd=1 || httpd=0
+  microfx_provision_ap_mode "$provision_interface" && ap_mode=1 || ap_mode=0
+  microfx_provision_link_up "$provision_interface" && link=1 || link=0
+  microfx_provision_address_ready "$provision_interface" 10.42.0.1/24 && address=1 || address=0
+  microfx_provision_http_ready http://10.42.0.1/ && portal=1 || portal=0
+  microfx_provision_beacon_ready "$provision_interface" "$run_root/hostapd" && beacon=1 || beacon=0
+
+  if [ "$radio" = 1 ] && [ "$hostapd" = 1 ] &&
+     [ "$dnsmasq" = 1 ] && [ "$httpd" = 1 ] &&
+     [ "$ap_mode" = 1 ] && [ "$link" = 1 ] &&
+     [ "$address" = 1 ] && [ "$portal" = 1 ] &&
+     [ "$beacon" = 1 ]; then
+    failures=0
+  else
+    failures=$((failures + 1))
+  fi
+  action=$(microfx_provision_action "$radio" "$hostapd" "$dnsmasq" "$httpd" \
+    "$ap_mode" "$link" "$address" "$portal" "$beacon" "$failures")
+  write_status "$action"
+  if [ "$action" = repair ]; then
+    echo "$(date) repairing setup services radio=$radio hostapd=$hostapd dnsmasq=$dnsmasq httpd=$httpd ap_mode=$ap_mode link=$link address=$address portal=$portal beacon=$beacon" >>"$log"
+    "$provision_service" repair >>"$log" 2>&1 || true
+    failures=0
+    sleep "$repair_delay"
+  fi
+  cycles=$((cycles + 1))
+  [ "$max_cycles" -gt 0 ] && [ "$cycles" -ge "$max_cycles" ] && break
+  sleep "$poll_delay"
+done

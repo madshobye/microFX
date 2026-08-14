@@ -49,7 +49,8 @@ for partition in 2 3; do
     show_stat "$device" /usr/sbin/dropbear
     show_stat "$device" /usr/lib/libcrypt.so.2
     show_stat "$device" /root/.ssh/authorized_keys
-    show_file "$device" /etc/init.d/S42dropbear-debug
+    show_file "$device" /etc/init.d/S39dropbear-debug
+    show_file "$device" /etc/init.d/S39recovery-client
 done
 
 device="${DISK}s4"

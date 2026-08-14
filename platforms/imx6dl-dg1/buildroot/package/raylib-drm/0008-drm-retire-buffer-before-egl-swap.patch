@@ -47,11 +47,12 @@
      double t0 = SwapClockMs();
      eglSwapBuffers(platform.device, platform.surface);
      double t1 = SwapClockMs();
-@@ -574,15 +611,9 @@ void SwapScreenBuffer(void)
+@@ -574,16 +611,10 @@ void SwapScreenBuffer(void)
  
      uint32_t fb = 0;
--    int result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, 16, 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
-+    result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, 16, 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
+     int highColor = getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0);
+-    int result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, highColor? 24 : 16, highColor? 32 : 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
++    result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, highColor? 24 : 16, highColor? 32 : 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
      if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeAddFB() failed with result: %d", result);
      double t3 = SwapClockMs();
 -    double tWaitStart = t3;
@@ -64,7 +65,7 @@
  
      if (!platform.prevFB)
      {
-@@ -596,44 +627,6 @@ void SwapScreenBuffer(void)
+@@ -596,43 +627,6 @@ void SwapScreenBuffer(void)
      }
      else
      {

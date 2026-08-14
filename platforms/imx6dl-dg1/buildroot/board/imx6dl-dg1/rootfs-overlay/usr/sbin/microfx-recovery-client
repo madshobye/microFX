@@ -1,0 +1,136 @@
+#!/bin/sh
+
+# Tear down every normal Wi-Fi process and run a frozen copy of the original
+# known-working client sequence from the 2026-08-13 development image. Recovery
+# intentionally avoids newer radio policy, power-save tuning, AP code, and the
+# normal Wi-Fi watchdog. It uses wlan1 unless that interface does not exist.
+runtime_config=${MICROFX_RUNTIME_CONFIG:-/etc/canvas.conf}
+[ -r "$runtime_config" ] && . "$runtime_config"
+[ "${CANVAS_SSH:-0}" = 1 ] || exit 0
+product_config=${MICROFX_PRODUCT_CONFIG:-/etc/microfx-product.conf}
+[ -r "$product_config" ] && . "$product_config"
+
+run_root=${MICROFX_RUN_ROOT:-/run}
+sys_class_net=${MICROFX_SYS_CLASS_NET:-/sys/class/net}
+stored_config=${MICROFX_RECOVERY_CONFIG:-/data/config/wpa_supplicant.conf}
+[ -r "$stored_config" ] || stored_config=${MICROFX_RECOVERY_FALLBACK_CONFIG:-/etc/wpa_supplicant.conf}
+interface=${MICROFX_RECOVERY_INTERFACE:-wlan1}
+fallback_interface=${MICROFX_RECOVERY_FALLBACK_INTERFACE:-wlan0}
+max_rounds=${MICROFX_RECOVERY_MAX_ROUNDS:-0}
+retry_delay=${MICROFX_RECOVERY_RETRY_DELAY:-15}
+association_seconds=${MICROFX_RECOVERY_ASSOCIATION_SECONDS:-30}
+address_seconds=${MICROFX_RECOVERY_ADDRESS_SECONDS:-15}
+ssh_service=${MICROFX_SSH_SERVICE:-/etc/init.d/S39dropbear-debug}
+flag=${MICROFX_RECOVERY_ACTIVE_FLAG:-$run_root/microfx-recovery-active}
+status=${MICROFX_RECOVERY_STATUS:-$run_root/microfx-recovery-status}
+log=${MICROFX_RECOVERY_LOG:-/tmp/microfx-recovery-client.log}
+
+mkdir -p "$run_root"
+if [ ! -r "$stored_config" ]; then
+  printf 'state\tfailed\ndetail\tstored WPA configuration missing\n' >"$status"
+  echo "Stored WPA configuration is missing" >"$log"
+  exit 1
+fi
+
+stop_pidfile() {
+  [ -r "$1" ] || return 0
+  pid=$(cat "$1" 2>/dev/null || true)
+  case "$pid" in ''|*[!0-9]*) : ;; *) kill "$pid" 2>/dev/null || true ;; esac
+  rm -f "$1"
+}
+
+clean_network() {
+  for pidfile in \
+    "$run_root/microfx-provision-watch.pid" \
+    "$run_root/microfx-provision-control.pid" \
+    "$run_root/hostapd-microfx.pid" \
+    "$run_root/dnsmasq-microfx.pid" \
+    "$run_root/httpd-microfx.pid" \
+    "$run_root/wifi-connect.pid" \
+    "$run_root/wifi-watchdog.pid" \
+    "$run_root"/wpa_supplicant-wlan?.pid \
+    "$run_root"/udhcpc-wlan?.pid; do
+    stop_pidfile "$pidfile"
+  done
+  for process in hostapd dnsmasq wpa_supplicant udhcpc; do
+    killall "$process" 2>/dev/null || true
+  done
+  for candidate in wlan0 wlan1; do
+    [ -d "$sys_class_net/$candidate" ] || continue
+    ip address flush dev "$candidate" 2>/dev/null || true
+    ip link set "$candidate" down 2>/dev/null || true
+  done
+}
+
+connect_stored_network() {
+  wpa_pid=$run_root/wpa_supplicant-${interface}.pid
+  dhcp_pid=$run_root/udhcpc-${interface}.pid
+  echo "$(date) trying stored network on $interface" >>"$log"
+  iw reg set DK >>"$log" 2>&1 || true
+  ip link set "$interface" up || return 1
+  wpa_supplicant -B -t -f /tmp/microfx-recovery-wpa.log \
+    -P "$wpa_pid" -i "$interface" -c "$stored_config" || return 1
+
+  seconds=0
+  state=
+  while [ "$seconds" -lt "$association_seconds" ]; do
+    state=$(wpa_cli -i "$interface" status 2>/dev/null | sed -n 's/^wpa_state=//p')
+    [ "$state" = COMPLETED ] && break
+    seconds=$((seconds + 1))
+    sleep 1
+  done
+  if [ "$state" != COMPLETED ]; then
+    stop_pidfile "$wpa_pid"
+    return 1
+  fi
+
+  # Match the original connector: let udhcpc continue in the background while
+  # this recovery wrapper waits only to confirm that SSH has a usable address.
+  udhcpc -b -p "$dhcp_pid" -i "$interface" -x hostname:microfx >>"$log" 2>&1 || true
+  seconds=0
+  address=
+  while [ "$seconds" -lt "$address_seconds" ]; do
+    address=$(ip -4 address show dev "$interface" 2>/dev/null |
+      sed -n 's/.*inet \([^ ]*\).*/\1/p' | head -n 1)
+    [ -n "$address" ] && break
+    seconds=$((seconds + 1))
+    sleep 1
+  done
+  if [ -z "$address" ]; then
+    stop_pidfile "$dhcp_pid"
+    stop_pidfile "$wpa_pid"
+    return 1
+  fi
+
+  "$ssh_service" start >>"$log" 2>&1 || true
+  printf 'state\tconnected\ninterface\t%s\naddress\t%s\n' "$interface" "$address" >"$status"
+  echo "$(date) recovery SSH ready on $interface at $address" >>"$log"
+  return 0
+}
+
+: >"$flag"
+: >"$log"
+clean_network
+tries=0
+while [ ! -d "$sys_class_net/$interface" ] && [ "$tries" -lt 20 ]; do
+  tries=$((tries + 1))
+  sleep 1
+done
+if [ ! -d "$sys_class_net/$interface" ]; then
+  interface=$fallback_interface
+  echo "wlan1 is absent; using $interface" >>"$log"
+fi
+[ -d "$sys_class_net/$interface" ] || {
+  printf 'state\tfailed\ndetail\tclient radio unavailable\n' >"$status"
+  exit 1
+}
+
+round=0
+while :; do
+  round=$((round + 1))
+  clean_network
+  connect_stored_network && exit 0
+  printf 'state\tretrying\nround\t%s\n' "$round" >"$status"
+  [ "$max_rounds" -gt 0 ] && [ "$round" -ge "$max_rounds" ] && exit 1
+  sleep "$retry_delay"
+done

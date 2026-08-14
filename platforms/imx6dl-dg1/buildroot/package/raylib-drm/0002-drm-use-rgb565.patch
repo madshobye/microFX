@@ -1,6 +1,6 @@
 --- a/src/platforms/rcore_drm.c
 +++ b/src/platforms/rcore_drm.c
-@@ -558,17 +558,17 @@
+@@ -558,17 +558,18 @@
      eglSwapBuffers(platform.device, platform.surface);
  
      if (!platform.gbmSurface || (-1 == platform.fd) || !platform.connector || !platform.crtc) TRACELOG(LOG_ERROR, "DISPLAY: DRM initialization failed to swap");
@@ -10,7 +10,8 @@
  
      uint32_t fb = 0;
 -    int result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, 24, 32, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
-+    int result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, 16, 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
++    int highColor = getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0);
++    int result = drmModeAddFB(platform.fd, platform.connector->modes[platform.modeIndex].hdisplay, platform.connector->modes[platform.modeIndex].vdisplay, highColor? 24 : 16, highColor? 32 : 16, gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, &fb);
      if (result != 0) TRACELOG(LOG_ERROR, "DISPLAY: drmModeAddFB() failed with result: %d", result);
  
      if (!platform.prevFB)
@@ -29,7 +30,7 @@
  
      platform.gbmSurface = gbm_surface_create(platform.gbmDevice, platform.connector->modes[platform.modeIndex].hdisplay,
 -        platform.connector->modes[platform.modeIndex].vdisplay, GBM_FORMAT_ARGB8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
-+        platform.connector->modes[platform.modeIndex].vdisplay, GBM_FORMAT_RGB565, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
++        platform.connector->modes[platform.modeIndex].vdisplay, (getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? GBM_FORMAT_ARGB8888 : GBM_FORMAT_RGB565, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
      if (!platform.gbmSurface)
      {
          TRACELOG(LOG_WARNING, "DISPLAY: Failed to create GBM surface");
@@ -38,31 +39,21 @@
  
      EGLint samples = 0;
      EGLint sampleBuffer = 0;
-@@ -933,20 +933,20 @@
-         sampleBuffer = 1;
-         TRACELOG(LOG_INFO, "DISPLAY: Trying to enable MSAA x4");
-     }
- 
-     const EGLint framebufferAttribs[] =
-     {
-         EGL_RENDERABLE_TYPE, (rlGetVersion() == RL_OPENGL_ES_30)? EGL_OPENGL_ES3_BIT : EGL_OPENGL_ES2_BIT,      // Type of context support
-         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,          // Don't use it on Android!
+@@ -942,9 +942,9 @@
 -        EGL_RED_SIZE, 8,            // RED color bit depth (alternative: 5)
 -        EGL_GREEN_SIZE, 8,          // GREEN color bit depth (alternative: 6)
 -        EGL_BLUE_SIZE, 8,           // BLUE color bit depth (alternative: 5)
 -        EGL_ALPHA_SIZE, 8,        // ALPHA bit depth (required for transparent framebuffer)
-+        EGL_RED_SIZE, 5,
-+        EGL_GREEN_SIZE, 6,
-+        EGL_BLUE_SIZE, 5,
-+        EGL_ALPHA_SIZE, 0,
++        EGL_RED_SIZE, (getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 5,
++        EGL_GREEN_SIZE, (getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 6,
++        EGL_BLUE_SIZE, (getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 5,
++        EGL_ALPHA_SIZE, (getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? 8 : 0,
          //EGL_TRANSPARENT_TYPE, EGL_NONE, // Request transparent framebuffer (EGL_TRANSPARENT_RGB does not work on RPI)
-         EGL_DEPTH_SIZE, 16,         // Depth buffer size (Required to use Depth testing!)
+-        EGL_DEPTH_SIZE, 16,         // Depth buffer size (Required to use Depth testing!)
++        EGL_DEPTH_SIZE, getenv("MICROFX_DEPTH_BITS")? atoi(getenv("MICROFX_DEPTH_BITS")) : 16,
          //EGL_STENCIL_SIZE, 8,      // Stencil buffer size
          EGL_SAMPLE_BUFFERS, sampleBuffer,    // Activate MSAA
          EGL_SAMPLES, samples,       // 4x Antialiasing if activated (Free on MALI GPUs)
-         EGL_NONE
-     };
- 
 @@ -1004,17 +1004,17 @@
      {
          EGLint id = 0;
@@ -73,7 +64,7 @@
          }
  
 -        if (GBM_FORMAT_ARGB8888 == id)
-+        if (GBM_FORMAT_RGB565 == id)
++        if (((getenv("MICROFX_COLOR_FORMAT") && (strcmp(getenv("MICROFX_COLOR_FORMAT"), "rgba8888") == 0))? GBM_FORMAT_ARGB8888 : GBM_FORMAT_RGB565) == id)
          {
              TRACELOG(LOG_TRACE, "DISPLAY: Using EGL config: %d", i);
              platform.config = configs[i];

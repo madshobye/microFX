@@ -9,6 +9,12 @@ int main(void)
     assert(scene.camera.fovY == 48.0f);
     assert(scene.runtime.targetFps == 30 && scene.runtime.debugBar);
     assert(scene.runtime.durationSeconds == 0.0f);
+    assert(!scene.runtime.profiling && scene.runtime.profileIntervalFrames == 120);
+    assert(scene.runtime.densitySampleFrames == 180);
+    assert(scene.runtime.densityStep == 0.025f);
+    assert(scene.runtime.densityDownThreshold == 1.08f);
+    assert(scene.runtime.densityUpThreshold == 0.72f);
+    assert(scene.runtime.densityUpSamples == 4);
 
     int circle=MicroFxSceneAddCircle(&scene,10,20,5,0xff00ffff);
     assert((circle&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_SDF);
@@ -29,6 +35,9 @@ int main(void)
     assert(scene.quad[1].bottomColor==0x90abcdef);
     assert(MicroFxSceneMove(&scene,quad,20,30,0.25f));
     assert(scene.quad[0].x==20 && scene.quadDirty);
+    assert(scene.quad[0].opacity==1.0f);
+    assert(MicroFxSceneSetOpacity(&scene,quad,0.4f));
+    assert(scene.quad[0].opacity==0.4f && scene.quadDirty);
     int fastCircle=MicroFxSceneAddFastCircle(&scene,40,50,20,0xff00ffff);
     assert((fastCircle&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_QUAD);
     assert(scene.quad[2].kind==MICROFX_QUAD_CIRCLE);
@@ -54,11 +63,46 @@ int main(void)
     assert((text&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_TEXT);
     assert(MicroFxSceneSetText(&scene,text,"updated"));
     assert(strcmp(scene.text[0].text,"updated")==0 && scene.textDirty);
+    scene.textDirty=false;
+    assert(MicroFxSceneSetTextFont(&scene,text,"/project/assets/display.ttf"));
+    assert(strcmp(scene.text[0].fontPath,"/project/assets/display.ttf")==0);
+    assert(scene.textDirty);
+    scene.textDirty=false;
+    assert(MicroFxSceneSetTextFont(&scene,text,"/project/assets/display.ttf"));
+    assert(!scene.textDirty);
+    assert(MicroFxSceneSetTextFont(&scene,text,""));
+    assert(scene.text[0].fontPath[0]=='\0');
+    assert(!MicroFxSceneSetTextFont(&scene,cube,"font.ttf"));
     assert(MicroFxSceneSetColor(&scene,text,0x12345678));
+    assert(scene.text[0].opacity==1.0f);
+    assert(MicroFxSceneSetOpacity(&scene,text,0.65f));
+    assert(scene.text[0].opacity==0.65f && scene.textDirty);
+    assert(MicroFxSceneSetVisible(&scene, quad, false));
+    assert(!scene.quad[0].visible && scene.quadDirty);
+    assert(MicroFxSceneSetVisible(&scene, quad, true));
+    assert(scene.quad[0].visible);
     assert(scene.text[0].color==0x12345678);
+
+    int image=MicroFxSceneAddImage(&scene,"/project/assets/icon.png",
+                                   100,200,320,180,0xffffffff);
+    assert((image&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_IMAGE);
+    assert(strcmp(scene.image[0].assetPath,"/project/assets/icon.png")==0);
+    assert(MicroFxSceneMove(&scene,image,300,400,0.75f));
+    assert(scene.image[0].x==300 && scene.image[0].rotation==0.75f);
+    assert(MicroFxSceneSetColor(&scene,image,0x89abcdef));
+    assert(scene.image[0].tint==0x89abcdef);
+    assert(MicroFxSceneSetOpacity(&scene,image,0.5f));
+    assert(scene.image[0].opacity==0.5f);
+    assert(MicroFxSceneSetVisible(&scene,image,false));
+    assert(!scene.image[0].visible && scene.imageDirty);
+    assert(MicroFxSceneAddImage(&scene,"",0,0,10,10,0xffffffff)<0);
+    assert(MicroFxSceneAddImage(&scene,"bad.png",0,0,0,10,0xffffffff)<0);
 
     assert(!MicroFxSceneMove(&scene,cube,0,0,0));
     assert(!MicroFxSceneTransform(&scene,circle,0,0,0,0,0,0,1));
     assert(!MicroFxSceneSetEffect(&scene,cube,99,1,1));
+    assert(!MicroFxSceneSetOpacity(&scene,cube,0.5f));
+    assert(!MicroFxSceneSetOpacity(&scene,quad,-0.1f));
+    assert(!MicroFxSceneSetOpacity(&scene,quad,1.1f));
     return 0;
 }

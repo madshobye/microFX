@@ -1,0 +1,20 @@
+#!/bin/sh
+
+case "$1" in
+  start)
+    [ -x /usr/sbin/microfx-data-adapters ] || exit 0
+    if [ -r /run/microfx-data-adapters.pid ]; then
+      read -r pid </run/microfx-data-adapters.pid || pid=
+      case "$pid" in ''|*[!0-9]*) :;; *) kill -0 "$pid" 2>/dev/null && exit 0;; esac
+    fi
+    /usr/sbin/microfx-data-adapters >/dev/null 2>&1 &
+    ;;
+  stop)
+    [ ! -r /run/microfx-data-adapters.pid ] || kill "$(cat /run/microfx-data-adapters.pid)" 2>/dev/null || true
+    rm -f /run/microfx-data-adapters.pid
+    ;;
+  restart)
+    "$0" stop
+    "$0" start
+    ;;
+esac

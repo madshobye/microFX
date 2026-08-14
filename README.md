@@ -15,6 +15,7 @@ applications, provisioning service, and remote editor.
 ```text
 apps/                         Portable JavaScript applications and assets
 engine/                       QuickJS runtime and retained GPU scene engine
+engine/runtime/               Native executable and render loop
 services/provision/           Optional Wi-Fi provisioning service and portal
 services/peer-bridge/         Optional PeerJS project and asset transport
 platforms/imx6dl-dg1/         i.MX6DL-DG1 Buildroot platform adapter
@@ -33,3 +34,17 @@ applications transactionally over SSH.
 Read [codex.md](codex.md) before changing architecture or deployment behavior.
 For the current firmware target, see
 [platforms/imx6dl-dg1/README.md](platforms/imx6dl-dg1/README.md).
+
+Run the portable host-side unit and policy suite with:
+
+```sh
+./tests/run.sh
+```
+
+Current host evidence and the remaining physical-hardware gates are tracked in
+[`V1-STATUS.md`](V1-STATUS.md). It deliberately distinguishes passing policy
+tests from Wi-Fi, HDMI, WebRTC, and boot behavior that still needs a device.
+
+The custom bootloader work under `platforms/imx6dl-dg1/bootloader/` is an
+isolated prototype only. It is not consumed by the firmware build, SD-card
+installers, or the general SSH development workflow.

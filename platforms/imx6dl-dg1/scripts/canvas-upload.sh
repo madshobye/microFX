@@ -5,7 +5,15 @@ PLATFORM_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 REPO_DIR=$(CDPATH= cd -- "$PLATFORM_DIR/../.." && pwd)
 APP_DIR="$REPO_DIR/apps/demo"
 HOST=${1:-192.168.3.109}
-VM_NAME=${VM_NAME:-microfx-build}
+VM_NAME_FILE="$PLATFORM_DIR/private/build-vm"
+if [ -n "${VM_NAME:-}" ]; then
+  :
+elif [ -r "$VM_NAME_FILE" ]; then
+  IFS= read -r VM_NAME <"$VM_NAME_FILE"
+  [ -n "$VM_NAME" ] || { echo "Empty build VM name in $VM_NAME_FILE" >&2; exit 1; }
+else
+  VM_NAME=microfx-build
+fi
 KEY="$PLATFORM_DIR/private/canvas_debug_ed25519"
 RELEASE="release-$(date -u +%Y%m%d-%H%M%S)"
 SSH="ssh -i $KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o ServerAliveInterval=3 -o ServerAliveCountMax=2"
@@ -28,9 +36,17 @@ limactl shell "$VM_NAME" -- sh -lc "
   OUT=\"\$HOME/microfx-imx6dl-output\"
   make -C \"\$BR\" O=\"\$OUT\" microfx-demo-dirclean
   make -C \"\$BR\" O=\"\$OUT\" microfx-demo
-  cp \"\$OUT/build/microfx-demo-1.0.0/canvas-demo\" '$WORK/canvas-demo'
-  cp \"\$OUT/build/raylib-drm-5.5/src/libraylib.so.5.5.0\" '$WORK/libraylib.so.550'
+  test -x \"\$OUT/build/microfx-demo-1.0.0/canvas-demo\"
+  test -f \"\$OUT/build/raylib-drm-5.5/src/libraylib.so.5.5.0\"
 "
+
+GUEST_HOME=$(limactl shell "$VM_NAME" -- printenv HOME)
+limactl copy --backend=scp \
+  "$VM_NAME:$GUEST_HOME/microfx-imx6dl-output/build/microfx-demo-1.0.0/canvas-demo" \
+  "$WORK/canvas-demo"
+limactl copy --backend=scp \
+  "$VM_NAME:$GUEST_HOME/microfx-imx6dl-output/build/raylib-drm-5.5/src/libraylib.so.5.5.0" \
+  "$WORK/libraylib.so.550"
 
 chmod 0755 "$WORK/canvas-demo"
 cp "$APP_DIR/assets/models/icosahedron.obj" "$WORK/icosahedron.obj"

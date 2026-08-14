@@ -8,6 +8,7 @@
 #define MICROFX_MAX_QUAD_ELEMENTS 256
 #define MICROFX_MAX_MESH_ELEMENTS 16
 #define MICROFX_MAX_TEXT_ELEMENTS 32
+#define MICROFX_MAX_IMAGE_ELEMENTS 16
 #define MICROFX_MAX_TEXT_BYTES 128
 #define MICROFX_MAX_ASSET_PATH 256
 
@@ -15,6 +16,7 @@
 #define MICROFX_HANDLE_MESH 0x02000000
 #define MICROFX_HANDLE_TEXT 0x03000000
 #define MICROFX_HANDLE_QUAD 0x04000000
+#define MICROFX_HANDLE_IMAGE 0x05000000
 #define MICROFX_HANDLE_KIND_MASK 0xff000000
 #define MICROFX_HANDLE_INDEX_MASK 0x00ffffff
 
@@ -33,6 +35,7 @@ typedef struct {
     float radius;
     float rotation;
     uint32_t color;
+    float opacity;
     bool visible;
 } MicroFxSdfElement;
 
@@ -50,6 +53,7 @@ typedef struct {
     float rotation;
     uint32_t topColor;
     uint32_t bottomColor;
+    float opacity;
     bool background;
     bool visible;
 } MicroFxQuadElement;
@@ -75,18 +79,42 @@ typedef struct {
 
 typedef struct {
     char text[MICROFX_MAX_TEXT_BYTES];
+    char fontPath[MICROFX_MAX_ASSET_PATH];
     float x;
     float y;
     float size;
     uint32_t color;
+    float opacity;
     bool visible;
 } MicroFxTextElement;
+
+typedef struct {
+    char assetPath[MICROFX_MAX_ASSET_PATH];
+    float x;
+    float y;
+    float width;
+    float height;
+    float rotation;
+    uint32_t tint;
+    float opacity;
+    bool visible;
+} MicroFxImageElement;
 
 typedef struct {
     float position[3];
     float target[3];
     float fovY;
 } MicroFxCamera;
+
+typedef enum {
+    MICROFX_COLOR_RGB565 = 0,
+    MICROFX_COLOR_RGBA8888 = 1
+} MicroFxColorFormat;
+
+typedef enum {
+    MICROFX_ANTIALIAS_NONE = 0,
+    MICROFX_ANTIALIAS_MSAA4 = 1
+} MicroFxAntialiasing;
 
 typedef struct {
     int outputWidth;
@@ -95,8 +123,19 @@ typedef struct {
     float pixelDensity;
     float minimumPixelDensity;
     float durationSeconds;
+    MicroFxColorFormat colorFormat;
+    MicroFxAntialiasing antialiasing;
+    int depthBits;
     bool automaticDensity;
+    bool dithering;
     bool debugBar;
+    bool profiling;
+    int profileIntervalFrames;
+    int densitySampleFrames;
+    float densityStep;
+    float densityDownThreshold;
+    float densityUpThreshold;
+    int densityUpSamples;
     bool configured;
 } MicroFxRuntimeSettings;
 
@@ -114,6 +153,9 @@ typedef struct {
     MicroFxTextElement text[MICROFX_MAX_TEXT_ELEMENTS];
     int textCount;
     bool textDirty;
+    MicroFxImageElement image[MICROFX_MAX_IMAGE_ELEMENTS];
+    int imageCount;
+    bool imageDirty;
     MicroFxCamera camera;
     MicroFxRuntimeSettings runtime;
     float clearColor[3];
@@ -152,8 +194,15 @@ bool MicroFxSceneTransform(MicroFxScene *scene, int handle, float x, float y,
                           float z, float rx, float ry, float rz, float scale);
 int MicroFxSceneAddText(MicroFxScene *scene, const char *text, float x, float y,
                        float size, uint32_t color);
+int MicroFxSceneAddImage(MicroFxScene *scene, const char *assetPath,
+                        float x, float y, float width, float height,
+                        uint32_t tint);
 bool MicroFxSceneSetText(MicroFxScene *scene, int handle, const char *text);
+bool MicroFxSceneSetTextFont(MicroFxScene *scene, int handle,
+                             const char *assetPath);
 bool MicroFxSceneSetColor(MicroFxScene *scene, int handle, uint32_t color);
+bool MicroFxSceneSetOpacity(MicroFxScene *scene, int handle, float opacity);
+bool MicroFxSceneSetVisible(MicroFxScene *scene, int handle, bool visible);
 bool MicroFxSceneSetEffect(MicroFxScene *scene, int handle, int effect,
                           float amount, float scale);
 void MicroFxSceneSetCamera(MicroFxScene *scene, float x, float y, float z,

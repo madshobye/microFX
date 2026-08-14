@@ -1,12 +1,24 @@
 #!/bin/sh
 
-pidfile=/run/canvas-supervisor.pid
+run_root=${MICROFX_RUN_ROOT:-/run}
+pidfile=$run_root/canvas-supervisor.pid
+supervisor=${MICROFX_SUPERVISOR:-/usr/sbin/canvas-supervisor}
 
 case "$1" in
   start)
+    if [ -r "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+      echo "Graphics supervisor already running"
+      exit 0
+    fi
+    rm -f "$pidfile"
     echo "Starting graphics supervisor"
-    /usr/sbin/canvas-supervisor &
+    "$supervisor" &
     echo $! >"$pidfile"
+    if ! kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+      echo "Graphics supervisor failed to start" >&2
+      rm -f "$pidfile"
+      exit 1
+    fi
     ;;
   stop)
     if [ -r "$pidfile" ]; then

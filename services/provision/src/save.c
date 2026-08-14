@@ -76,17 +76,89 @@ static void Quote(FILE *file, const char *value)
     fputc('"',file);
 }
 
+static int LineEquals(const char *line, const char *value)
+{
+    while (isspace((unsigned char)*line)) line++;
+    size_t length=strlen(value);
+    if (strncmp(line,value,length)) return 0;
+    line+=length;
+    while (isspace((unsigned char)*line)) line++;
+    return *line=='\0';
+}
+
+static int NetworkSsid(const char *line, char *value, size_t capacity)
+{
+    while (isspace((unsigned char)*line)) line++;
+    if (strncmp(line,"ssid",4)) return 0;
+    line+=4;
+    while (isspace((unsigned char)*line)) line++;
+    if (*line++!='=') return 0;
+    while (isspace((unsigned char)*line)) line++;
+    if (*line++!='"') return 0;
+    size_t cursor=0;
+    while (*line && *line!='"') {
+        unsigned char c=(unsigned char)*line++;
+        if (c=='\\') {
+            c=(unsigned char)*line++;
+            if (c!='"' && c!='\\') return 0;
+        }
+        if (c<32 || cursor+1>=capacity) return 0;
+        value[cursor++]=(char)c;
+    }
+    if (*line++!='"') return 0;
+    while (isspace((unsigned char)*line)) line++;
+    if (*line!='\0') return 0;
+    value[cursor]='\0';
+    return 1;
+}
+
+static int CopyOtherNetworks(FILE *input, FILE *output, const char *ssid)
+{
+    char line[1024], block[8192];
+    size_t used=0;
+    int inNetwork=0, matching=0;
+    while (fgets(line,sizeof(line),input)) {
+        if (!strchr(line,'\n') && !feof(input)) return -1;
+        if (!inNetwork) {
+            char normalized[1024];
+            snprintf(normalized,sizeof(normalized),"%s",line);
+            normalized[strcspn(normalized,"\r\n")]='\0';
+            if (LineEquals(normalized,"network={")) {
+                inNetwork=1; matching=0; used=0;
+            } else if (fputs(line,output)==EOF) return -1;
+        }
+        if (inNetwork) {
+            size_t length=strlen(line);
+            if (length>=sizeof(block)-used) return -1;
+            memcpy(block+used,line,length); used+=length; block[used]='\0';
+            char normalized[1024], parsed[33];
+            snprintf(normalized,sizeof(normalized),"%s",line);
+            normalized[strcspn(normalized,"\r\n")]='\0';
+            if (NetworkSsid(normalized,parsed,sizeof(parsed)) && !strcmp(parsed,ssid)) matching=1;
+            if (LineEquals(normalized,"}")) {
+                if (!matching && fwrite(block,1,used,output)!=used) return -1;
+                inNetwork=0; used=0;
+            }
+        }
+    }
+    // Preserve a malformed trailing block instead of silently discarding user
+    // configuration. wpa_supplicant will report the original syntax problem.
+    if (inNetwork && fwrite(block,1,used,output)!=used) return -1;
+    return ferror(input) || ferror(output) ? -1 : 0;
+}
+
 static int SaveNetwork(const char *ssid, const char *password)
 {
     mkdir(MICROFX_CONFIG_DIR,0700);
-    int input=open(MICROFX_CONFIG_DIR "/wpa_supplicant.conf",O_RDONLY);
+    FILE *input=fopen(MICROFX_CONFIG_DIR "/wpa_supplicant.conf","r");
     FILE *output=fopen(MICROFX_CONFIG_DIR "/wpa_supplicant.new","w");
-    if (!output) return -1;
-    if (input>=0) {
-        char buffer[1024]; ssize_t count;
-        while ((count=read(input,buffer,sizeof(buffer)))>0) fwrite(buffer,1,(size_t)count,output);
-        close(input);
-    } else fputs("ctrl_interface=/run/wpa_supplicant\nupdate_config=0\ncountry=DK\n",output);
+    if (!output) { if (input) fclose(input); return -1; }
+    if (input) {
+        if (CopyOtherNetworks(input,output,ssid)) { fclose(input); fclose(output); unlink(MICROFX_CONFIG_DIR "/wpa_supplicant.new"); return -1; }
+        if (fclose(input)) { fclose(output); unlink(MICROFX_CONFIG_DIR "/wpa_supplicant.new"); return -1; }
+    } else if (fputs("ctrl_interface=/run/wpa_supplicant\nupdate_config=0\ncountry=DK\n",output)==EOF) {
+        fclose(output); unlink(MICROFX_CONFIG_DIR "/wpa_supplicant.new"); return -1;
+    }
     fputs("\nnetwork={\n    ssid=",output); Quote(output,ssid);
     fputs("\n    psk=",output); Quote(output,password);
     fputs("\n    key_mgmt=WPA-PSK\n}\n",output);

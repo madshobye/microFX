@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "protocolVersion": 2,
+  "commands": [
+    { "name": "system.ping", "response": "system.pong", "access": "read", "safeCheck": true },
+    { "name": "console.get", "response": "console", "access": "read", "safeCheck": true },
+    { "name": "project.status", "response": "project.status", "access": "read", "safeCheck": false },
+    { "name": "project.list", "response": "projects", "access": "read", "safeCheck": true },
+    { "name": "project.create", "response": "project.create", "access": "write", "safeCheck": false },
+    { "name": "project.get", "response": "project", "access": "read", "safeCheck": true },
+    { "name": "project.save-run", "response": "project.activation", "access": "control", "safeCheck": false },
+    { "name": "code.put", "response": "code.put", "access": "write", "safeCheck": false },
+    { "name": "project.metadata.put", "response": "project.metadata.put", "access": "write", "safeCheck": false },
+    { "name": "revision.get", "response": "revision", "access": "read", "safeCheck": false },
+    { "name": "revision.restore", "response": "revision.restore", "access": "write", "safeCheck": false },
+    { "name": "asset.upload.status", "response": "asset.upload", "access": "write", "safeCheck": false },
+    { "name": "asset.upload.chunk", "response": "asset.upload", "access": "write", "safeCheck": false },
+    { "name": "asset.upload.commit", "response": "asset", "access": "write", "safeCheck": false },
+    { "name": "asset.get.chunk", "response": "asset.chunk", "access": "read", "safeCheck": false },
+    { "name": "asset.get", "response": "asset", "access": "read", "safeCheck": false },
+    { "name": "asset.put", "response": "asset.put", "access": "write", "safeCheck": false },
+    { "name": "asset.delete", "response": "asset.delete", "access": "write", "safeCheck": false },
+    { "name": "project.activate", "response": "project.activate", "access": "control", "safeCheck": false }
+  ]
+}

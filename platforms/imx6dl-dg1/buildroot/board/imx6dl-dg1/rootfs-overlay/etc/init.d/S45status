@@ -1,0 +1,40 @@
+#!/bin/sh
+
+run_root=${MICROFX_RUN_ROOT:-/run}
+pidfile=$run_root/microfx-status.pid
+report=$run_root/microfx-status
+interval=${MICROFX_STATUS_INTERVAL:-15}
+status_command=${MICROFX_STATUS_COMMAND:-/usr/sbin/microfx-status}
+
+case "$1" in
+  start)
+    if [ -r "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+      exit 0
+    fi
+    rm -f "$pidfile"
+    (
+      trap 'exit 0' TERM INT
+      while :; do
+        if "$status_command" >"$report.new"; then
+          mv -f "$report.new" "$report"
+        else
+          rm -f "$report.new"
+        fi
+        sleep "$interval" &
+        wait $!
+      done
+    ) &
+    echo $! >"$pidfile"
+    ;;
+  stop)
+    if [ -r "$pidfile" ]; then
+      kill "$(cat "$pidfile")" 2>/dev/null || true
+      rm -f "$pidfile"
+    fi
+    rm -f "$report.new"
+    ;;
+  restart)
+    "$0" stop
+    "$0" start
+    ;;
+esac

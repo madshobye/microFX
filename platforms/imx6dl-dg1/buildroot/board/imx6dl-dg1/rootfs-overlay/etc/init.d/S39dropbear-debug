@@ -3,7 +3,6 @@
 config=/etc/canvas.conf
 [ -r "$config" ] && . "$config"
 CANVAS_SSH=${CANVAS_SSH:-0}
-CANVAS_DEBUG=${CANVAS_DEBUG:-0}
 CANVAS_PERSIST_LOGS=${CANVAS_PERSIST_LOGS:-0}
 pidfile=/run/dropbear-debug.pid
 hostkey=/run/dropbear_ed25519_host_key
@@ -16,6 +15,10 @@ fi
 case "$1" in
   start)
     [ "$CANVAS_SSH" = "1" ] || exit 0
+    if [ -r "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+      exit 0
+    fi
+    rm -f "$pidfile"
     if grep -q ' /data ' /proc/mounts; then
       mkdir -p /data/ssh
       [ "$CANVAS_PERSIST_LOGS" != "1" ] || mkdir -p /data/state

@@ -1,0 +1,31 @@
+===== modetest imx-drm planes =====
+Planes:
+id      crtc    fb      CRTC x,y        x,y     gamma size      possible crtcs
+31      0       0       0,0             0,0     0               0x00000001
+  formats: XR24 AR24 RG16
+  props:
+        6 type:
+                flags: immutable enum
+                enums: Overlay=0 Primary=1 Cursor=2
+                value: 0
+        7 zpos:
+                flags: range
+                values: 0 3
+                value: 1
+        8 alpha:
+                flags: range
+                values: 0 65535
+                value: 65535
+32      0       0       0,0             0,0     0               0x00000001
+  formats: XR24
+  props:
+        6 type:
+                flags: immutable enum
+                enums: Overlay=0 Primary=1 Cursor=2
+                value: 1
+MICROFX_EVIDENCE scaling=yes
+MICROFX_EVIDENCE dmaBufImport=yes
+MICROFX_EVIDENCE atomicCommit=yes
+MICROFX_EVIDENCE pageFlipSync=yes
+===== modetest etnaviv planes =====
+

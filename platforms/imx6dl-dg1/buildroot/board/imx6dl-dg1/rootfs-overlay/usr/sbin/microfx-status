@@ -1,0 +1,91 @@
+#!/bin/sh
+
+run_root=${MICROFX_RUN_ROOT:-/run}
+data_root=${MICROFX_DATA_ROOT:-/data}
+release_file=${MICROFX_RELEASE_FILE:-/etc/microfx-release}
+runtime_config=${MICROFX_RUNTIME_CONFIG:-/etc/microfx.conf}
+product_config=${MICROFX_PRODUCT_CONFIG:-/etc/microfx-product.conf}
+cmdline_file=${MICROFX_CMDLINE_FILE:-/proc/cmdline}
+mounts_file=${MICROFX_MOUNTS_FILE:-/proc/mounts}
+firmware_root=${MICROFX_FIRMWARE_ROOT:-/lib/firmware}
+ip_cmd=${MICROFX_IP_CMD:-ip}
+
+[ -r "$release_file" ] && . "$release_file"
+[ -r "$runtime_config" ] && . "$runtime_config"
+[ -r "$product_config" ] && . "$product_config"
+
+status_value() {
+  file=$1
+  key=$2
+  sed -n "s/^${key}[[:space:]]*//p" "$file" 2>/dev/null | head -n 1
+}
+
+counter_value() {
+  value=$(cat "$1" 2>/dev/null || echo 0)
+  case "$value" in ''|*[!0-9]*) value=0 ;; esac
+  printf '%s' "$value"
+}
+
+process_state() {
+  if [ -r "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; then
+    printf running
+  else
+    printf stopped
+  fi
+}
+
+cmdline=$(cat "$cmdline_file" 2>/dev/null || true)
+root_device=$(printf '%s\n' "$cmdline" | sed -n 's/.*root=\([^ ]*\).*/\1/p')
+case "$root_device" in
+  /dev/mmcblk0p2) active_slot=a ;;
+  /dev/mmcblk0p3) active_slot=b ;;
+  *) active_slot=unknown ;;
+esac
+
+if grep -q ' /data ' "$mounts_file" 2>/dev/null; then data_mount=mounted; else data_mount=missing; fi
+wifi_interface=${MICROFX_WIFI_INTERFACE:-wlan1}
+wifi_address=$($ip_cmd -4 -o address show dev "$wifi_interface" 2>/dev/null |
+  sed -n 's/.* inet \([^ /]*\).*/\1/p' | head -n 1)
+[ -n "$wifi_address" ] || wifi_address=none
+
+wifi_firmware=$firmware_root/ath6k/AR6003/hw2.1.1/fw-3.bin
+if [ -s "$wifi_firmware" ]; then
+  firmware_name=${wifi_firmware##*/}
+  if command -v sha256sum >/dev/null 2>&1; then
+    firmware_digest=$(sha256sum "$wifi_firmware" | sed 's/[[:space:]].*//')
+  else
+    firmware_digest=unavailable
+  fi
+else
+  firmware_name=missing
+  firmware_digest=missing
+fi
+
+recovery_state=$(status_value "$run_root/microfx-recovery-status" state)
+[ -n "$recovery_state" ] || recovery_state=inactive
+network_state=$(status_value "$run_root/microfx-network-status" state)
+[ -n "$network_state" ] || network_state=unknown
+time_state=$(status_value "$run_root/microfx-time-sync.status" state)
+[ -n "$time_state" ] || time_state=unknown
+
+printf 'generated_epoch\t%s\n' "$(date -u +%s 2>/dev/null || echo 0)"
+printf 'release_id\t%s\n' "${MICROFX_RELEASE_ID:-unknown}"
+printf 'image_schema\t%s\n' "${MICROFX_IMAGE_SCHEMA:-unknown}"
+printf 'platform\t%s\n' "${MICROFX_PLATFORM:-unknown}"
+printf 'boot_model\t%s\n' "${MICROFX_BOOT_MODEL:-unknown}"
+printf 'active_slot\t%s\n' "$active_slot"
+printf 'root_device\t%s\n' "${root_device:-unknown}"
+printf 'data_mount\t%s\n' "$data_mount"
+printf 'provisioning\t%s\n' "${MICROFX_PROVISIONING:-0}"
+printf 'wifi_interface\t%s\n' "$wifi_interface"
+printf 'wifi_address\t%s\n' "$wifi_address"
+printf 'wifi_firmware\t%s\n' "$firmware_name"
+printf 'wifi_firmware_sha256\t%s\n' "$firmware_digest"
+printf 'network_state\t%s\n' "$network_state"
+printf 'time_state\t%s\n' "$time_state"
+printf 'recovery_state\t%s\n' "$recovery_state"
+printf 'boot_count\t%s\n' "$(counter_value "$data_root/state/boot-count")"
+printf 'short_boot_count\t%s\n' "$(counter_value "$data_root/state/short-boot-count")"
+printf 'graphics_supervisor\t%s\n' "$(process_state "$run_root/canvas-supervisor.pid")"
+printf 'debug_ssh\t%s\n' "$(process_state "$run_root/dropbear-debug.pid")"
+printf 'peer_bridge\t%s\n' "$(process_state "$run_root/microfx-peer-bridge.pid")"

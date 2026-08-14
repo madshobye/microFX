@@ -1,41 +1,114 @@
 #!/bin/sh
 
-pidfile=/run/microfx-time-sync.pid
-log=/tmp/microfx-time-sync.log
+# This board has no persistent RTC. Seed an invalid clock from the newest
+# trustworthy local timestamp before TLS clients start, then keep retrying NTP
+# for the lifetime of the boot. All routine diagnostics remain in RAM.
+run_root=${MICROFX_RUN_ROOT:-/run}
+data_root=${MICROFX_DATA_ROOT:-/data}
+mounts_file=${MICROFX_MOUNTS_FILE:-/proc/mounts}
+date_cmd=${MICROFX_DATE_COMMAND:-date}
+timeout_cmd=${MICROFX_TIMEOUT_COMMAND:-timeout}
+ntpd_cmd=${MICROFX_NTPD_COMMAND:-ntpd}
+ip_cmd=${MICROFX_IP_COMMAND:-ip}
+release_file=${MICROFX_RELEASE_FILE:-/etc/microfx-release}
+seed_file=${MICROFX_TIME_SEED_FILE:-$data_root/state/last-known-time}
+pidfile=${MICROFX_TIME_PIDFILE:-$run_root/microfx-time-sync.pid}
+status=${MICROFX_TIME_STATUS:-$run_root/microfx-time-sync.status}
+log=${MICROFX_TIME_LOG:-/tmp/microfx-time-sync.log}
+valid_year=${MICROFX_TIME_VALID_YEAR:-2024}
+retry_delay=${MICROFX_TIME_RETRY_DELAY:-15}
+synced_retry_delay=${MICROFX_TIME_SYNCED_RETRY_DELAY:-3600}
+max_attempts=${MICROFX_TIME_MAX_ATTEMPTS:-0}
+
+clock_valid() {
+  year=$($date_cmd -u +%Y 2>/dev/null || echo 0)
+  case "$year" in ''|*[!0-9]*) year=0 ;; esac
+  [ "$year" -ge "$valid_year" ]
+}
+
+write_status() {
+  printf 'state\t%s\ndetail\t%s\n' "$1" "$2" >"$status.new" &&
+    mv -f "$status.new" "$status"
+}
+
+valid_seed() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$1" -ge 1704067200 ]
+}
+
+seed_clock() {
+  clock_valid && return 0
+  seed=
+  if grep -q " $data_root " "$mounts_file" 2>/dev/null && [ -r "$seed_file" ]; then
+    seed=$(head -n 1 "$seed_file" 2>/dev/null || true)
+    valid_seed "$seed" || seed=
+  fi
+  if [ -z "$seed" ] && [ -r "$release_file" ]; then
+    seed=$($date_cmd -u -r "$release_file" +%s 2>/dev/null || true)
+    valid_seed "$seed" || seed=
+  fi
+  if [ -n "$seed" ]; then
+    $date_cmd -u -s "@$seed" >/dev/null 2>&1 || true
+  fi
+}
+
+persist_seed_once() {
+  [ "$1" = 0 ] || return 0
+  grep -q " $data_root " "$mounts_file" 2>/dev/null || return 0
+  epoch=$($date_cmd -u +%s 2>/dev/null || true)
+  valid_seed "$epoch" || return 0
+  mkdir -p "${seed_file%/*}"
+  printf '%s\n' "$epoch" >"$seed_file.new" && mv -f "$seed_file.new" "$seed_file"
+}
 
 case "$1" in
   start)
-    # The DG1 profile has no persistent real-time clock. Start asynchronously
-    # because Wi-Fi association and DHCP are also asynchronous at boot. PeerJS
-    # retries independently until this service makes TLS certificate dates
-    # meaningful.
-    if [ "$(date -u +%Y)" -ge 2024 ]; then
-      echo "System clock already valid: $(date -u -Iseconds)" >"$log"
+    mkdir -p "$run_root"
+    if [ -r "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
       exit 0
     fi
-    echo "Starting network time synchronization"
+    rm -f "$pidfile"
+    : >"$log"
+    seed_clock
+    if clock_valid; then
+      write_status seeded "clock is usable while network time is pending"
+    else
+      write_status waiting-network "no usable local clock seed"
+    fi
+    echo "Starting persistent network time synchronization"
     (
+      child=
+      trap 'test -z "$child" || kill "$child" 2>/dev/null; exit 0' TERM INT
       attempts=0
-      while [ "$attempts" -lt 24 ]; do
+      persisted=0
+      while [ "$max_attempts" -eq 0 ] || [ "$attempts" -lt "$max_attempts" ]; do
+        if ! $ip_cmd -4 route show default 2>/dev/null | grep -q '^default '; then
+          write_status waiting-network "default route unavailable"
+          sleep "$retry_delay"
+          continue
+        fi
         attempts=$((attempts + 1))
         echo "NTP attempt $attempts"
-        # Some BusyBox ntpd failure paths still return success (for example
-        # while DNS or Wi-Fi is only partially ready).  The exit status alone
-        # therefore cannot prove that TLS has a usable clock.
-        timeout 20 ntpd -q \
+        $timeout_cmd 20 "$ntpd_cmd" -q \
           -p time.cloudflare.com \
-          -p pool.ntp.org || true
+          -p pool.ntp.org &
+        child=$!
+        wait "$child" || true
+        child=
 
-        year=$(date -u +%Y)
-        if [ "$year" -ge 2024 ]; then
-          echo "System clock synchronized: $(date -u -Iseconds)"
-          exit 0
+        if clock_valid; then
+          persist_seed_once "$persisted"
+          persisted=1
+          write_status usable "clock usable; NTP retry remains armed"
+          echo "System clock usable: $($date_cmd -u -Iseconds 2>/dev/null || true)"
+          sleep "$synced_retry_delay"
+        else
+          write_status retrying "clock remains invalid after NTP attempt $attempts"
+          echo "Clock still invalid after attempt $attempts"
+          sleep "$retry_delay"
         fi
-        echo "Clock still invalid after attempt $attempts: $(date -u -Iseconds)"
-        sleep 5
       done
-      echo "Unable to synchronize the system clock"
-      exit 1
+      write_status stopped "test retry limit reached"
     ) >"$log" 2>&1 &
     echo $! >"$pidfile"
     ;;

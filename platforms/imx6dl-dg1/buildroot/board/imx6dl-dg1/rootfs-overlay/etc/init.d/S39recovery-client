@@ -1,0 +1,26 @@
+#!/bin/sh
+
+pidfile=/run/microfx-recovery-guardian.pid
+guardian=/usr/sbin/microfx-recovery-guardian
+
+case "$1" in
+  start)
+    [ -x "$guardian" ] || exit 0
+    if [ -r "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+      exit 0
+    fi
+    rm -f "$pidfile"
+    "$guardian" &
+    echo $! >"$pidfile"
+    ;;
+  stop)
+    if [ -r "$pidfile" ]; then
+      kill "$(cat "$pidfile")" 2>/dev/null || true
+      rm -f "$pidfile"
+    fi
+    ;;
+  restart)
+    "$0" stop
+    "$0" start
+    ;;
+esac

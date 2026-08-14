@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "sectorBytes": 512,
+  "alignmentBytes": 1048576,
+  "minimumDiskBytes": 3833593856,
+  "rawBoot": {
+    "startBytes": 0,
+    "sizeBytes": 8388608,
+    "imageOffsetBytes": 1024,
+    "maximumImageBytes": 4194304
+  },
+  "partitions": [
+    {
+      "name": "boot",
+      "label": "microfx-boot",
+      "startBytes": 8388608,
+      "sizeBytes": 67108864,
+      "filesystem": "ext4"
+    },
+    {
+      "name": "root-a",
+      "label": "microfx-root-a",
+      "startBytes": 75497472,
+      "sizeBytes": 1610612736,
+      "filesystem": "ext4"
+    },
+    {
+      "name": "root-b",
+      "label": "microfx-root-b",
+      "startBytes": 1686110208,
+      "sizeBytes": 1610612736,
+      "filesystem": "ext4"
+    },
+    {
+      "name": "data",
+      "label": "microfx-data",
+      "startBytes": 3296722944,
+      "minimumSizeBytes": 536870912,
+      "growToEnd": true,
+      "filesystem": "ext4"
+    }
+  ]
+}

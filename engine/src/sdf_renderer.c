@@ -91,7 +91,7 @@ static void SetVertex(SdfVertex *vertex, const MicroFxSdfElement *e,
     vertex->color[0] = ((e->color >> 24) & 255)/255.0f;
     vertex->color[1] = ((e->color >> 16) & 255)/255.0f;
     vertex->color[2] = ((e->color >> 8) & 255)/255.0f;
-    vertex->color[3] = (e->color & 255)/255.0f;
+    vertex->color[3] = (e->color & 255)/255.0f*e->opacity;
 }
 
 void MicroFxSdfRendererDraw(MicroFxSdfRenderer *renderer, MicroFxScene *scene,

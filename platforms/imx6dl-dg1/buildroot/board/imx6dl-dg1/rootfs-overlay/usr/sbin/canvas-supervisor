@@ -1,17 +1,93 @@
 #!/bin/sh
 
-config=/etc/canvas.conf
+config=${CANVAS_CONFIG:-/etc/canvas.conf}
 [ -r "$config" ] && . "$config"
-product_config=/etc/microfx-product.conf
+runtime_config=${MICROFX_RUNTIME_CONFIG:-/etc/microfx.conf}
+[ -r "$runtime_config" ] && . "$runtime_config"
+product_config=${MICROFX_PRODUCT_CONFIG:-/etc/microfx-product.conf}
 [ -r "$product_config" ] && . "$product_config"
 CANVAS_PERSIST_LOGS=${CANVAS_PERSIST_LOGS:-0}
 CANVAS_FAIL_FAST=${CANVAS_FAIL_FAST:-1}
 MICROFX_DEFAULT_PEER_ID=${MICROFX_DEFAULT_PEER_ID:-graphics-demo}
 MICROFX_SETUP_SSID=${MICROFX_SETUP_SSID:-graphics-setup}
 MICROFX_SETUP_PASSWORD=${MICROFX_SETUP_PASSWORD:-graphicssetup}
+MICROFX_DATA_ROOT=${MICROFX_DATA_ROOT:-/data}
+MICROFX_RUN_ROOT=${MICROFX_RUN_ROOT:-/run}
+MICROFX_FACTORY_APP=${MICROFX_FACTORY_APP:-/usr/bin/canvas-demo}
+MICROFX_ONBOARDING_SCRIPT=${MICROFX_ONBOARDING_SCRIPT:-/usr/share/microfx/onboarding.js}
+MICROFX_HEALTH_SECONDS=${MICROFX_HEALTH_SECONDS:-2}
+MICROFX_REQUIRE_DATA_MOUNT=${MICROFX_REQUIRE_DATA_MOUNT:-1}
+reload_request=$MICROFX_RUN_ROOT/microfx-project-reload
+reload_status=$MICROFX_RUN_ROOT/microfx-project-status
+onboarding_marker=$MICROFX_RUN_ROOT/microfx-onboarding-shown
+benchmark_overrides=$MICROFX_RUN_ROOT/microfx-benchmark.env
+state_root=$MICROFX_DATA_ROOT/state
+apps_root=$MICROFX_DATA_ROOT/apps
 
-if [ "$CANVAS_PERSIST_LOGS" = "1" ] && grep -q ' /data ' /proc/mounts; then
-    log=/data/state/canvas.log
+apply_benchmark_overrides() {
+    [ -r "$benchmark_overrides" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|'#'*) continue ;; esac
+        key=${line%%=*}
+        value=${line#*=}
+        case "$key" in
+          MICROFX_OUTPUT_WIDTH|MICROFX_OUTPUT_HEIGHT|MICROFX_PIXEL_DENSITY|\
+          MICROFX_MIN_PIXEL_DENSITY|MICROFX_TARGET_FPS|MICROFX_COLOR_FORMAT|\
+          MICROFX_DEPTH_BITS|MICROFX_DITHERING|MICROFX_ANTIALIASING|\
+          MICROFX_PROFILE_INTERVAL) ;;
+          *) echo "Ignored unknown volatile benchmark setting: $key"; continue ;;
+        esac
+        case "$value" in
+          ''|*[!A-Za-z0-9._-]*)
+            echo "Ignored invalid volatile benchmark value for $key"
+            continue
+            ;;
+        esac
+        export "$key=$value"
+    done <"$benchmark_overrides"
+}
+
+data_available() {
+    if [ "$MICROFX_REQUIRE_DATA_MOUNT" = "0" ]; then
+        [ -d "$MICROFX_DATA_ROOT" ]
+    else
+        grep -q " $MICROFX_DATA_ROOT " /proc/mounts
+    fi
+}
+
+write_activation_status() {
+    token=$1 project=$2 state=$3 detail=$4
+    mkdir -p "$MICROFX_RUN_ROOT"
+    printf '%s\t%s\t%s\t%s\n' "$token" "$project" "$state" "$detail" >"$reload_status.new"
+    mv -f "$reload_status.new" "$reload_status"
+}
+
+renderer_failure_detail() {
+    detail=$(tail -n 1 "$log" 2>/dev/null | tr '\t\r\n' '   ')
+    [ -n "$detail" ] || detail="renderer exited during health check"
+    printf '%s' "$detail"
+}
+
+wait_for_activation_request() {
+    echo "Renderer stopped; waiting for the next project activation" >>"$log"
+    while :; do
+        if [ -f "$reload_request" ]; then
+            IFS="$(printf '\t')" read -r activation_token activation_project <"$reload_request" || true
+            rm -f "$reload_request"
+            if [ -n "$activation_token" ] && [ -n "$activation_project" ]; then
+                write_activation_status "$activation_token" "$activation_project" pending "starting renderer after previous failure"
+                return 0
+            fi
+            echo "Ignored malformed project reload request while renderer was stopped" >>"$log"
+            activation_token=
+            activation_project=
+        fi
+        sleep 1
+    done
+}
+
+if [ "$CANVAS_PERSIST_LOGS" = "1" ] && data_available; then
+    log=$state_root/canvas.log
 else
     log=/tmp/canvas.log
 fi
@@ -20,51 +96,85 @@ child=
 trap 'test -n "$child" && kill "$child" 2>/dev/null; exit 0' TERM INT
 
 rollback() {
-    if [ -L /data/apps/previous ]; then
-        previous=$(readlink /data/apps/previous)
-        ln -s "$previous" /data/apps/current.new
-        mv -Tf /data/apps/current.new /data/apps/current
+    if [ -L "$apps_root/previous-runtime" ]; then
+        previous=$(readlink "$apps_root/previous-runtime")
+        ln -s "$previous" "$apps_root/current-runtime.new"
+        mv -Tf "$apps_root/current-runtime.new" "$apps_root/current-runtime"
         echo "Rolled back canvas application to $previous" >>"$log"
     fi
-    rm -f /data/state/app-pending
+    rm -f "$state_root/app-pending"
 }
 
-if [ ! -e /run/microfx-onboarding-shown ] &&
-   [ -x /usr/bin/canvas-demo ] &&
-   [ -r /usr/share/microfx/onboarding.js ]; then
-    touch /run/microfx-onboarding-shown
+if [ ! -e "$onboarding_marker" ] &&
+   [ -x "$MICROFX_FACTORY_APP" ] &&
+   [ -r "$MICROFX_ONBOARDING_SCRIPT" ]; then
+    touch "$onboarding_marker"
     peer_id=$MICROFX_DEFAULT_PEER_ID
-    [ ! -s /data/config/peer-id ] || peer_id=$(head -n 1 /data/config/peer-id)
+    [ ! -s "$MICROFX_DATA_ROOT/config/peer-id" ] || peer_id=$(head -n 1 "$MICROFX_DATA_ROOT/config/peer-id")
     echo "Starting 40-second onboarding application" >>"$log"
-    MICROFX_SCRIPT=/usr/share/microfx/onboarding.js \
+    MICROFX_SCRIPT="$MICROFX_ONBOARDING_SCRIPT" \
     MICROFX_PEER_ID="$peer_id" \
     MICROFX_AP_SSID="$MICROFX_SETUP_SSID" \
     MICROFX_AP_PASSWORD="$MICROFX_SETUP_PASSWORD" \
-      /usr/bin/canvas-demo >>"$log" 2>&1 &
+    MICROFX_PROVISIONING="${MICROFX_PROVISIONING:-0}" \
+      "$MICROFX_FACTORY_APP" >>"$log" 2>&1 &
     child=$!
     wait "$child" || echo "Onboarding application exited with an error" >>"$log"
     child=
 fi
 
+activation_token=
+activation_project=
+
 while :; do
-    app=/usr/bin/canvas-demo
-    grep -q ' /data ' /proc/mounts &&
-      [ -x /data/apps/current/canvas-demo ] &&
-      app=/data/apps/current/canvas-demo
+    app=$MICROFX_FACTORY_APP
+    data_available &&
+      [ -x "$apps_root/current-runtime/canvas-demo" ] &&
+      app=$apps_root/current-runtime/canvas-demo
     echo "Starting $app" >>"$log"
-    "$app" >>"$log" 2>&1 &
+    (
+      apply_benchmark_overrides
+      if [ -e "$MICROFX_RUN_ROOT/microfx-profile" ]; then
+          export MICROFX_PROFILE=1
+          export MICROFX_PROFILE_INTERVAL=${MICROFX_PROFILE_INTERVAL:-120}
+      fi
+      exec "$app"
+    ) >>"$log" 2>&1 &
     child=$!
     requested_reload=0
 
-    if [ -f /data/state/app-pending ]; then
+    if [ -n "$activation_token" ]; then
+        sleep "$MICROFX_HEALTH_SECONDS"
+        if kill -0 "$child" 2>/dev/null; then
+            write_activation_status "$activation_token" "$activation_project" running "renderer passed health check"
+            echo "Project $activation_project is running (activation $activation_token)" >>"$log"
+            activation_token=
+            activation_project=
+        else
+            wait "$child" 2>/dev/null || true
+            child=
+            failure_detail=$(renderer_failure_detail)
+            write_activation_status "$activation_token" "$activation_project" failed "$failure_detail"
+            echo "Project $activation_project failed (activation $activation_token)" >>"$log"
+            activation_token=
+            activation_project=
+            if [ "$CANVAS_FAIL_FAST" = "1" ]; then
+                wait_for_activation_request
+            fi
+            sleep 1
+            continue
+        fi
+    fi
+
+    if [ -f "$state_root/app-pending" ]; then
         sleep 10
         if kill -0 "$child" 2>/dev/null; then
-            rm -f /data/state/app-pending
+            rm -f "$state_root/app-pending"
             echo "Canvas application passed its health window" >>"$log"
         else
             wait "$child" 2>/dev/null || true
             child=
-            rm -f /data/state/app-pending
+            rm -f "$state_root/app-pending"
             echo "Canvas pending release failed its health window" >>"$log"
             if [ "$CANVAS_FAIL_FAST" = "1" ]; then
                 echo "Fail-fast enabled; canvas supervisor is stopping" >>"$log"
@@ -77,10 +187,18 @@ while :; do
     fi
 
     while kill -0 "$child" 2>/dev/null; do
-        if [ -f /run/microfx-project-reload ]; then
-            rm -f /run/microfx-project-reload
+        if [ -f "$reload_request" ]; then
+            IFS="$(printf '\t')" read -r activation_token activation_project <"$reload_request" || true
+            rm -f "$reload_request"
+            if [ -z "$activation_token" ] || [ -z "$activation_project" ]; then
+                echo "Ignored malformed project reload request" >>"$log"
+                activation_token=
+                activation_project=
+                continue
+            fi
+            write_activation_status "$activation_token" "$activation_project" stopping "stopping previous renderer"
             requested_reload=1
-            echo "Reloading active graphics project" >>"$log"
+            echo "Reloading project $activation_project (activation $activation_token)" >>"$log"
             kill "$child" 2>/dev/null || true
             break
         fi
@@ -93,8 +211,9 @@ while :; do
         continue
     fi
     if [ "$CANVAS_FAIL_FAST" = "1" ]; then
-        echo "Canvas application exited; fail-fast supervisor is stopping" >>"$log"
-        exit 1
+        echo "Canvas application exited; fail-fast supervisor will wait for an explicit activation" >>"$log"
+        wait_for_activation_request
+        continue
     fi
     echo "Canvas application exited; restarting" >>"$log"
     sleep 1

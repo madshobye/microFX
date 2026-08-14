@@ -2,17 +2,26 @@
 
 case "$1" in
   start)
+    if [ -r /run/microfx-peer-bridge.pid ] &&
+       kill -0 "$(cat /run/microfx-peer-bridge.pid)" 2>/dev/null; then
+      exit 0
+    fi
+    rm -f /run/microfx-peer-bridge.pid
     if grep -q ' /data ' /proc/mounts; then
-      mkdir -p /data/apps/current/assets /data/config
-      if [ ! -s /data/apps/current/main.js ]; then
-        cp /usr/share/microfx/main.js /data/apps/current/main.js
-      fi
+      mkdir -p /data/apps/projects /data/config
     fi
     echo "Starting PeerJS bridge"
     (
       child=
       trap 'if [ -n "$child" ]; then kill "$child" 2>/dev/null || true; fi; exit 0' TERM INT
       while true; do
+        year=$(date -u +%Y 2>/dev/null || echo 0)
+        case "$year" in ''|*[!0-9]*) year=0 ;; esac
+        if [ "$year" -lt 2024 ]; then
+          echo "PeerJS bridge waiting for a TLS-usable system clock"
+          sleep 5
+          continue
+        fi
         /usr/bin/microfx-peer-bridge &
         child=$!
         wait "$child" || true

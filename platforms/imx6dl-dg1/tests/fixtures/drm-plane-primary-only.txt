@@ -1,0 +1,16 @@
+===== modetest imx-drm planes =====
+Planes:
+id      crtc    fb      CRTC x,y        x,y     gamma size      possible crtcs
+32      0       0       0,0             0,0     0               0x00000001
+  formats: XR24 RG16
+  props:
+        6 type:
+                flags: immutable enum
+                enums: Overlay=0 Primary=1 Cursor=2
+                value: 1
+        7 zpos:
+                flags: range
+                values: 0 0
+                value: 0
+===== modetest etnaviv planes =====
+

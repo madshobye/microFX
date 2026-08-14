@@ -9,5 +9,8 @@ bool MicroFxProjectRoot(const char *scriptPath, char *output, size_t outputSize,
 bool MicroFxResolveAsset(const char *projectRoot, const char *assetPath,
                         char *output, size_t outputSize,
                         char *error, size_t errorSize);
+bool MicroFxResolveDataAsset(const char *projectRoot, const char *assetPath,
+                            char *output, size_t outputSize,
+                            char *error, size_t errorSize);
 
 #endif

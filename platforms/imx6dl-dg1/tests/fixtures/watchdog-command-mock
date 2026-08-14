@@ -1,0 +1,47 @@
+#!/bin/sh
+set -eu
+
+command_name=${0##*/}
+case "$command_name" in
+  wpa_cli)
+    case " $* " in
+      *" status "*)
+        count=$(cat "$MOCK_COUNTER" 2>/dev/null || echo 0)
+        count=$((count + 1))
+        printf '%s\n' "$count" >"$MOCK_COUNTER"
+        state=$(sed -n "${count}p" "$MOCK_STATES")
+        printf 'wpa_state=%s\n' "${state:-DISCONNECTED}"
+        ;;
+      *" reassociate "*) printf 'reassociate\n' >>"$MOCK_ACTIONS" ;;
+    esac
+    ;;
+  hostapd_cli)
+    state=${MOCK_HOSTAPD_STATE:-}
+    if [ -z "$state" ]; then
+      [ "${MOCK_PROVISION_HEALTH:-0}" = 1 ] && state=ENABLED || state=DISABLED
+    fi
+    printf 'state=%s\n' "$state"
+    ;;
+  ip)
+    if [ "${MOCK_PROVISION_HEALTH:-0}" = 1 ]; then
+      provision_interface=${MICROFX_PROVISION_INTERFACE:-wlan0}
+      case " $* " in
+        *" link show dev $provision_interface "*) printf '2: %s: <BROADCAST,MULTICAST,UP> mtu 1500 state UNKNOWN\n' "$provision_interface" ;;
+        *" address show dev $provision_interface "*) printf '2: %s inet 10.42.0.1/24 scope global %s\n' "$provision_interface" "$provision_interface" ;;
+      esac
+    else
+      count=$(cat "${MOCK_COUNTER:-/dev/null}" 2>/dev/null || echo 1)
+      address=$(sed -n "${count}p" "${MOCK_ADDRESSES:-/dev/null}")
+      [ -n "$address" ] && printf '    inet %s scope global wlan1\n' "$address"
+    fi
+    ;;
+  iw)
+    [ "${MOCK_PROVISION_HEALTH:-0}" = 1 ] && printf '\ttype AP\n' || true
+    ;;
+  wget) [ "${MOCK_PROVISION_HEALTH:-0}" = 1 ] ;;
+  udhcpc) printf 'renew-dhcp\n' >>"$MOCK_ACTIONS" ;;
+  sleep) ;;
+  date) printf 'test-time\n' ;;
+  wifi-connect) printf 'rebuild\n' >>"$MOCK_ACTIONS" ;;
+  provision-service) printf 'repair %s\n' "${1:-}" >>"$MOCK_ACTIONS" ;;
+esac

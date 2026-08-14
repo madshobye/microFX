@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+project=${1:-}
+case "$project" in
+  ''|*[!A-Za-z0-9._-]*|.*|*.) echo "Usage: microfx-reload-project PROJECT [TOKEN]" >&2; exit 2 ;;
+esac
+[ -d "/data/apps/projects/$project" ] || { echo "Unknown project: $project" >&2; exit 1; }
+token=${2:-local-$$-$(date +%s)}
+case "$token" in
+  ''|*[!A-Za-z0-9._:-]*) echo "Invalid activation token" >&2; exit 2 ;;
+esac
+temporary=/run/microfx-project-reload.new
+printf '%s\t%s\n' "$token" "$project" >"$temporary"
+chmod 0600 "$temporary"
+mv -f "$temporary" /run/microfx-project-reload
+printf '%s\n' "$token"

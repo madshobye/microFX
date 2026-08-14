@@ -71,7 +71,8 @@ for partition in 2 3; do
     check_filesystem "$device"
     verify_path "$device" /data
     verify_path "$device" /etc/init.d/S39data
-    verify_path "$device" /etc/init.d/S42dropbear-debug
+    verify_path "$device" /etc/init.d/S39dropbear-debug
+    verify_path "$device" /etc/init.d/S39recovery-client
     verify_path "$device" /etc/init.d/S43peer-bridge
     verify_path "$device" /usr/sbin/canvas-supervisor
 done

@@ -20,15 +20,15 @@ grep -q ' /data ' /proc/mounts || { echo "/data is not mounted" >&2; exit 1; }
 (cd "$incoming" && sha256sum -c manifest.sha256)
 [ ! -e "$destination" ] || { echo "Release already exists: $release" >&2; exit 1; }
 
-if [ -L /data/apps/current ]; then
-    current=$(readlink /data/apps/current)
-    ln -s "$current" /data/apps/previous.new
-    mv -Tf /data/apps/previous.new /data/apps/previous
+if [ -L /data/apps/current-runtime ]; then
+    current=$(readlink /data/apps/current-runtime)
+    ln -s "$current" /data/apps/previous-runtime.new
+    mv -Tf /data/apps/previous-runtime.new /data/apps/previous-runtime
 fi
 
 mv "$incoming" "$destination"
-ln -s "$destination" /data/apps/current.new
-mv -Tf /data/apps/current.new /data/apps/current
+ln -s "$destination" /data/apps/current-runtime.new
+mv -Tf /data/apps/current-runtime.new /data/apps/current-runtime
 touch /data/state/app-pending
 sync
 /etc/init.d/S40canvas restart

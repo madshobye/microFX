@@ -1,0 +1,63 @@
+#!/bin/sh
+set -eu
+
+profile=${1:-}
+seconds=${2:-20}
+case "$profile" in
+  native-auto|native-fixed|native-75|native-50|720-fixed|720-half|1080-fixed|1080-quality) ;;
+  *) echo "Unknown benchmark profile: $profile" >&2; exit 2 ;;
+esac
+case "$seconds" in ''|*[!0-9]*) echo "Duration must be 1..300 seconds" >&2; exit 2 ;; esac
+[ "$seconds" -ge 1 ] && [ "$seconds" -le 300 ] || {
+  echo "Duration must be 1..300 seconds" >&2
+  exit 2
+}
+
+run_root=${MICROFX_RUN_ROOT:-/run}
+data_root=${MICROFX_DATA_ROOT:-/data}
+log=${MICROFX_RENDER_LOG:-/tmp/canvas.log}
+override_tool=${MICROFX_BENCHMARK_OVERRIDE:-/usr/sbin/microfx-benchmark-override}
+reload_tool=${MICROFX_RELOAD_TOOL:-/usr/sbin/microfx-reload-project}
+sleep_tool=${MICROFX_SLEEP_TOOL:-sleep}
+project=$(basename "$(readlink "$data_root/apps/current")")
+[ -n "$project" ] || { echo "No active project" >&2; exit 1; }
+marker="MICROFX_BENCHMARK_BEGIN profile=$profile pid=$$ time=$(date +%s)"
+token="benchmark-$profile-$$-$(date +%s)"
+had_profile=0
+[ ! -e "$run_root/microfx-profile" ] || had_profile=1
+restored=0
+
+restore_runtime() {
+  [ "$restored" = 0 ] || return 0
+  restored=1
+  "$override_tool" clear >/dev/null 2>&1 || true
+  [ "$had_profile" = 1 ] || rm -f "$run_root/microfx-profile"
+  "$reload_tool" "$project" "benchmark-restore-$$-$(date +%s)" >/dev/null 2>&1 || true
+}
+trap 'restore_runtime' EXIT HUP INT TERM
+
+"$override_tool" "$profile"
+touch "$run_root/microfx-profile"
+printf '%s\n' "$marker" >>"$log"
+"$reload_tool" "$project" "$token" >/dev/null
+
+attempt=0
+while :; do
+  if [ -r "$run_root/microfx-project-status" ] &&
+     IFS="$(printf '\t')" read -r seen_token seen_project seen_state seen_detail <"$run_root/microfx-project-status" &&
+     [ "$seen_token" = "$token" ]; then
+    case "$seen_state" in
+      running) break ;;
+      failed) echo "Renderer failed for $profile: $seen_detail" >&2; exit 1 ;;
+    esac
+  fi
+  attempt=$((attempt + 1))
+  [ "$attempt" -lt 20 ] || { echo "Renderer did not acknowledge $profile" >&2; exit 1; }
+  "$sleep_tool" 1
+done
+
+"$sleep_tool" "$seconds"
+awk -v marker="$marker" '
+  $0 == marker { capture=1; next }
+  capture && ($0 ~ /MICROFX_PROFILE/ || $0 ~ /DRM_TIMING/) { print }
+' "$log"

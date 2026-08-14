@@ -4,9 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Graphics Studio</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.39.1/src-min-noconflict/ace.js"></script>
+  <script src="vendor/peerjs-1.5.5.min.js"></script>
+  <script src="vendor/ace-1.39.1.js"></script>
+  <script>ace.config.set('basePath', 'vendor');</script>
 </head>
 <body>
   <header>
@@ -15,8 +17,10 @@
       <p>JavaScript graphics editor</p>
     </div>
     <div class="connection">
-      <label>Device ID <input id="peer-id" spellcheck="false"></label>
+      <label>Device ID <input id="peer-id" list="peer-history" spellcheck="false"><datalist id="peer-history"></datalist></label>
       <button id="connect">Connect</button>
+      <button id="disconnect" disabled>Disconnect</button>
+      <button id="system-check" disabled>Check</button>
       <span id="status" data-state="idle">offline</span>
     </div>
   </header>
@@ -24,21 +28,52 @@
   <main>
     <section class="code-panel">
       <div class="toolbar">
+        <label class="project-picker">Project <select id="project" disabled></select></label>
+        <button id="new-project" disabled>New</button>
         <strong>main.js</strong>
         <span class="spacer"></span>
         <button id="retrieve" disabled>Retrieve</button>
         <button id="save" disabled>Save</button>
         <button id="run" class="primary" disabled>Save &amp; Run</button>
+        <span id="operation" data-state="idle">idle</span>
       </div>
       <div id="editor"></div>
     </section>
 
     <aside>
+      <section class="aside-section metadata-section">
+        <div class="aside-title"><div><strong>Project details</strong><small>project.json</small></div></div>
+        <form id="metadata-form">
+          <label>Title<input id="project-title" maxlength="96" disabled></label>
+          <label>Description<textarea id="project-description" maxlength="512" rows="2" disabled></textarea></label>
+          <button id="save-metadata" type="submit" disabled>Save details</button>
+        </form>
+      </section>
+      <section class="aside-section projects-section">
+        <div class="aside-title"><div><strong>Revisions</strong><small>code · details · assets</small></div></div>
+        <ul id="revisions"><li class="empty">No project loaded</li></ul>
+      </section>
+      <section class="aside-section assets-section">
       <div class="aside-title">
         <div><strong>Assets</strong><small>/assets</small></div>
         <label class="upload">Upload<input id="asset-input" type="file" multiple disabled></label>
       </div>
       <ul id="assets"><li class="empty">Connect to retrieve project</li></ul>
+      </section>
+      <section class="aside-section console-section">
+        <div class="aside-title">
+          <div><strong>Device console</strong><small>RAM log</small></div>
+          <button id="clear-console" type="button">Clear</button>
+        </div>
+        <pre id="device-console">Connect to stream renderer output</pre>
+      </section>
+      <section class="aside-section console-section">
+        <div class="aside-title">
+          <div><strong>Interaction trace</strong><small>browser ↔ device</small></div>
+          <button id="clear-trace" type="button">Clear</button>
+        </div>
+        <pre id="transport-console">No device interaction yet</pre>
+      </section>
       <div class="help">
         <strong>Flow</strong>
         <p>Edits are written atomically. “Save &amp; Run” asks the platform adapter to reload the active script.</p>
@@ -47,7 +82,23 @@
     </aside>
   </main>
 
-  <footer><span id="message">Ready</span><span>PeerJS DataChannel · libpeer device</span></footer>
+  <dialog id="revision-dialog">
+    <form method="dialog" class="revision-card">
+      <header class="revision-header">
+        <div><strong id="revision-name">Revision</strong><small id="revision-summary"></small></div>
+        <button value="cancel" aria-label="Close">Close</button>
+      </header>
+      <label>Project details<textarea id="revision-metadata" rows="5" readonly></textarea></label>
+      <label>main.js<textarea id="revision-code" rows="12" readonly></textarea></label>
+      <label>Assets<pre id="revision-assets">None</pre></label>
+      <div class="revision-actions">
+        <button id="revision-restore" value="cancel" type="button">Restore</button>
+        <button id="revision-run" value="cancel" type="button" class="primary">Restore &amp; Run</button>
+      </div>
+    </form>
+  </dialog>
+
+  <footer><span id="message">Ready</span><span id="console">PeerJS DataChannel · libpeer device</span></footer>
   <script type="module" src="app.js"></script>
 </body>
 </html>

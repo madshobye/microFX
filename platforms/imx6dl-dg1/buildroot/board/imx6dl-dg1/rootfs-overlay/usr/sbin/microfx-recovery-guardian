@@ -1,0 +1,126 @@
+#!/bin/sh
+
+# Development-only last-resort client recovery. It starts before the normal
+# networking services, waits for them to establish an SSH-reachable LAN path,
+# and invokes the independent clean connector only after sustained failure.
+runtime_config=${MICROFX_RUNTIME_CONFIG:-/etc/canvas.conf}
+[ -r "$runtime_config" ] && . "$runtime_config"
+[ "${CANVAS_DEBUG:-0}" = 1 ] || exit 0
+[ "${CANVAS_SSH:-0}" = 1 ] || exit 0
+
+run_root=${MICROFX_RUN_ROOT:-/run}
+initial_delay=${MICROFX_RECOVERY_INITIAL_DELAY:-60}
+poll_delay=${MICROFX_RECOVERY_POLL_DELAY:-10}
+failure_limit=${MICROFX_RECOVERY_FAILURE_LIMIT:-3}
+max_cycles=${MICROFX_RECOVERY_MAX_CYCLES:-0}
+ssh_service=${MICROFX_SSH_SERVICE:-/etc/init.d/S39dropbear-debug}
+ssh_pidfile=${MICROFX_SSH_PIDFILE:-$run_root/dropbear-debug.pid}
+recovery_client=${MICROFX_RECOVERY_CLIENT:-/usr/sbin/microfx-recovery-client}
+status=${MICROFX_RECOVERY_STATUS:-$run_root/microfx-recovery-status}
+log=${MICROFX_RECOVERY_GUARDIAN_LOG:-/tmp/microfx-recovery-guardian.log}
+state_root=${MICROFX_RECOVERY_STATE_ROOT:-/data/state}
+require_data_mount=${MICROFX_RECOVERY_REQUIRE_DATA_MOUNT:-1}
+mounts_file=${MICROFX_MOUNTS_FILE:-/proc/mounts}
+stable_seconds=${MICROFX_RECOVERY_STABLE_SECONDS:-600}
+short_boot_limit=${MICROFX_RECOVERY_SHORT_BOOT_LIMIT:-3}
+disable_boot_guard=${MICROFX_RECOVERY_DISABLE_BOOT_GUARD:-0}
+disable_stable_timer=${MICROFX_RECOVERY_DISABLE_STABLE_TIMER:-0}
+failures=0
+cycles=0
+boot_count=0
+short_boot_count=0
+
+write_status() {
+  printf 'state\t%s\nfailures\t%s\n' "$1" "$failures" >"$status.new" &&
+    mv -f "$status.new" "$status"
+}
+
+ssh_alive() {
+  [ -r "$ssh_pidfile" ] && kill -0 "$(cat "$ssh_pidfile")" 2>/dev/null
+}
+
+lan_route_ready() {
+  route=$(ip -4 route show default 2>/dev/null | head -n 1)
+  [ -n "$route" ] || return 1
+  interface=$(printf '%s\n' "$route" | sed -n 's/.* dev \([^ ]*\).*/\1/p')
+  [ -n "$interface" ] || return 1
+  ip -4 address show dev "$interface" 2>/dev/null | grep -q ' inet '
+}
+
+read_counter() {
+  value=$(cat "$1" 2>/dev/null || echo 0)
+  case "$value" in ''|*[!0-9]*) value=0 ;; esac
+  printf '%s' "$value"
+}
+
+write_counter() {
+  printf '%s\n' "$2" >"$1.new" && mv -f "$1.new" "$1"
+}
+
+begin_boot_guard() {
+  if [ "$require_data_mount" = 1 ] && ! grep -q ' /data ' "$mounts_file"; then
+    echo "Persistent data is not mounted; boot-loop accounting is disabled for this boot" >>"$log"
+    return 0
+  fi
+  mkdir -p "$state_root"
+  boot_count=$(read_counter "$state_root/boot-count")
+  boot_count=$((boot_count + 1))
+  short_boot_count=$(read_counter "$state_root/short-boot-count")
+  if [ -r "$state_root/boot-pending" ]; then
+    previous_pending=$(read_counter "$state_root/boot-pending")
+    previous_stable=$(read_counter "$state_root/boot-stable")
+    if [ "$previous_pending" -gt 0 ] && [ "$previous_stable" != "$previous_pending" ]; then
+      short_boot_count=$((short_boot_count + 1))
+    else
+      short_boot_count=0
+    fi
+  else
+    short_boot_count=0
+  fi
+  write_counter "$state_root/boot-count" "$boot_count"
+  write_counter "$state_root/short-boot-count" "$short_boot_count"
+  write_counter "$state_root/boot-pending" "$boot_count"
+
+  # The marker is deliberately based on uptime rather than wall time: this
+  # platform has no persistent RTC and normally starts with an invalid date.
+  if [ "$disable_stable_timer" != 1 ]; then
+    (
+      sleep "$stable_seconds"
+      write_counter "$state_root/boot-stable" "$boot_count"
+      write_counter "$state_root/short-boot-count" 0
+      rm -f "$state_root/boot-pending"
+    ) &
+  fi
+}
+
+mkdir -p "$run_root"
+echo "Recovery guardian waiting for normal LAN SSH" >"$log"
+[ "$disable_boot_guard" = 1 ] || begin_boot_guard
+if [ "$short_boot_count" -ge "$short_boot_limit" ]; then
+  write_status activating-boot-loop
+  echo "$(date) boot $boot_count follows $short_boot_count consecutive boots shorter than ${stable_seconds}s" >>"$log"
+  exec "$recovery_client"
+fi
+sleep "$initial_delay"
+
+while :; do
+  ssh_alive || "$ssh_service" start >>"$log" 2>&1 || true
+  if ssh_alive && lan_route_ready; then
+    failures=0
+    write_status normal
+  else
+    failures=$((failures + 1))
+    write_status waiting
+    echo "$(date) no SSH-reachable LAN path ($failures/$failure_limit)" >>"$log"
+  fi
+
+  if [ "$failures" -ge "$failure_limit" ]; then
+    write_status activating
+    echo "$(date) activating clean stored-network recovery" >>"$log"
+    exec "$recovery_client"
+  fi
+
+  cycles=$((cycles + 1))
+  [ "$max_cycles" -gt 0 ] && [ "$cycles" -ge "$max_cycles" ] && exit 0
+  sleep "$poll_delay"
+done

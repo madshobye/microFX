@@ -13,12 +13,14 @@ fx.configure({
 const peerId = fx.env("MICROFX_PEER_ID", fx.product.defaultPeerId);
 const apSsid = fx.env("MICROFX_AP_SSID", fx.product.defaultSetupSsid);
 const apPassword = fx.env("MICROFX_AP_PASSWORD", fx.product.defaultSetupPassword);
+const provisioningEnabled = fx.env("MICROFX_PROVISIONING", "0") === "1";
 const portalUrl = "http://10.42.0.1";
 
 fx.gradientRect(960, 540, 1920, 1080, 0x101b3dff, 0x050916ff);
 fx.gradientRect(960, 82, 1920, 164, 0x162b5dff, 0x0b1532ff);
 fx.text(fx.product.name, 92, 46, 52, 0xffdf62ff);
-fx.text("SETUP & REMOTE EDITING", 94, 112, 22, 0x72e6ffff);
+fx.text(provisioningEnabled ? "SETUP & REMOTE EDITING" : "CLIENT WI-FI & REMOTE EDITING",
+        94, 112, 22, 0x72e6ffff);
 
 // Version 2-L QR for http://10.42.0.1. Rows are rendered as horizontal runs,
 // keeping the retained scene below one batched quad per individual module.
@@ -49,41 +51,51 @@ const qr = [
   "1000001010110001110011010",
   "1111111011001000100100011"
 ];
-const moduleSize = 20;
-const quiet = 4;
-const qrX = 100;
-const qrY = 240;
-const qrSize = (qr.length + quiet * 2) * moduleSize;
-fx.rect(qrX + qrSize / 2, qrY + qrSize / 2, qrSize, qrSize, 0xffffffff);
-for (let y = 0; y < qr.length; y++) {
-  let start = -1;
-  for (let x = 0; x <= qr[y].length; x++) {
-    const black = x < qr[y].length && qr[y][x] === "1";
-    if (black && start < 0) start = x;
-    if (!black && start >= 0) {
-      const width = x - start;
-      fx.rect(qrX + (quiet + start + width / 2) * moduleSize,
-              qrY + (quiet + y + 0.5) * moduleSize,
-              width * moduleSize, moduleSize, 0x050505ff);
-      start = -1;
+if (provisioningEnabled) {
+  const moduleSize = 20;
+  const quiet = 4;
+  const qrX = 100;
+  const qrY = 240;
+  const qrSize = (qr.length + quiet * 2) * moduleSize;
+  fx.rect(qrX + qrSize / 2, qrY + qrSize / 2, qrSize, qrSize, 0xffffffff);
+  for (let y = 0; y < qr.length; y++) {
+    let start = -1;
+    for (let x = 0; x <= qr[y].length; x++) {
+      const black = x < qr[y].length && qr[y][x] === "1";
+      if (black && start < 0) start = x;
+      if (!black && start >= 0) {
+        const width = x - start;
+        fx.rect(qrX + (quiet + start + width / 2) * moduleSize,
+                qrY + (quiet + y + 0.5) * moduleSize,
+                width * moduleSize, moduleSize, 0x050505ff);
+        start = -1;
+      }
     }
   }
+
+  fx.text("1. CONNECT TO THE SETUP WI-FI", 880, 260, 29, 0xffdf62ff);
+  fx.text("Network", 880, 330, 19, 0x7f96c4ff);
+  fx.text(apSsid, 880, 362, 32, 0xffffffff);
+  fx.text("Password", 880, 430, 19, 0x7f96c4ff);
+  fx.text(apPassword, 880, 462, 32, 0xffffffff);
+
+  fx.text("2. SCAN THE QR CODE OR OPEN", 880, 560, 29, 0xffdf62ff);
+  fx.text(portalUrl, 880, 622, 32, 0x72e6ffff);
+  fx.text("Add Wi-Fi networks and change the PeerJS device name.",
+          880, 674, 19, 0xb7c8eaff);
+
+  fx.text("PEERJS DEVICE NAME", 880, 770, 19, 0x7f96c4ff);
+  fx.gradientRect(1330, 846, 900, 78, 0x223866ff, 0x142448ff);
+  fx.text(peerId, 910, 827, 34, 0xffffffff);
+} else {
+  fx.text("STORED-NETWORK DEVELOPMENT MODE", 110, 286, 31, 0xffdf62ff);
+  fx.text("The setup access point is disabled.", 110, 356, 25, 0xffffffff);
+  fx.text("Client Wi-Fi, key-only SSH and PeerJS remain available.",
+          110, 408, 22, 0xb7c8eaff);
+  fx.text("PEERJS DEVICE NAME", 110, 566, 19, 0x7f96c4ff);
+  fx.gradientRect(560, 650, 900, 90, 0x223866ff, 0x142448ff);
+  fx.text(peerId, 140, 626, 38, 0xffffffff);
 }
-
-fx.text("1. CONNECT TO THE SETUP WI-FI", 880, 260, 29, 0xffdf62ff);
-fx.text("Network", 880, 330, 19, 0x7f96c4ff);
-fx.text(apSsid, 880, 362, 32, 0xffffffff);
-fx.text("Password", 880, 430, 19, 0x7f96c4ff);
-fx.text(apPassword, 880, 462, 32, 0xffffffff);
-
-fx.text("2. SCAN THE QR CODE OR OPEN", 880, 560, 29, 0xffdf62ff);
-fx.text(portalUrl, 880, 622, 32, 0x72e6ffff);
-fx.text("Add Wi-Fi networks and change the PeerJS device name.",
-        880, 674, 19, 0xb7c8eaff);
-
-fx.text("PEERJS DEVICE NAME", 880, 770, 19, 0x7f96c4ff);
-fx.gradientRect(1330, 846, 900, 78, 0x223866ff, 0x142448ff);
-fx.text(peerId, 910, 827, 34, 0xffffffff);
 
 const countdown = fx.text("Starting project in 40 seconds", 880, 966, 22, 0x72e6ffff);
 let previousSecond = 40;

@@ -24,8 +24,10 @@ On macOS install `lima`, `e2fsprogs`, and `dtc`, then run:
 ./scripts/build.sh
 ```
 
-The `microfx-build` Lima VM uses Buildroot 2025.02.16. Generated files go in the
-ignored `artifacts/` directory. The main output,
+The default `microfx-build` Lima VM uses Buildroot 2025.02.16. A development
+machine can reuse a differently named local VM by putting its name on one line
+in ignored `private/build-vm`, or by setting `VM_NAME` for one invocation.
+Generated files go in the ignored `artifacts/` directory. The main output,
 `microfx-imx6dl-dg1.rootfs`, fits either Linux root slot.
 
 For a faster compile-only check run:
@@ -37,6 +39,16 @@ For a faster compile-only check run:
 The VM verifies the ARM build and package graph. DRM page flips, HDMI modes,
 Etnaviv behavior, SDIO Wi-Fi, and the device tree still require physical
 hardware testing.
+
+## Experimental mappings
+
+The custom bootloader files in `bootloader/` and the IPU/DRM layer proposal in
+`COMPOSITOR.md` are isolated prototypes. They are not inputs to `build.sh`, the
+Buildroot configuration, the SD installers, or the runtime supervisor. The
+existing boot chain and single Etnaviv OpenGL ES render path remain the
+authoritative general-development setup until separate hardware validation is
+complete. The staged checks and acceptance criteria are recorded in
+[`HARDWARE-VALIDATION.md`](HARDWARE-VALIDATION.md).
 
 ## SD installation
 
@@ -67,10 +79,16 @@ MICROFX_OUTPUT_HEIGHT=0
 MICROFX_PIXEL_DENSITY=auto
 MICROFX_MIN_PIXEL_DENSITY=0.50
 MICROFX_TARGET_FPS=30
+MICROFX_DENSITY_SAMPLE_FRAMES=180
+MICROFX_DENSITY_STEP=0.025
+MICROFX_DENSITY_DOWN_THRESHOLD=1.08
+MICROFX_DENSITY_UP_THRESHOLD=0.72
+MICROFX_DENSITY_UP_SAMPLES=4
 ```
 
 Zero dimensions select the monitor's preferred HDMI mode. Automatic density
-can step through advertised modes when measured FPS misses the target. Setting
+steps down through advertised modes under load and recovers upward only after
+sustained spare capacity, using separate thresholds to avoid oscillation. Setting
 both dimensions forces one mode and disables automatic resolution changes. The
 scene renders directly at the selected global mode without a full-screen
 upscale pass.
@@ -78,21 +96,80 @@ upscale pass.
 ## Onboarding and networking
 
 At boot the platform supervisor runs the portable microFX onboarding app for 40
-seconds before starting the active project. It shows setup Wi-Fi information,
-the captive-portal QR code, the configured PeerJS device ID, and a countdown.
+seconds before starting the active project. It shows the configured PeerJS
+device ID and a countdown. Setup-network information is included only when the
+platform setup network is enabled.
+
+Development images default to `MICROFX_PROVISIONING=0` in
+`/etc/microfx.conf`. This prevents hostapd, dnsmasq, the setup HTTP server, and
+the provisioning watchdog from starting, leaving stored-network client Wi-Fi
+and key-only SSH as the sole recovery path. Set it to `1` only for an explicit
+setup-network hardware test; the setup implementation and its host tests remain
+available while disabled.
 
 Product defaults are centralized in `/etc/microfx-product.conf`. The platform
 adapter owns hostapd, dnsmasq, HTTP, Wi-Fi interface selection, and init
 integration; none of those concerns enter the graphics engine or JavaScript
 application API.
 
+The setup-network watchdog validates more than daemon PIDs: it requires hostapd
+to report an active beacon, AP mode, an UP link, `10.42.0.1/24`, and a successful
+local portal request. Its RAM-only status is exposed on the management page
+alongside client signal, rate, and address so hardware tests identify the failed
+layer without enabling persistent logging. Captive-probe paths for Apple,
+Android/Chromium, and Windows are generated and host-tested as actual response
+files rather than directories.
+
+The same management server publishes the vendored browser Studio at
+`http://DEVICE/studio/`. The portal supplies the configured Peer ID in the
+Studio link, removing the separate Python web-server step from normal device
+development. Page assets are local; PeerJS signalling still needs network
+access to the configured signalling service.
+
+The host suite also executes the real setup SysV service with isolated runtime,
+sysfs, interface, and content roots. It forces one failed beacon attempt before
+success and verifies AP mode/address setup, stable locally administered MAC,
+hostapd/dnsmasq/httpd liveness, captive content, cleanup, and the invariant that
+the setup path never issues a command against the independent client interface.
+All injectable values retain the target paths and `wlan0`/`wlan1` names as their
+production defaults.
+
+Renderer profiling is opt-in and RAM-only. After enabling it with
+`scripts/canvas-profile.sh HOST on`, use `scripts/canvas-profile.sh HOST report`
+for a frame-weighted budget, worst-frame, missed-frame, CPU, non-CPU/pacing,
+render-stage, and DRM page-flip summary. Non-CPU/pacing is not presented as a
+true GPU timer because it includes display synchronization on this GLES 2 stack.
+
+`S44data-adapters` is the optional network-to-project boundary for live demos.
+It polls only while a matching project is active, normalizes remote responses
+with isolated QuickJS adapter files, and atomically publishes bounded JSON under
+`/run/microfx-data/PROJECT/`. The flight adapter uses a small OpenSky bounding
+box at five-minute cadence; the electricity adapter uses Energinet's DK2
+Elspotprices data at hourly cadence. Requests wait for a synchronized clock,
+failed requests use a shorter retry interval, oversized data is rejected, and
+the last good RAM result remains available through transient failures. Status,
+attempt, and success timestamps also remain under `/run`. Both retain bundled
+project snapshots when no live result exists, and neither writes routine feed
+updates to the SD card. Disable all adapters with
+`MICROFX_DATA_ADAPTERS=0` in the persistent platform configuration.
+
 The development onboarding profile displays the setup password on HDMI. A
 production deployment should provide its own credential and security policy.
 
-The board profile has no persistent real-time clock. `S42time` waits for
-networking and uses BusyBox NTP to initialize the clock from public time
-servers. It runs before the PeerJS service, retries asynchronously while Wi-Fi
-comes online, and writes diagnostics only to `/tmp/microfx-time-sync.log`.
+The board profile has no persistent real-time clock. `S42time` immediately
+seeds an invalid clock from `/data/state/last-known-time`, or from the firmware
+release-file timestamp on a fresh card. It then retries BusyBox NTP for the
+entire boot instead of giving up before delayed Wi-Fi recovery. One usable
+timestamp is atomically retained per boot; diagnostics and service status stay
+in RAM. Credited random seeds are also stored below `/data/state/seedrng` after
+the persistent partition mounts, instead of writing the root slot. The PeerJS
+service does not attempt TLS until the clock is usable.
+
+`microfx-status` produces one tab-separated health report containing release
+ID, active root slot, mount state, selected Wi-Fi firmware and checksum,
+network/time/recovery state, boot-loop counters, and core service liveness.
+`S45status` refreshes the same report atomically at `/run/microfx-status`; it
+never writes routine status to the SD card.
 
 ## SSH deployment
 
@@ -104,6 +181,10 @@ and retrieve a screenshot with:
 ./scripts/canvas-ssh.sh 192.168.3.109
 ./scripts/canvas-upload.sh 192.168.3.109
 ./scripts/canvas-screenshot.sh 192.168.3.109
+./scripts/install-active-root-ssh.sh 192.168.3.109
+./scripts/canvas-profile.sh 192.168.3.109 on
+./scripts/canvas-profile.sh 192.168.3.109 status
+./scripts/canvas-profile.sh 192.168.3.109 off
 ```
 
 Uploads stage below `/data/apps/incoming`, verify SHA-256, and atomically select
@@ -111,9 +192,58 @@ the new release. The default `CANVAS_FAIL_FAST=1` stops when an application
 fails instead of silently restoring another revision. SSH remains independent
 for diagnosis.
 
+`install-active-root-ssh.sh` is the narrow development-only exception for
+updating tested init/configuration hardening without rewriting an SD card. It
+requires a healthy `/data` mount, client default route, and Dropbear session;
+checksums a strict file whitelist; backs up replaced files below
+`/data/state/root-update-backups`; and checks Wi-Fi, SSH, the graphics
+supervisor, and renderer after installation. It never changes the client Wi-Fi
+service, SSH service, kernel, DTB, inactive root, or partition layout, and it
+does not reboot. Use a complete SD image for a release or when both root slots
+must match.
+
+In the development profile, `S39dropbear-debug` starts key-only SSH before the
+graphics and normal networking services. A RAM-only recovery guardian then
+allows the normal client path 60 seconds to establish an addressed default
+route. After three failed health checks it stops the normal Wi-Fi processes and
+uses the frozen, known-working `wlan1` + `wpa_supplicant` + `udhcpc` sequence
+with `/data/config/wpa_supplicant.conf` (or the image fallback configuration),
+then starts SSH again. This recovery path never creates an access point.
+
+The same debug-only guardian counts boots in `/data/state`. A boot becomes
+stable after ten minutes of uptime; three consecutive boots that end before
+that marker cause stored-network recovery to start immediately on the next
+boot. No counters are written when `/data` is not actually mounted, and the
+entire guardian is disabled unless both `CANVAS_DEBUG=1` and `CANVAS_SSH=1`.
+
 `/etc/canvas.conf` controls development diagnostics. Routine logs stay in RAM
 under `/tmp`; enable `CANVAS_PERSIST_LOGS=1` only when persistence is worth the
 additional SD writes.
+
+Profiling is similarly opt-in and RAM-only. It reports average JavaScript,
+background, mesh, overlay, interface, presentation, process-CPU, and complete
+frame times alongside the lower-level DRM swap breakdown. Enabling it restarts
+the renderer but does not alter project data or the normal boot configuration.
+
+For repeatable comparisons, run the volatile benchmark campaign from the host:
+
+```sh
+./scripts/canvas-benchmark.sh 192.168.3.109 artifacts/benchmarks/near
+```
+
+By default it captures `native-fixed`, `native-75`, `native-50`, and
+`720-fixed`. Override that list with `MICROFX_BENCHMARK_PROFILES`, and the
+capture duration with `MICROFX_BENCHMARK_SECONDS`. Optional
+`MICROFX_BENCHMARK_MAX_BUDGET_USE` and
+`MICROFX_BENCHMARK_MAX_OVER_BUDGET` values turn measured limits into failing
+regression checks. Raw target output, per-profile text/JSON reports, and a
+combined comparison matrix are retained only in the requested host directory.
+
+Each target profile is written below `/run`, applied to one renderer child by a
+strict variable whitelist, and removed before the normal project is reloaded.
+The campaign does not edit `/data`, either root slot, the SD boot environment,
+or the isolated boot/compositor prototypes. It is therefore part of the
+existing SSH development workflow, not the experimental boot work.
 
 ## Distribution
 
