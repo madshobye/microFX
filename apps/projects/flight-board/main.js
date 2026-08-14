@@ -88,7 +88,7 @@ const map = scene.add(fx.tileMap({
     tint: 0xffffffff
   }
 }));
-scene.add(fx.text(PLACE.label, 55, 45, 28, 0x7ee5ffff));
+scene.add(fx.text(PLACE.label, 55, 45, 28, 0xc6ced4ff));
 scene.add(fx.text("OPENSTREETMAP + CARTO",
   1690, 1040, 14, 0x708090ff).antialias(false));
 
