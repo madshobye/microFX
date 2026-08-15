@@ -1,0 +1,7 @@
+{
+  "title": "Weather Layers",
+  "description": "Debug prototype for a geographic honeycomb weather field and atmospheric map passes",
+  "bundled": true,
+  "category": "data",
+  "dataSource": "Mock weather field and Esri World Imagery"
+}

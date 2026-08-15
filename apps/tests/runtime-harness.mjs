@@ -28,7 +28,7 @@ function summary(name, report) {
 
 const projects = readdirSync(join(apps, "projects"), { withFileTypes: true })
   .filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
-assert.equal(projects.length, 12, "expected twelve selectable project folders");
+assert.equal(projects.length, 13, "expected thirteen selectable project folders");
 
 for (const name of ["energy-clock", "flight-board", "train-board"]) {
   const source = readFileSync(join(apps, "projects", name, "main.js"), "utf8");

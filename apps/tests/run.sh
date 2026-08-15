@@ -32,8 +32,8 @@ node --test "$APPS_DIR/tests/runtime-test.test.mjs"
 node --test "$APPS_DIR/tests/network-runtime.test.mjs"
 node "$APPS_DIR/tests/runtime-harness.mjs"
 
-if [ "$count" -ne 12 ]; then
-  echo "Expected exactly 12 selectable bundled projects plus the fallback demo, found $count" >&2
+if [ "$count" -ne 13 ]; then
+  echo "Expected exactly 13 selectable bundled projects plus the fallback demo, found $count" >&2
   exit 1
 fi
 
