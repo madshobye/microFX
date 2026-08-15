@@ -6,7 +6,7 @@ fx.configure({
 });
 
 // Select a preset from assets/locations.json.
-const PLACE_NAME = "new-york";
+const PLACE_NAME = "copenhagen";
 const LOCATIONS = fx.data("locations.json");
 const PLACE = LOCATIONS[PLACE_NAME];
 if (!PLACE) throw new Error(`Unknown location preset: ${PLACE_NAME}`);
