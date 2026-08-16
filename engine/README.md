@@ -124,6 +124,8 @@ relative offset. Both are fluent and return the same object.
 | `tileMap.unproject(x,y)` | Convert a design-canvas point back to longitude and latitude |
 | `tileMap.center(...)` / `zoom(...)` | Atomically prepare a replacement map texture |
 | `texture(tileMapOrAssetPath)` | Expose a cached map or image asset as a reusable GPU texture layer |
+| `rasterTexture(width,height)` | Create a generic transparent GPU texture; draw bounded paths off-frame and upload them with `commit()` |
+| `texture.overlay(rasterTexture)` | Fold a raster layer into a static texture shader/cache without an extra steady-state screen pass |
 | `texture.enabled(false)` | Disable that GPU texture layer without changing its authored visibility |
 | `texture.secondary(tileMapOrAssetPath)` | Bind one additional cached image as shader uniform `uTexture2` |
 | `texture.tertiary(tileMapOrAssetPath)` | Bind a third cached image as shader uniform `uTexture3` |
@@ -297,7 +299,7 @@ font or a fifth distinct face is a visible fatal asset error rather than an
 implicit fallback.
 
 Current limits are 512 SDF elements, 512 quad elements, 256 mesh elements, 64 text elements of 127
-bytes each, four font faces, 16 image elements/textures, a 32 MiB JS heap, and a 512 KiB JS stack. A script exception is fatal
+bytes each, four font faces, 16 image elements/textures, a 64 MiB JS heap, and a 512 KiB JS stack. A script exception is fatal
 by design so a bad remote revision remains visible through independent SSH
 rather than silently changing behavior.
 

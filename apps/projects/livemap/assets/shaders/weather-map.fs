@@ -5,6 +5,7 @@ varying mediump vec2 vUv;
 uniform sampler2D uTexture;
 uniform sampler2D uTexture2;
 uniform sampler2D uTexture3;
+uniform sampler2D uOverlay;
 
 void main() {
     lowp vec3 dark = texture2D(uTexture, vUv).rgb;
@@ -30,5 +31,7 @@ void main() {
     lowp vec3 roadGrey = vec3(0.13, 0.115, 0.085) * litRoad;
     lowp vec3 night = darkBase + roadGrey +
         vec3(1.00, 0.62, 0.18) * light;
-    gl_FragColor = vec4(night, 1.0);
+    lowp vec4 track = texture2D(uOverlay, vUv);
+    gl_FragColor = track.a >= 0.4 ? vec4(track.rgb, 1.0) :
+        vec4(night, 1.0);
 }

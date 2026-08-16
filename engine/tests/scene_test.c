@@ -168,6 +168,23 @@ int main(void)
     assert(MicroFxSceneSetGpuTextureOpacity(&scene,gpuTexture,0.35f));
     assert(scene.gpuTexture[0].opacity==0.35f);
     assert(!MicroFxSceneSetGpuTextureOpacity(&scene,gpuTexture,1.1f));
+    int rasterTexture=MicroFxSceneAddGpuRasterTexture(&scene,8,4);
+    assert((rasterTexture&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_GPU_TEXTURE);
+    assert(scene.gpuTexture[1].source==MICROFX_GPU_TEXTURE_RASTER&&
+           scene.gpuTexture[1].rasterSize==8u*4u*4u&&
+           scene.gpuTexture[1].rasterVersion==1);
+    const float rasterPath[][2]={{1,1},{6,1}};
+    assert(MicroFxSceneDrawGpuRasterPath(&scene,rasterTexture,rasterPath,2,2,
+                                         0x274f5fff));
+    assert(scene.gpuTexture[1].rasterRgba[(1*8+3)*4+3]>0);
+    assert(MicroFxSceneCommitGpuRasterTexture(&scene,rasterTexture));
+    assert(scene.gpuTexture[1].rasterVersion==2);
+    assert(MicroFxSceneClearGpuRasterTexture(&scene,rasterTexture,0));
+    assert(scene.gpuTexture[1].rasterRgba[(1*8+3)*4+3]==0);
+    assert(MicroFxSceneSetGpuTextureOverlayRaster(&scene,gpuTexture,
+                                                   rasterTexture));
+    assert(scene.gpuTexture[0].overlayRaster&&
+           scene.gpuTexture[0].overlayTextureIndex==1);
     assert(MicroFxSceneBeginTileMap(&scene,tileMap,2,1));
     assert(!scene.imageDirty);
     assert(MicroFxSceneSetOpacity(&scene,image,0.5f));

@@ -26,6 +26,9 @@ struct MicroFxScript {
 };
 
 static void DumpException(JSContext *ctx);
+static bool ReadOutlinePoints(JSContext *ctx,JSValueConst value,
+                              float points[MICROFX_MAX_OUTLINE_POINTS][2],
+                              int *pointCount);
 
 // Generated from engine/runtime/retained.js by engine/tools/embed-runtime.py.
 #include "runtime_js.inc"
@@ -183,6 +186,62 @@ static JSValue AddGpuAssetTexture(JSContext *ctx,JSValueConst thisValue,int argc
     if(!resolved)return JS_ThrowReferenceError(ctx,
         "GPU texture asset rejected: %s",error);
     return Handle(ctx,MicroFxSceneAddGpuAssetTexture(script->scene,path));
+}
+
+static JSValue AddGpuRasterTexture(JSContext *ctx,JSValueConst thisValue,int argc,
+                                   JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t width=0,height=0;
+    if(argc!=2||JS_ToInt32(ctx,&width,argv[0])||JS_ToInt32(ctx,&height,argv[1]))
+        return JS_ThrowTypeError(ctx,"rasterTexture(width,height)");
+    return Handle(ctx,MicroFxSceneAddGpuRasterTexture(script->scene,width,height));
+}
+
+static JSValue ClearGpuRasterTexture(JSContext *ctx,JSValueConst thisValue,
+                                     int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc!=2||JS_ToInt32(ctx,&handle,argv[0])||
+       !MicroFxSceneClearGpuRasterTexture(script->scene,handle,ColorArg(ctx,argv[1])))
+        return JS_ThrowRangeError(ctx,"rasterTexture.clear(color) failed");
+    return JS_UNDEFINED;
+}
+
+static JSValue DrawGpuRasterPath(JSContext *ctx,JSValueConst thisValue,int argc,
+                                 JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    float points[MICROFX_MAX_OUTLINE_POINTS][2];int count=0;double width=0;
+    if(argc!=4||JS_ToInt32(ctx,&handle,argv[0])||
+       !ReadOutlinePoints(ctx,argv[1],points,&count)||
+       JS_ToFloat64(ctx,&width,argv[2])||
+       !MicroFxSceneDrawGpuRasterPath(script->scene,handle,points,count,
+                                      (float)width,ColorArg(ctx,argv[3])))
+        return JS_ThrowRangeError(ctx,"rasterTexture.path(points,width,color) failed");
+    return JS_UNDEFINED;
+}
+
+static JSValue CommitGpuRasterTexture(JSContext *ctx,JSValueConst thisValue,
+                                      int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc!=1||JS_ToInt32(ctx,&handle,argv[0])||
+       !MicroFxSceneCommitGpuRasterTexture(script->scene,handle))
+        return JS_ThrowRangeError(ctx,"rasterTexture.commit() failed");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetGpuTextureOverlayRaster(JSContext *ctx,JSValueConst thisValue,
+                                          int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0,rasterHandle=0;
+    if(argc!=2||JS_ToInt32(ctx,&handle,argv[0])||
+       JS_ToInt32(ctx,&rasterHandle,argv[1])||
+       !MicroFxSceneSetGpuTextureOverlayRaster(script->scene,handle,rasterHandle))
+        return JS_ThrowRangeError(ctx,"texture.overlay(rasterTexture) failed");
+    return JS_UNDEFINED;
 }
 
 static JSValue SetGpuTextureSecondaryMap(JSContext *ctx,JSValueConst thisValue,
@@ -1151,7 +1210,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
         free(source);free(script);return NULL;
     }
     script->scene=scene; script->runtime=JS_NewRuntime(); script->context=JS_NewContext(script->runtime);
-    JS_SetMemoryLimit(script->runtime, 32*1024*1024);
+    JS_SetMemoryLimit(script->runtime, 64*1024*1024);
     JS_SetMaxStackSize(script->runtime, 512*1024);
     JS_SetContextOpaque(script->context,script);
     JSValue global=JS_GetGlobalObject(script->context);
@@ -1167,6 +1226,11 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_tileMapReady",JS_NewCFunction(script->context,TileMapReady,"_tileMapReady",1));
     JS_SetPropertyStr(script->context,fx,"_gpuTextureMap",JS_NewCFunction(script->context,AddGpuMapTexture,"_gpuTextureMap",1));
     JS_SetPropertyStr(script->context,fx,"_gpuTextureAsset",JS_NewCFunction(script->context,AddGpuAssetTexture,"_gpuTextureAsset",1));
+    JS_SetPropertyStr(script->context,fx,"_gpuRasterTexture",JS_NewCFunction(script->context,AddGpuRasterTexture,"_gpuRasterTexture",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuRasterClear",JS_NewCFunction(script->context,ClearGpuRasterTexture,"_gpuRasterClear",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuRasterPath",JS_NewCFunction(script->context,DrawGpuRasterPath,"_gpuRasterPath",4));
+    JS_SetPropertyStr(script->context,fx,"_gpuRasterCommit",JS_NewCFunction(script->context,CommitGpuRasterTexture,"_gpuRasterCommit",1));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureOverlayRaster",JS_NewCFunction(script->context,SetGpuTextureOverlayRaster,"_gpuTextureOverlayRaster",2));
     JS_SetPropertyStr(script->context,fx,"_gpuTextureSecondaryMap",JS_NewCFunction(script->context,SetGpuTextureSecondaryMap,"_gpuTextureSecondaryMap",2));
     JS_SetPropertyStr(script->context,fx,"_gpuTextureSecondaryAsset",JS_NewCFunction(script->context,SetGpuTextureSecondaryAsset,"_gpuTextureSecondaryAsset",2));
     JS_SetPropertyStr(script->context,fx,"_gpuTextureTertiaryMap",JS_NewCFunction(script->context,SetGpuTextureTertiaryMap,"_gpuTextureTertiaryMap",2));

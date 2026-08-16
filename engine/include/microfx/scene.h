@@ -164,7 +164,8 @@ typedef struct {
 
 typedef enum {
     MICROFX_GPU_TEXTURE_MAP = 0,
-    MICROFX_GPU_TEXTURE_ASSET = 1
+    MICROFX_GPU_TEXTURE_ASSET = 1,
+    MICROFX_GPU_TEXTURE_RASTER = 2
 } MicroFxGpuTextureSource;
 
 typedef enum {
@@ -197,6 +198,13 @@ typedef struct {
     int tertiaryVersion;
     int paramVersion;
     int fieldVersion;
+    uint8_t *rasterRgba;
+    size_t rasterSize;
+    int rasterWidth;
+    int rasterHeight;
+    int rasterVersion;
+    bool overlayRaster;
+    int overlayTextureIndex;
     bool visible;
     bool blend;
     float opacity;
@@ -344,6 +352,15 @@ bool MicroFxSceneSetTileMapVisible(MicroFxScene *scene, int handle,
                                    bool visible);
 int MicroFxSceneAddGpuMapTexture(MicroFxScene *scene, int mapIndex);
 int MicroFxSceneAddGpuAssetTexture(MicroFxScene *scene, const char *assetPath);
+int MicroFxSceneAddGpuRasterTexture(MicroFxScene *scene, int width, int height);
+bool MicroFxSceneClearGpuRasterTexture(MicroFxScene *scene, int handle,
+                                       uint32_t color);
+bool MicroFxSceneDrawGpuRasterPath(MicroFxScene *scene, int handle,
+                                   const float points[][2], int pointCount,
+                                   float width, uint32_t color);
+bool MicroFxSceneCommitGpuRasterTexture(MicroFxScene *scene, int handle);
+bool MicroFxSceneSetGpuTextureOverlayRaster(MicroFxScene *scene, int handle,
+                                            int rasterHandle);
 bool MicroFxSceneSetGpuTextureSecondaryMap(MicroFxScene *scene, int handle,
                                            int mapIndex);
 bool MicroFxSceneSetGpuTextureSecondaryAsset(MicroFxScene *scene, int handle,

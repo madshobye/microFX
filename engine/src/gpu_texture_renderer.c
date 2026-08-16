@@ -56,13 +56,22 @@ bool MicroFxGpuTextureRendererInit(MicroFxGpuTextureRenderer *renderer)
         "uniform sampler2D uTexture;uniform lowp float uOpacity;"
         "void main(){lowp vec4 c=texture2D(uTexture,vUv);"
         "gl_FragColor=vec4(c.rgb,c.a*uOpacity);}\n";
+    static const char *sparseRasterFragment=
+        "#version 100\nprecision lowp float;varying mediump vec2 vUv;"
+        "uniform sampler2D uTexture;"
+        "void main(){lowp vec4 c=texture2D(uTexture,vUv);"
+        "if(c.a<0.4)discard;gl_FragColor=vec4(c.rgb,1.0);}\n";
     renderer->defaultProgram=LinkProgram(fragment);
     renderer->cachedProgram=LinkProgram(cachedFragment);
-    if(!renderer->defaultProgram||!renderer->cachedProgram)return false;
+    renderer->sparseRasterProgram=LinkProgram(sparseRasterFragment);
+    if(!renderer->defaultProgram||!renderer->cachedProgram||
+       !renderer->sparseRasterProgram)return false;
     renderer->defaultTextureLocation=
         glGetUniformLocation(renderer->defaultProgram,"uTexture");
     renderer->cachedTextureLocation=
         glGetUniformLocation(renderer->cachedProgram,"uTexture");
+    renderer->sparseRasterTextureLocation=
+        glGetUniformLocation(renderer->sparseRasterProgram,"uTexture");
     renderer->cachedOpacityLocation=
         glGetUniformLocation(renderer->cachedProgram,"uOpacity");
     const GpuTextureVertex vertices[6]={
@@ -80,7 +89,8 @@ static bool UpdateShader(MicroFxGpuTextureRenderState *state,
                          const MicroFxGpuTexture *texture)
 {
     if(state->shaderVersion==texture->shaderVersion)return true;
-    if((texture->secondary||texture->tertiary)&&!texture->fragmentPath[0]){
+    if((texture->secondary||texture->tertiary||texture->overlayRaster)&&
+       !texture->fragmentPath[0]){
         fprintf(stderr,
             "MICROFX_GPU_TEXTURE secondary source requires a custom shader\n");
         return false;
@@ -88,7 +98,7 @@ static bool UpdateShader(MicroFxGpuTextureRenderState *state,
     if(state->program){glDeleteProgram(state->program);state->program=0;}
     state->textureLocation=-1;state->secondaryTextureLocation=-1;
     state->tertiaryTextureLocation=-1;
-    state->fieldLocation=-1;
+    state->fieldLocation=-1;state->overlayTextureLocation=-1;
     state->fieldSizeLocation=-1;state->resolutionLocation=-1;
     state->timeLocation=-1;state->paramsLocation=-1;
     if(texture->fragmentPath[0]){
@@ -105,6 +115,8 @@ static bool UpdateShader(MicroFxGpuTextureRenderState *state,
         state->tertiaryTextureLocation=
             glGetUniformLocation(state->program,"uTexture3");
         state->fieldLocation=glGetUniformLocation(state->program,"uField");
+        state->overlayTextureLocation=
+            glGetUniformLocation(state->program,"uOverlay");
         state->fieldSizeLocation=glGetUniformLocation(state->program,"uFieldSize");
         state->resolutionLocation=glGetUniformLocation(state->program,"uResolution");
         state->timeLocation=glGetUniformLocation(state->program,"uTime");
@@ -123,6 +135,16 @@ static bool UpdateShader(MicroFxGpuTextureRenderState *state,
             fprintf(stderr,
                 "MICROFX_GPU_TEXTURE tertiary source requires uTexture3: %s\n",
                 texture->fragmentPath);return false;
+        }
+        if(texture->overlayRaster&&state->overlayTextureLocation<0){
+            fprintf(stderr,
+                "MICROFX_GPU_TEXTURE raster overlay requires uOverlay: %s\n",
+                texture->fragmentPath);return false;
+        }
+        if(texture->overlayRaster&&texture->fieldVersion>0){
+            fprintf(stderr,
+                "MICROFX_GPU_TEXTURE raster overlay and data field share texture unit 1\n");
+            return false;
         }
         printf("MICROFX_GPU_TEXTURE shader loaded fragment=%s\n",
                texture->fragmentPath);fflush(stdout);
@@ -153,6 +175,30 @@ static bool UpdateField(MicroFxGpuTextureRenderState *state,
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D,0);state->fieldVersion=texture->fieldVersion;
     return true;
+}
+
+static bool UpdateRaster(MicroFxGpuTextureRenderState *state,
+                         const MicroFxGpuTexture *texture)
+{
+    if(texture->source!=MICROFX_GPU_TEXTURE_RASTER||
+       state->rasterVersion==texture->rasterVersion)return true;
+    if(!texture->rasterRgba||texture->rasterWidth<=0||texture->rasterHeight<=0)
+        return false;
+    if(!state->rasterTexture)glGenTextures(1,&state->rasterTexture);
+    if(!state->rasterTexture)return false;
+    glBindTexture(GL_TEXTURE_2D,state->rasterTexture);
+    glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,texture->rasterWidth,
+                 texture->rasterHeight,0,GL_RGBA,GL_UNSIGNED_BYTE,
+                 texture->rasterRgba);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    const bool ok=glGetError()==GL_NO_ERROR;
+    glBindTexture(GL_TEXTURE_2D,0);
+    if(ok)state->rasterVersion=texture->rasterVersion;
+    return ok;
 }
 
 static bool UpdateAsset(MicroFxGpuTextureRenderState *state,
@@ -226,7 +272,8 @@ bool MicroFxGpuTextureRendererUpdate(MicroFxGpuTextureRenderer *renderer,
     for(int i=0;i<scene->gpuTextureCount;i++){
         MicroFxGpuTextureRenderState *state=&renderer->textures[i];
         const MicroFxGpuTexture *texture=&scene->gpuTexture[i];
-        if(!UpdateShader(state,texture)||!UpdateAsset(state,texture))return false;
+        if(!UpdateShader(state,texture)||!UpdateAsset(state,texture)||
+           !UpdateRaster(state,texture))return false;
         if(texture->fieldVersion>0&&!UpdateField(state,texture))return false;
     }
     return true;
@@ -301,13 +348,16 @@ static bool SnapshotCacheForSampling(MicroFxGpuTextureRenderState *state,
 static void DrawPass(const MicroFxGpuTextureRenderer *renderer,
                      const MicroFxGpuTextureRenderState *state,
                      const MicroFxGpuTexture *texture,Texture2D source,
-                     Texture2D secondary,Texture2D tertiary,
+                     Texture2D secondary,Texture2D tertiary,Texture2D overlay,
                      int width,int height,bool custom,
                      bool blend,float time)
 {
-    GLuint program=custom?state->program:renderer->defaultProgram;
-    GLint sourceLocation=custom?state->textureLocation:
-        renderer->defaultTextureLocation;
+    const bool sparseRaster=!custom&&!blend&&
+        texture->source==MICROFX_GPU_TEXTURE_RASTER;
+    GLuint program=custom?state->program:(sparseRaster?
+        renderer->sparseRasterProgram:renderer->defaultProgram);
+    GLint sourceLocation=custom?state->textureLocation:(sparseRaster?
+        renderer->sparseRasterTextureLocation:renderer->defaultTextureLocation);
     glUseProgram(program);glUniform1i(sourceLocation,0);
     if(blend){glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);}
     else glDisable(GL_BLEND);
@@ -319,6 +369,10 @@ static void DrawPass(const MicroFxGpuTextureRenderer *renderer,
         if(texture->tertiary){
             glUniform1i(state->tertiaryTextureLocation,3);
             glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D,tertiary.id);
+        }
+        if(texture->overlayRaster){
+            glUniform1i(state->overlayTextureLocation,1);
+            glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,overlay.id);
         }
         if(state->fieldLocation>=0){
             glUniform1i(state->fieldLocation,1);glActiveTexture(GL_TEXTURE1);
@@ -384,7 +438,12 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
             texture->tertiaryMapIndex>=scene->tileMapCount))continue;
         Texture2D source=texture->source==MICROFX_GPU_TEXTURE_MAP?
             MicroFxTileRendererTexture(tiles,texture->mapIndex):
-            state->assetTexture;
+            (texture->source==MICROFX_GPU_TEXTURE_RASTER?
+             (Texture2D){.id=state->rasterTexture,
+                         .width=texture->rasterWidth,
+                         .height=texture->rasterHeight,.mipmaps=1,
+                         .format=PIXELFORMAT_UNCOMPRESSED_R8G8B8A8}:
+             state->assetTexture);
         if(!IsTextureValid(source))continue;
         Texture2D secondary=texture->secondary?
             (texture->secondarySource==MICROFX_GPU_TEXTURE_MAP?
@@ -396,11 +455,27 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
              MicroFxTileRendererTexture(tiles,texture->tertiaryMapIndex):
              state->tertiaryAssetTexture):(Texture2D){0};
         if(texture->tertiary&&!IsTextureValid(tertiary))continue;
+        Texture2D overlay=(Texture2D){0};
+        int overlayVersion=0;
+        if(texture->overlayRaster){
+            const int overlayIndex=texture->overlayTextureIndex;
+            if(overlayIndex<0||overlayIndex>=scene->gpuTextureCount)continue;
+            const MicroFxGpuTexture *overlayTexture=&scene->gpuTexture[overlayIndex];
+            const MicroFxGpuTextureRenderState *overlayState=&renderer->textures[overlayIndex];
+            if(overlayTexture->source!=MICROFX_GPU_TEXTURE_RASTER||
+               !overlayState->rasterTexture)continue;
+            overlay=(Texture2D){.id=overlayState->rasterTexture,
+                .width=overlayTexture->rasterWidth,
+                .height=overlayTexture->rasterHeight,.mipmaps=1,
+                .format=PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
+            overlayVersion=overlayTexture->rasterVersion;
+        }
         // Bake static background composition independently from final layer
         // opacity. Sun fades then blend two RGB565 caches without re-running
         // their multi-source shaders every frame.
         const bool staticShader=state->program==0||state->timeLocation<0;
-        const bool cacheable=stage==MICROFX_GPU_TEXTURE_BACKGROUND&&staticShader;
+        const bool cacheable=stage==MICROFX_GPU_TEXTURE_BACKGROUND&&staticShader&&
+            texture->source!=MICROFX_GPU_TEXTURE_RASTER;
         if(cacheable){
             if(!EnsureCache(state,width,height))continue;
             const bool dirty=!state->cacheValid||
@@ -410,13 +485,14 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
                 state->cachedSourceId!=source.id||
                 state->cachedSecondaryId!=secondary.id||
                 state->cachedTertiaryId!=tertiary.id;
-            if(dirty){
+            const bool overlayDirty=state->cachedOverlayVersion!=overlayVersion;
+            if(dirty||overlayDirty){
                 GLint framebuffer=0,viewport[4]={0};
                 glGetIntegerv(GL_FRAMEBUFFER_BINDING,&framebuffer);
                 glGetIntegerv(GL_VIEWPORT,viewport);
                 glBindFramebuffer(GL_FRAMEBUFFER,state->cachedFramebuffer);
                 glViewport(0,0,width,height);
-                DrawPass(renderer,state,texture,source,secondary,tertiary,width,height,
+                DrawPass(renderer,state,texture,source,secondary,tertiary,overlay,width,height,
                          state->program!=0,false,scene->time);
                 if(!SnapshotCacheForSampling(state,width,height)){
                     fprintf(stderr,"MICROFX_GPU_TEXTURE cache snapshot failure\n");
@@ -432,6 +508,7 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
                 state->cachedSourceId=source.id;
                 state->cachedSecondaryId=secondary.id;
                 state->cachedTertiaryId=tertiary.id;
+                state->cachedOverlayVersion=overlayVersion;
                 state->cacheValid=true;
                 printf("MICROFX_GPU_TEXTURE cache_bake index=%d size=%dx%d\n",
                        i,width,height);fflush(stdout);
@@ -440,7 +517,7 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
                 .height=height,.mipmaps=1,.format=PIXELFORMAT_UNCOMPRESSED_R5G6B5};
             DrawCachedPass(renderer,cached,texture->blend,texture->opacity);
         }else{
-            DrawPass(renderer,state,texture,source,secondary,tertiary,width,height,
+            DrawPass(renderer,state,texture,source,secondary,tertiary,overlay,width,height,
                      state->program!=0,texture->blend,scene->time);
         }
     }
@@ -459,6 +536,7 @@ void MicroFxGpuTextureRendererDestroy(MicroFxGpuTextureRenderer *renderer,
         MicroFxGpuTextureRenderState *state=&renderer->textures[i];
         if(state->program)glDeleteProgram(state->program);
         if(state->fieldTexture)glDeleteTextures(1,&state->fieldTexture);
+        if(state->rasterTexture)glDeleteTextures(1,&state->rasterTexture);
         if(state->cachedFramebuffer)
             glDeleteFramebuffers(1,&state->cachedFramebuffer);
         if(state->cachedTexture)glDeleteTextures(1,&state->cachedTexture);
@@ -473,9 +551,12 @@ void MicroFxGpuTextureRendererDestroy(MicroFxGpuTextureRenderer *renderer,
     for(int i=0;i<scene->gpuTextureCount;i++){
         free(scene->gpuTexture[i].fieldRgba);
         scene->gpuTexture[i].fieldRgba=NULL;
+        free(scene->gpuTexture[i].rasterRgba);
+        scene->gpuTexture[i].rasterRgba=NULL;
     }
     if(renderer->vertexBuffer)glDeleteBuffers(1,&renderer->vertexBuffer);
     if(renderer->defaultProgram)glDeleteProgram(renderer->defaultProgram);
+    if(renderer->sparseRasterProgram)glDeleteProgram(renderer->sparseRasterProgram);
     if(renderer->cachedProgram)glDeleteProgram(renderer->cachedProgram);
     *renderer=(MicroFxGpuTextureRenderer){0};
 }

@@ -52,7 +52,7 @@ single-pass GPU texture shader can combine a cached map or image with one small
 RGBA data field; treat additional full-screen passes and high-octave fragment effects as
 experiments that require target profiling.
 
-QuickJS is statically embedded with a 32 MiB heap limit and 512 KiB stack. The
+QuickJS is statically embedded with a 64 MiB heap limit and 512 KiB stack. The
 implemented JS API uses a cheap retained quad/geometry batch for ordinary
 rectangles, gradients and circles. Experimental SDF circles and rounded
 rectangles remain an explicit second batch. Elements update by handle; each

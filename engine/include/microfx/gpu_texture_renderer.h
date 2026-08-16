@@ -9,6 +9,7 @@
 typedef struct {
     GLuint program;
     GLuint fieldTexture;
+    GLuint rasterTexture;
     Texture2D assetTexture;
     Texture2D secondaryAssetTexture;
     Texture2D tertiaryAssetTexture;
@@ -16,11 +17,13 @@ typedef struct {
     int secondaryVersion;
     int tertiaryVersion;
     int fieldVersion;
+    int rasterVersion;
     bool assetLoaded;
     GLint textureLocation;
     GLint secondaryTextureLocation;
     GLint tertiaryTextureLocation;
     GLint fieldLocation;
+    GLint overlayTextureLocation;
     GLint fieldSizeLocation;
     GLint resolutionLocation;
     GLint timeLocation;
@@ -36,14 +39,17 @@ typedef struct {
     GLuint cachedSourceId;
     GLuint cachedSecondaryId;
     GLuint cachedTertiaryId;
+    int cachedOverlayVersion;
     bool cacheValid;
 } MicroFxGpuTextureRenderState;
 
 typedef struct {
     GLuint defaultProgram;
+    GLuint sparseRasterProgram;
     GLuint cachedProgram;
     GLuint vertexBuffer;
     GLint defaultTextureLocation;
+    GLint sparseRasterTextureLocation;
     GLint cachedTextureLocation;
     GLint cachedOpacityLocation;
     MicroFxGpuTextureRenderState textures[MICROFX_MAX_GPU_TEXTURES];

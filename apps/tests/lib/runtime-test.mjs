@@ -110,6 +110,17 @@ function instrumentedNativeFx(root, capacities) {
     _gpuTextureAsset(path) {
       assert.match(path, /^assets\//);return 0x07000000;
     },
+    _gpuRasterTexture(width, height) {
+      assert.ok(width > 0 && width <= 1920);assert.ok(height > 0 && height <= 1080);
+      return 0x07000001;
+    },
+    _gpuRasterClear() {},
+    _gpuRasterPath(handle, points, width) {
+      assert.equal(handle, 0x07000001);finite("raster path", points);
+      assert.ok(points.length >= 4 && points.length <= 128 && width > 0);
+    },
+    _gpuRasterCommit() {},
+    _gpuTextureOverlayRaster() {},
     _gpuTextureSecondaryMap(handle, mapHandle) {
       assert.equal(handle, 0x07000000);assert.equal(mapHandle, 0);
     },

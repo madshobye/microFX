@@ -440,6 +440,110 @@ int MicroFxSceneAddGpuAssetTexture(MicroFxScene *scene,const char *assetPath)
     return MICROFX_HANDLE_GPU_TEXTURE|index;
 }
 
+int MicroFxSceneAddGpuRasterTexture(MicroFxScene *scene,int width,int height)
+{
+    if(scene->gpuTextureCount>=MICROFX_MAX_GPU_TEXTURES||width<1||height<1||
+       width>MICROFX_DESIGN_WIDTH||height>MICROFX_DESIGN_HEIGHT)return -1;
+    const size_t size=(size_t)width*(size_t)height*4u;
+    uint8_t *pixels=calloc(size,1);if(!pixels)return -1;
+    int index=scene->gpuTextureCount++;
+    scene->gpuTexture[index]=(MicroFxGpuTexture){
+        .source=MICROFX_GPU_TEXTURE_RASTER,
+        .stage=MICROFX_GPU_TEXTURE_BACKGROUND,.mapIndex=-1,
+        .secondaryMapIndex=-1,.tertiaryMapIndex=-1,.visible=true,
+        .blend=true,.opacity=1.0f,.rasterRgba=pixels,.rasterSize=size,
+        .rasterWidth=width,.rasterHeight=height,.rasterVersion=1};
+    return MICROFX_HANDLE_GPU_TEXTURE|index;
+}
+
+bool MicroFxSceneClearGpuRasterTexture(MicroFxScene *scene,int handle,
+                                       uint32_t color)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||texture->source!=MICROFX_GPU_TEXTURE_RASTER||
+       !texture->rasterRgba)return false;
+    const uint8_t rgba[4]={(uint8_t)(color>>24),(uint8_t)(color>>16),
+                           (uint8_t)(color>>8),(uint8_t)color};
+    if(color==0){memset(texture->rasterRgba,0,texture->rasterSize);return true;}
+    for(size_t offset=0;offset<texture->rasterSize;offset+=4)
+        memcpy(texture->rasterRgba+offset,rgba,4);
+    return true;
+}
+
+static void BlendRasterPixel(MicroFxGpuTexture *texture,int x,int y,
+                             uint32_t color,float coverage)
+{
+    if(x<0||x>=texture->rasterWidth||y<0||y>=texture->rasterHeight||coverage<=0)
+        return;
+    uint8_t *pixel=texture->rasterRgba+
+        ((size_t)y*(size_t)texture->rasterWidth+(size_t)x)*4u;
+    const int sourceAlpha=(int)roundf((float)(color&255u)*fminf(coverage,1.0f));
+    if(sourceAlpha<=0)return;
+    const int inverse=255-sourceAlpha;
+    const int destinationAlpha=pixel[3];
+    const int outputAlpha=sourceAlpha+(destinationAlpha*inverse+127)/255;
+    const int source[3]={(int)((color>>24)&255u),(int)((color>>16)&255u),
+                         (int)((color>>8)&255u)};
+    for(int channel=0;channel<3;channel++){
+        const int premultiplied=source[channel]*sourceAlpha+
+            (pixel[channel]*destinationAlpha*inverse+127)/255;
+        pixel[channel]=(uint8_t)(outputAlpha>0?
+            (premultiplied+outputAlpha/2)/outputAlpha:0);
+    }
+    pixel[3]=(uint8_t)outputAlpha;
+}
+
+bool MicroFxSceneDrawGpuRasterPath(MicroFxScene *scene,int handle,
+                                   const float points[][2],int pointCount,
+                                   float width,uint32_t color)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||texture->source!=MICROFX_GPU_TEXTURE_RASTER||!points||
+       pointCount<2||pointCount>MICROFX_MAX_OUTLINE_POINTS||
+       !isfinite(width)||width<=0.0f||width>64.0f)return false;
+    const float radius=fmaxf(0.5f,width*0.5f);
+    const int stamp=(int)ceilf(radius+0.5f);
+    for(int index=1;index<pointCount;index++){
+        const float x0=points[index-1][0],y0=points[index-1][1];
+        const float dx=points[index][0]-x0,dy=points[index][1]-y0;
+        if(!isfinite(x0)||!isfinite(y0)||!isfinite(dx)||!isfinite(dy))return false;
+        const int steps=(int)ceilf(fmaxf(fabsf(dx),fabsf(dy))*2.0f);
+        for(int step=0;step<=steps;step++){
+            const float amount=steps>0?(float)step/(float)steps:0.0f;
+            const float cx=x0+dx*amount,cy=y0+dy*amount;
+            const int centerX=(int)floorf(cx),centerY=(int)floorf(cy);
+            for(int oy=-stamp;oy<=stamp;oy++)for(int ox=-stamp;ox<=stamp;ox++){
+                const float px=(float)(centerX+ox)+0.5f;
+                const float py=(float)(centerY+oy)+0.5f;
+                const float distance=sqrtf((px-cx)*(px-cx)+(py-cy)*(py-cy));
+                BlendRasterPixel(texture,centerX+ox,centerY+oy,color,
+                                 radius+0.5f-distance);
+            }
+        }
+    }
+    return true;
+}
+
+bool MicroFxSceneCommitGpuRasterTexture(MicroFxScene *scene,int handle)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||texture->source!=MICROFX_GPU_TEXTURE_RASTER||
+       !texture->rasterRgba)return false;
+    texture->rasterVersion++;return true;
+}
+
+bool MicroFxSceneSetGpuTextureOverlayRaster(MicroFxScene *scene,int handle,
+                                            int rasterHandle)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    MicroFxGpuTexture *raster=GpuTexture(scene,rasterHandle);
+    if(!texture||!raster||texture==raster||
+       raster->source!=MICROFX_GPU_TEXTURE_RASTER)return false;
+    texture->overlayRaster=true;
+    texture->overlayTextureIndex=rasterHandle&MICROFX_HANDLE_INDEX_MASK;
+    texture->shaderVersion++;return true;
+}
+
 bool MicroFxSceneSetGpuTextureSecondaryMap(MicroFxScene *scene,int handle,
                                            int mapIndex)
 {

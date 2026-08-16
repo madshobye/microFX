@@ -7,6 +7,7 @@
   const groups = new WeakSet();
   const tileMaps = new WeakSet();
   const gpuTextures = new WeakSet();
+  const rasterTextures = new WeakSet();
   const tileMapOwners = new WeakMap();
   const activeTileMaps = [];
   const sceneOwners = new WeakMap();
@@ -1203,6 +1204,12 @@
         else throw new TypeError("texture.tertiary(source) expects a tile map or asset path");
         return object;
       },
+      overlay(value) {
+        if (!rasterTextures.has(value)) {
+          throw new TypeError("texture.overlay(source) expects a raster texture");
+        }
+        fx._gpuTextureOverlayRaster(handle, value.handle);return object;
+      },
       params(values) {
         if (!Array.isArray(values) || values.length > 32 ||
             values.some(value => !Number.isFinite(Number(value)))) {
@@ -1251,6 +1258,55 @@
       hide() { return object.visible(false); }
     };
     gpuTextures.add(object);applyVisibility();return object;
+  };
+
+  fx.rasterTexture = function rasterTexture(width, height, options) {
+    const columns = Number(width), rows = Number(height);
+    if (!Number.isInteger(columns) || !Number.isInteger(rows) ||
+        columns < 1 || rows < 1 || columns > fx.width || rows > fx.height) {
+      throw new RangeError("rasterTexture dimensions must fit the design canvas");
+    }
+    const settings = options || {};
+    const handle = fx._gpuRasterTexture(columns, rows);
+    const state = {
+      enabled: settings.enabled === undefined ? true : Boolean(settings.enabled),
+      visible: settings.visible === undefined ? true : Boolean(settings.visible)
+    };
+    function applyVisibility() {
+      fx._gpuTextureVisible(handle, state.enabled && state.visible);
+    }
+    const object = {
+      handle,
+      clear(color) {
+        fx._gpuRasterClear(handle, color === undefined ? 0 : color);return object;
+      },
+      path(points, lineWidth, color) {
+        const widthValue = Number(lineWidth);
+        if (!Number.isFinite(widthValue) || widthValue <= 0 || widthValue > 64) {
+          throw new RangeError("rasterTexture.path width must be from 0 to 64");
+        }
+        fx._gpuRasterPath(handle, normalizePath(points), widthValue, color);
+        return object;
+      },
+      commit() { fx._gpuRasterCommit(handle);return object; },
+      stage(value) { fx._gpuTextureStage(handle, String(value));return object; },
+      blend(value) {
+        fx._gpuTextureBlend(handle, value === undefined ? true : Boolean(value));
+        return object;
+      },
+      opacity(value) {
+        const opacity = Number(value);
+        if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) {
+          throw new RangeError("rasterTexture.opacity requires a number from 0 to 1");
+        }
+        fx._gpuTextureOpacity(handle, opacity);return object;
+      },
+      enabled(value) { state.enabled = Boolean(value);applyVisibility();return object; },
+      visible(value) { state.visible = Boolean(value);applyVisibility();return object; },
+      show() { return object.visible(true); },
+      hide() { return object.visible(false); }
+    };
+    gpuTextures.add(object);rasterTextures.add(object);applyVisibility();return object;
   };
 
   fx.scene = function scene(options) {

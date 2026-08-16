@@ -70,11 +70,7 @@ const TRANSIT_CORRECTION_SECONDS = 8;
 const TRANSIT_SNAP_DISTANCE_KM = 1.5;
 const MAX_RAIL_TRANSIT = 224;
 const MAX_BUSES = 128;
-// The shared outline pool also contains aircraft, trails, and radar shapes.
-// These values use the remaining capacity exactly; better topology and the
-// geographic edge rule provide coverage without stealing moving-object slots.
-const MAX_TRAIN_MAP_PATHS = 144;
-const MAX_METRO_MAP_PATHS = 50;
+const MAX_RAILWAY_SEGMENTS = 4096;
 const RAILWAY_MERGE_PIXELS = 5;
 // Transitous can encode a valid station-to-station stretch with only its end
 // points. A geographic limit remains stable as presets change zoom, unlike a
@@ -86,7 +82,8 @@ const TRANSIT_MODES = new Set([
 const METRO_MODES = new Set(["SUBWAY", "TRAM", "LIGHT_RAIL"]);
 const BUS_MODES = new Set(["BUS", "COACH"]);
 const METRO_COLOR = 0xffd55aff;
-const METRO_PATH_COLOR = 0x8f742fff;
+const TRAIN_PATH_RASTER_COLOR = 0x29434aff;
+const METRO_PATH_RASTER_COLOR = 0x8f742fff;
 const TRAIN_COLOR = 0x65e6ffff;
 const BUS_DAY_COLOR = 0xf2f5f6ff;
 const BUS_NIGHT_COLOR = 0x899399ff;
@@ -200,6 +197,18 @@ const nightView = fx.texture(darkMap)
   .stage("background")
   .blend(false)
   .hide();
+// Static transport topology is accumulated off-frame and uploaded as one
+// transparent GPU texture. The day/night backgrounds consume it only while
+// baking their opaque RGB565 caches, so steady rendering remains one pass.
+const railwayTexture = HAS_TRANSIT ? fx.rasterTexture(fx.width, fx.height)
+  .stage("background").blend(false).hide() : null;
+if (railwayTexture) nightView.overlay(railwayTexture);
+const dayView = fx.texture(map)
+  .shader("assets/shaders/map-tracks.fs")
+  .stage("background")
+  .blend(false)
+  .hide();
+if (railwayTexture) dayView.overlay(railwayTexture);
 const startupAssets = fx.assets.load({
   required: [map, darkMap, satelliteMap, nightLights],
   lazy: [],
@@ -226,12 +235,6 @@ scene.add(fx.text("ESRI / NASA / DMI / ADSB.FI / TRANSITOUS",
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const mapPoint = (longitude, latitude) => map.project(longitude, latitude);
-const trainMapPaths = HAS_TRANSIT ? Array.from({ length: MAX_TRAIN_MAP_PATHS }, () =>
-  scene.add(fx.outline([[0, 0], [1, 0]], 0, 0, 1, 2,
-    0x29434aff).opacity(0.64).visible(false))) : [];
-const metroMapPaths = HAS_TRANSIT ? Array.from({ length: MAX_METRO_MAP_PATHS }, () =>
-  scene.add(fx.outline([[0, 0], [1, 0]], 0, 0, 1, 2,
-    METRO_PATH_COLOR).opacity(0.72).visible(false))) : [];
 const MAX_LANDMARKS = Math.max(...PLACE_NAMES.map(name =>
   (LOCATIONS[name].landmarks || []).length));
 const landmarks = Array.from({ length: MAX_LANDMARKS }, () => {
@@ -355,10 +358,7 @@ const railwayQueue = [];
 const railwayNodes = [];
 const railwayNodeCells = new Map();
 const railwayEdges = new Set();
-let trainMapPathCount = 0;
-let metroMapPathCount = 0;
-let pendingTrainMapPaths = 0;
-let pendingMetroMapPaths = 0;
+let railwayTextureDirty = false;
 let solarDirection = { x: -0.72, y: -0.69 };
 let nightAmount = -1;
 let nextSolarUpdate = 0;
@@ -419,8 +419,7 @@ function clearLocationData() {
   ships.forEach(slot => {
     slot.active = false;slot.id = "";slot.outline.visible(false);
   });
-  trainMapPaths.forEach(path => path.visible(false));
-  metroMapPaths.forEach(path => path.visible(false));
+  if (railwayTexture) railwayTexture.clear(0).commit();
   radarRegions.forEach(slot => {
     slot.outer.visible(false);slot.inner.visible(false);
   });
@@ -433,8 +432,7 @@ function clearLocationData() {
   routeQueue.length = 0;
   railwayQueue.length = 0;railwayNodes.length = 0;
   railwaySeen.clear();railwayNodeCells.clear();railwayEdges.clear();
-  trainMapPathCount = 0;metroMapPathCount = 0;
-  pendingTrainMapPaths = 0;pendingMetroMapPaths = 0;
+  railwayTextureDirty = false;
   transitJob = null;transitRequestInFlight = false;
   requestInFlight = false;routeInFlight = false;
   radarJob = null;radarRequestInFlight = false;radarFrameId = "";
@@ -480,8 +478,6 @@ function switchLocation(index) {
       const key = `${item.kind}:${item.polyline}`;
       if (railwaySeen.has(key)) return;
       railwaySeen.add(key);railwayQueue.push(item);
-      if (item.kind === "metro") pendingMetroMapPaths++;
-      else pendingTrainMapPaths++;
     });
     // Select the new location's solar state before exposing its first frame;
     // otherwise the freshly rebaked night texture can flash for one frame.
@@ -1168,18 +1164,14 @@ function transitPath(segment) {
 
 function rememberRailwayPath(segment, kind) {
   if (!kind || !segment || !segment.polyline) return;
-  const capacity = kind === "metro" ? MAX_METRO_MAP_PATHS : MAX_TRAIN_MAP_PATHS;
-  const used = kind === "metro" ? metroMapPathCount : trainMapPathCount;
-  const pending = kind === "metro" ? pendingMetroMapPaths : pendingTrainMapPaths;
   const key = `${kind}:${segment.polyline}`;
-  if (used >= capacity || pending >= capacity * 2 || railwaySeen.has(key)) {
+  if (placeCache().railways.length >= MAX_RAILWAY_SEGMENTS ||
+      railwaySeen.has(key)) {
     return;
   }
   railwaySeen.add(key);
   railwayQueue.push({ kind, polyline: segment.polyline });
   placeCache().railways.push({ kind, polyline: segment.polyline });
-  if (kind === "metro") pendingMetroMapPaths++;
-  else pendingTrainMapPaths++;
 }
 
 function railwayNode(point) {
@@ -1211,25 +1203,26 @@ function railwayNode(point) {
 }
 
 function drawRailwayRun(kind, nodes) {
-  if (nodes.length < 2) return;
-  const paths = kind === "metro" ? metroMapPaths : trainMapPaths;
+  if (!railwayTexture || nodes.length < 2) return;
   while (nodes.length >= 2) {
-    const count = kind === "metro" ? metroMapPathCount : trainMapPathCount;
-    if (count >= paths.length) return;
     const chunk = nodes.slice(0, 64).map(node => [node.x, node.y]);
-    paths[count].points(chunk).visible(true);
-    if (kind === "metro") metroMapPathCount++;
-    else trainMapPathCount++;
+    railwayTexture.path(chunk, 2, kind === "metro" ?
+      METRO_PATH_RASTER_COLOR : TRAIN_PATH_RASTER_COLOR);
+    railwayTextureDirty = true;
     if (nodes.length <= 64) return;
     nodes = nodes.slice(63);
   }
 }
 
 function processRailwayQueue() {
-  if (!railwayQueue.length) return;
+  if (!railwayQueue.length) {
+    if (railwayTextureDirty && !transitJob) {
+      railwayTexture.commit();
+      railwayTextureDirty = false;
+    }
+    return;
+  }
   const item = railwayQueue.shift();
-  if (item.kind === "metro") pendingMetroMapPaths--;
-  else pendingTrainMapPaths--;
   const nodes = [];
   decodeTransitPath(item.polyline).forEach(point => {
     const node = railwayNode(point);
@@ -1626,11 +1619,11 @@ function updateSun(now, force) {
   if (amount !== nightAmount) {
     nightAmount = amount;
     if (nightAmount === 1) {
-      map.hide();
+      dayView.hide();
       nightView.show().blend(false).opacity(1);
     } else {
       nightView.hide();
-      map.show();
+      dayView.show().blend(false).opacity(1);
     }
     flights.forEach(slot => {
       slot.shadow.visible(slot.active && !slot.onGround && nightAmount === 0);
@@ -2020,11 +2013,11 @@ function update(time, delta) {
     const startup = startupAssets.update(time);
     if (!startup.ready) {
       if (startup.sourcesReady) {
-        // Bake the opaque night composite once behind the initial loading
-        // cover. Later viewport changes have their own atomic handoff.
-        nightView.show().blend(false).opacity(1);
+        // Bake the geographically correct opaque background behind the
+        // initial loading cover. Later viewport changes use atomic handoff.
+        updateSun(time, true);
       } else {
-        nightView.hide();
+        nightView.hide();dayView.hide();
       }
       return;
     }
