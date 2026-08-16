@@ -15,6 +15,8 @@ function networkContext() {
   const passes = [];
   const requests = [];
   const cacheReads = [];
+  const tileVisibility = [];
+  const textureVisibility = [];
   let nextHandle = 1;
   const fx = {
     width: 1920,
@@ -44,7 +46,7 @@ function networkContext() {
     _tileMapTile(handle, generation, index, x, y, size, bytes) {
       tiles.push(["tile", handle, generation, index, x, y, size, bytes.byteLength]);
     },
-    _tileMapVisible() {},
+    _tileMapVisible(handle, visible) { tileVisibility.push([handle, visible]); },
     _tileMapReady: () => true,
     _gpuTextureMap(map) { passes.push(["texture", map]);return 0x07000000; },
     _gpuTextureAsset(path) { passes.push(["textureAsset", path]);return 0x07000000; },
@@ -62,7 +64,7 @@ function networkContext() {
     _gpuTextureStage(handle, stage) { passes.push(["stage", handle, stage]); },
     _gpuTextureBlend(handle, blend) { passes.push(["blend", handle, blend]); },
     _gpuTextureOpacity(handle, opacity) { passes.push(["textureOpacity", handle, opacity]); },
-    _gpuTextureVisible() {},
+    _gpuTextureVisible(handle, visible) { textureVisibility.push([handle, visible]); },
     _cacheRead(namespace, key) {
       cacheReads.push([namespace, key]);return Uint8Array.from([1, 2, 3]).buffer;
     },
@@ -82,7 +84,8 @@ function networkContext() {
   };
   const context = vm.createContext({ fx, console });
   vm.runInContext(runtime, context, { filename: "retained.js" });
-  return { context, callbacks, sends, tiles, passes, requests, cacheReads };
+  return { context, callbacks, sends, tiles, passes, requests, cacheReads,
+    tileVisibility, textureVisibility };
 }
 
 test("fetch exposes a standard response surface", async () => {
@@ -196,6 +199,33 @@ test("tile maps project coordinates and submit one atomic cached generation", as
   assert.deepEqual(passes.map(value => value[0]),
     ["texture", "shader", "field", "params", "stage", "blend"]);
   assert.deepEqual(Array.from(passes[3][2]), [1, 2, 3]);
+});
+
+test("scene selection gates tile maps without rewriting their visibility", () => {
+  const { context, tiles, tileVisibility, textureVisibility } = networkContext();
+  vm.runInContext(`
+    const map = fx.tileMap({
+      source: { url: "https://tiles.test/{z}/{x}/{y}.png", tileSize: 256 },
+      center: [12.635, 55.67], zoom: 11, cacheDays: 7
+    });
+    const disabled = fx.tileMap({
+      enabled: false,
+      source: { url: "https://disabled.test/{z}/{x}/{y}.png", tileSize: 256 },
+      center: [12.635, 55.67], zoom: 11, cacheDays: 7
+    });
+    const texture = fx.texture(map, { enabled: false });
+    const scene = fx.scenes.add(fx.scene({ name: "map-gate" }));
+    scene.add(map);
+    map.hide();
+    fx._beginFrame();scene.show();fx._endFrame();
+    texture.enabled(true).hide();
+  `, context);
+  assert.equal(tiles.filter(call => call[0] === "begin").length, 1,
+    "a disabled tile map must not start loading");
+  assert.equal(tileVisibility.at(-1)[1], false,
+    "scene.show must preserve the map's own hidden state");
+  assert.deepEqual(textureVisibility.slice(-3).map(call => call[1]),
+    [false, true, false]);
 });
 
 test("solar position is geographic and world-wide", () => {

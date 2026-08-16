@@ -58,8 +58,8 @@ limactl shell "$VM_NAME" -- sh -lc "
   make -C \"\$BR\" BR2_EXTERNAL=\"\$EXTERNAL\" O=\"\$OUT\" imx6dl_dg1_defconfig
   CLEAN_CONFIG=0
   if [ \"\$HAD_CONFIG\" = 1 ]; then
-    sed -E 's#/home/[^/]+/microfx-(linux|graphics)-src\.[^/\"]+#@MICROFX_SOURCE@#g; s#/home/[^/]+/microfx-(src|test-src)\.[^/\"]+#@MICROFX_SOURCE@#g' \"\$PREVIOUS_CONFIG\" >\"\$PREVIOUS_CONFIG_NORMALIZED\"
-    sed -E 's#/home/[^/]+/microfx-(linux|graphics)-src\.[^/\"]+#@MICROFX_SOURCE@#g; s#/home/[^/]+/microfx-(src|test-src)\.[^/\"]+#@MICROFX_SOURCE@#g' \"\$OUT/.config\" >\"\$CURRENT_CONFIG_NORMALIZED\"
+    sed -E 's#/home/[^/]+/microfx-(linux|graphics|studio)-src\.[^/\"]+#@MICROFX_SOURCE@#g; s#/home/[^/]+/microfx-(src|test-src)\.[^/\"]+#@MICROFX_SOURCE@#g' \"\$PREVIOUS_CONFIG\" >\"\$PREVIOUS_CONFIG_NORMALIZED\"
+    sed -E 's#/home/[^/]+/microfx-(linux|graphics|studio)-src\.[^/\"]+#@MICROFX_SOURCE@#g; s#/home/[^/]+/microfx-(src|test-src)\.[^/\"]+#@MICROFX_SOURCE@#g' \"\$OUT/.config\" >\"\$CURRENT_CONFIG_NORMALIZED\"
     if ! cmp -s \"\$PREVIOUS_CONFIG_NORMALIZED\" \"\$CURRENT_CONFIG_NORMALIZED\"; then
       CLEAN_CONFIG=1
     fi

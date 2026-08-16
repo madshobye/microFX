@@ -105,6 +105,8 @@ const map = fx.tileMap({
   }
 });
 scene.add(map);
+// Scene selection and authored map visibility are independent gates.
+map.enabled(true).show();
 const screenPoint = map.project(12.6561, 55.6181);
 const location = map.unproject(screenPoint.x, screenPoint.y);
 ```
@@ -121,6 +123,11 @@ const weather = fx.texture(map)
   .stage("overlay")
   .blend(true);
 ```
+
+Tile maps and GPU textures accept `enabled` and `visible` constructor options
+and expose matching fluent controls. A scene only gates its tile-map members;
+`scene.show()` never makes a hidden or disabled map visible. Disabling a tile
+map also stops new network loads and retries until it is enabled again.
 
 The shader receives `uTexture`, optional `uField`, `uFieldSize`, `uResolution`,
 `uTime`, and `uParams[8]`. Fields are limited to 64×64 RGBA cells and parameters

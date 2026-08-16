@@ -29,7 +29,7 @@ const map = scene.add(fx.tileMap({
 
 const texturePass = fx.texture(map)
   .shader("assets/shaders/texture-benchmark.fs")
-  .stage("overlay");
+  .stage("background");
 
 const title = scene.add(fx.text("", 42, 90, 52, 0xeeeeeeff));
 const note = scene.add(fx.text("", 44, 145, 24, 0xaaaaaaff));

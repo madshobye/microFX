@@ -113,16 +113,18 @@ relative offset. Both are fluent and return the same object.
 | `group.add(element)` | Add one retained element; an element belongs to at most one group |
 | `group.position(...)` / `move(...)` | Translate every member while preserving its retained local state |
 | `scene.add(elementOrGroup)` | Record explicit membership and return the element or group |
-| `scene.show()` | Select a scene for the current frame |
+| `scene.show()` | Select a scene as a render gate for the current frame without changing member visibility |
 | `configure(settings)` | Set startup output/FPS policy from the application |
 | `fetch(url, { headers })` / `fx.net.fetch(url, { headers })` | Non-blocking HTTP(S) GET with optional request headers and text, JSON, and ArrayBuffer responses |
 | `tileMap(options)` | Cached XYZ raster map with Mercator projection and a GPU color filter |
+| `tileMap.enabled(false)` | Disable rendering, loading, retries, and submissions until re-enabled |
 | `maps.earth(options)` | Aligned worldwide Esri daytime and fixed-date NASA Black Marble night maps |
 | `assets.load({required,lazy,settleFrames})` | Track blocking and lazy resources with bounded GPU-cache warmup frames |
 | `tileMap.project(lon,lat)` | Project geographic coordinates into the design canvas |
 | `tileMap.unproject(x,y)` | Convert a design-canvas point back to longitude and latitude |
 | `tileMap.center(...)` / `zoom(...)` | Atomically prepare a replacement map texture |
 | `texture(tileMapOrAssetPath)` | Expose a cached map or image asset as a reusable GPU texture layer |
+| `texture.enabled(false)` | Disable that GPU texture layer without changing its authored visibility |
 | `texture.secondary(tileMapOrAssetPath)` | Bind one additional cached image as shader uniform `uTexture2` |
 | `texture.tertiary(tileMapOrAssetPath)` | Bind a third cached image as shader uniform `uTexture3` |
 | `texture.shader(fragmentPath)` | Apply a project-local GLES2 fragment shader to that GPU texture |
@@ -183,7 +185,9 @@ only when all members are 2D, matching the underlying depth policy.
 Registered scenes start every frame disabled. `update()` selects any scene that
 should render by calling `scene.show()`; leaving every scene unselected produces
 a blank application frame. Selection is committed after `update()`, so keeping
-the same scene active does not dirty its buffers. `element.enabled(false)` is
+the same scene active does not dirty its buffers. Scene selection is only a
+render gate: it never calls `show()` on members or rewrites their own
+`visible`/`enabled` state. `element.enabled(false)` is
 an authored culling control: 2D geometry is omitted from rebuilt batches and 3D
 geometry is removed from the single mesh VBO until re-enabled.
 

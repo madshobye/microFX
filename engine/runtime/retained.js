@@ -162,7 +162,7 @@
       rotation: 0,
       scale: 1,
       enabled: true,
-      sceneVisible: true
+      sceneActive: true
     }, initial || {});
 
     const object = {
@@ -309,7 +309,7 @@
     }
 
     function applyVisibility() {
-      fx._visible(handle, state.enabled && state.sceneVisible);
+      fx._visible(handle, state.enabled && state.sceneActive);
     }
 
     elementStates.set(object, state);
@@ -912,9 +912,17 @@
         handle,
         longitude: Number(center[0]), latitude: Number(center[1]),
         zoom: Number(settings.zoom === undefined ? 10 : settings.zoom),
-        generation: 0, visible: true, ready: Promise.resolve(false),
+        generation: 0,
+        enabled: settings.enabled === undefined ? true : Boolean(settings.enabled),
+        visible: settings.visible === undefined ? true : Boolean(settings.visible),
+        sceneActive: true, ready: Promise.resolve(false),
         loading: false, reloadRequested: false, nextRetry: 0
       };
+
+      function applyVisibility() {
+        fx._tileMapVisible(handle,
+          state.enabled && state.visible && state.sceneActive);
+      }
 
       function coordinates() {
         if (!Number.isFinite(state.longitude) || !Number.isFinite(state.latitude) ||
@@ -968,6 +976,7 @@
       }
 
       function beginReload() {
+        if (!state.enabled) return Promise.resolve(false);
         if (state.loading) { state.reloadRequested = true; return state.ready; }
         const descriptors = coordinates();
         const generation = ++state.generation;
@@ -1028,11 +1037,26 @@
               (Number(y) - fx.height * 0.5) / (world * scale))
           };
         },
-        visible(value) { state.visible = Boolean(value);fx._tileMapVisible(handle,state.visible);return object; },
+        enabled(value) {
+          const next = Boolean(value);
+          if (state.enabled === next) return object;
+          state.enabled = next;
+          if (!next) {
+            state.generation++;
+            state.reloadRequested = false;
+          }
+          applyVisibility();
+          if (next) beginReload();
+          return object;
+        },
+        visible(value) { state.visible = Boolean(value);applyVisibility();return object; },
+        _sceneActive(value) { state.sceneActive = Boolean(value);applyVisibility();return object; },
         show() { return object.visible(true); },
         hide() { return object.visible(false); }
       };
-      tileMaps.add(object);activeTileMaps.push(state);beginReload();return object;
+      tileMaps.add(object);activeTileMaps.push(state);applyVisibility();
+      if (state.enabled) beginReload();
+      return object;
     };
 
     const EARTH_NIGHT_DATE = "2016-01-01";
@@ -1127,11 +1151,19 @@
     };
   }
 
-  fx.texture = function texture(source) {
+  fx.texture = function texture(source, options) {
+    const settings = options || {};
     let handle;
     if (tileMaps.has(source)) handle = fx._gpuTextureMap(source.handle);
     else if (typeof source === "string") handle = fx._gpuTextureAsset(source);
     else throw new TypeError("texture(source) expects a tile map or asset path");
+    const state = {
+      enabled: settings.enabled === undefined ? true : Boolean(settings.enabled),
+      visible: settings.visible === undefined ? true : Boolean(settings.visible)
+    };
+    function applyVisibility() {
+      fx._gpuTextureVisible(handle, state.enabled && state.visible);
+    }
     const object = {
       handle,
       shader(fragmentPath) {
@@ -1193,13 +1225,12 @@
         }
         fx._gpuTextureOpacity(handle, opacity);return object;
       },
-      visible(value) {
-        fx._gpuTextureVisible(handle, Boolean(value));return object;
-      },
+      enabled(value) { state.enabled = Boolean(value);applyVisibility();return object; },
+      visible(value) { state.visible = Boolean(value);applyVisibility();return object; },
       show() { return object.visible(true); },
       hide() { return object.visible(false); }
     };
-    gpuTextures.add(object);return object;
+    gpuTextures.add(object);applyVisibility();return object;
   };
 
   fx.scene = function scene(options) {
@@ -1212,7 +1243,7 @@
         if (tileMaps.has(value)) {
           if (tileMapOwners.has(value)) throw new Error("tile map already belongs to a scene");
           tileMapOwners.set(value, object);state.maps.push(value);members.push(value);
-          value.hide();return value;
+          value._sceneActive(false);return value;
         }
         if (!value || (!elementStates.has(value) && !groups.has(value))) {
           throw new TypeError("scene.add() expects a retained element, group, or tile map");
@@ -1224,7 +1255,7 @@
         additions.forEach(member => {
           sceneOwners.set(member, object);
           const memberState = elementStates.get(member);
-          memberState.sceneVisible = false;
+          memberState.sceneActive = false;
           fx._visible(member.handle, false);
           flattened.push(member);
         });
@@ -1275,14 +1306,14 @@
       state.active = state.requested;
       scene.flattenedElements().forEach(member => {
         const memberState = elementStates.get(member);
-        memberState.sceneVisible = state.active;
-        fx._visible(member.handle, memberState.enabled && memberState.sceneVisible);
+        memberState.sceneActive = state.active;
+        fx._visible(member.handle, memberState.enabled && memberState.sceneActive);
       });
-      state.maps.forEach(map => map.visible(state.active));
+      state.maps.forEach(map => map._sceneActive(state.active));
     });
     const now = Date.now();
     activeTileMaps.forEach(state => {
-      if (!state.loading && state.nextRetry > 0 && now >= state.nextRetry) {
+      if (state.enabled && !state.loading && state.nextRetry > 0 && now >= state.nextRetry) {
         state.beginReload();
       }
     });

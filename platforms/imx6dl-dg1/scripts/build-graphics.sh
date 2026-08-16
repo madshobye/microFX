@@ -41,9 +41,11 @@ limactl shell "$VM_NAME" -- sh -lc "
   CURRENT_CONFIG_NORMALIZED=\"\$(mktemp)\"
   cp \"\$OUT/.config\" \"\$PREVIOUS_CONFIG\"
   make -C \"\$BR\" BR2_EXTERNAL=\"\$EXTERNAL\" O=\"\$OUT\" imx6dl_dg1_defconfig
-  sed -E 's#/home/[^/]+/microfx-(linux|graphics)-src\.[^/\"]+#@MICROFX_SOURCE@#g; s#/home/[^/]+/microfx-(src|test-src)\.[^/\"]+#@MICROFX_SOURCE@#g' \"\$PREVIOUS_CONFIG\" >\"\$PREVIOUS_CONFIG_NORMALIZED\"
-  sed -E 's#/home/[^/]+/microfx-(linux|graphics)-src\.[^/\"]+#@MICROFX_SOURCE@#g; s#/home/[^/]+/microfx-(src|test-src)\.[^/\"]+#@MICROFX_SOURCE@#g' \"\$OUT/.config\" >\"\$CURRENT_CONFIG_NORMALIZED\"
+  sed -E 's#/home/[^/]+/microfx-(linux|graphics|studio)-src\.[^/\"]+#@MICROFX_SOURCE@#g; s#/home/[^/]+/microfx-(src|test-src)\.[^/\"]+#@MICROFX_SOURCE@#g' \"\$PREVIOUS_CONFIG\" >\"\$PREVIOUS_CONFIG_NORMALIZED\"
+  sed -E 's#/home/[^/]+/microfx-(linux|graphics|studio)-src\.[^/\"]+#@MICROFX_SOURCE@#g; s#/home/[^/]+/microfx-(src|test-src)\.[^/\"]+#@MICROFX_SOURCE@#g' \"\$OUT/.config\" >\"\$CURRENT_CONFIG_NORMALIZED\"
   if ! cmp -s \"\$PREVIOUS_CONFIG_NORMALIZED\" \"\$CURRENT_CONFIG_NORMALIZED\"; then
+    echo 'Buildroot configuration difference:' >&2
+    diff -u \"\$PREVIOUS_CONFIG_NORMALIZED\" \"\$CURRENT_CONFIG_NORMALIZED\" >&2 || true
     cp \"\$PREVIOUS_CONFIG\" \"\$OUT/.config\"
     echo 'Buildroot configuration changed; graphics build refused to touch the Linux cache.' >&2
     echo 'Run build-linux.sh and use --clean only if that command explicitly requests it.' >&2
@@ -55,4 +57,3 @@ limactl shell "$VM_NAME" -- sh -lc "
   test -x \"\$OUT/build/microfx-demo-1.0.0/canvas-demo\"
   echo 'Graphics/runtime cross-build passed; Linux image and cache were preserved.'
 "
-

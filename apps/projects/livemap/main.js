@@ -10,7 +10,11 @@ const PLACE_NAME = "copenhagen";
 const LOCATIONS = fx.data("locations.json");
 const PLACE = LOCATIONS[PLACE_NAME];
 if (!PLACE) throw new Error(`Unknown location preset: ${PLACE_NAME}`);
-const HAS_TRANSIT = Boolean(PLACE.transit && PLACE.transit.regions &&
+// Keep optional feeds as explicit application switches. AIS is currently
+// unreliable, and transit is disabled while profiling the background path.
+const ENABLE_AIS = false;
+const ENABLE_TRANSIT = false;
+const HAS_TRANSIT = ENABLE_TRANSIT && Boolean(PLACE.transit && PLACE.transit.regions &&
   PLACE.transit.regions.length);
 const HAS_BUSES = HAS_TRANSIT && PLACE.transit.regions.some(region =>
   region.kinds.includes("bus"));
@@ -29,12 +33,10 @@ const AIRPORT_CLUSTER_MAX_RADIUS = 24;
 const SHADOW_MIN_OFFSET = 7;
 const SHADOW_MAX_OFFSET = 62;
 const LANDMARK_BREATH_SECONDS = 3;
-// Debug: travel through one complete geographic day every minute. Set to 0
-// to return to wall-clock time after the visual transition has been tuned.
-const SUN_DEBUG_CYCLE_SECONDS = 60;
-// Hold the compositor at full night while the NASA light-mask alignment is
-// inspected on the target display.
-const FORCE_NIGHT_DEBUG = true;
+// Sun position selects one opaque background. There is deliberately no
+// full-screen day/night alpha transition on this hardware.
+const SUN_DEBUG_CYCLE_SECONDS = 0;
+const NIGHT_SWITCH_ELEVATION = -3;
 const SUN_UPDATE_SECONDS = SUN_DEBUG_CYCLE_SECONDS ? 0.1 : 30;
 const sunDebugToday = new Date();
 const SUN_DEBUG_DAY_START = Date.UTC(sunDebugToday.getUTCFullYear(),
@@ -63,7 +65,7 @@ const BUS_MODES = new Set(["BUS", "COACH"]);
 const TRANSIT_URL = "https://api.transitous.org/api/v6/map/trips";
 const TRANSIT_USER_AGENT =
   "microFX-copenhagen-map/0.1 (+https://github.com/madshobye/microFX)";
-const AIS_API_KEY = fx.secret("AISSTREAM_API_KEY", "");
+const AIS_API_KEY = ENABLE_AIS ? fx.secret("AISSTREAM_API_KEY", "") : "";
 const AIS_URL = "wss://stream.aisstream.io/v0/stream";
 const DATA_URL = `https://opendata.adsb.fi/api/v3/lat/${PLACE.airport.latitude}` +
   `/lon/${PLACE.airport.longitude}/dist/${PLACE.searchRadiusNm}`;
@@ -162,10 +164,6 @@ const nightLights = scene.add(fx.tileMap({
   filter: { grayscale: 0, contrast: 1, brightness: 1 }
 }));
 map.hide();darkMap.hide();satelliteMap.hide();nightLights.hide();
-const dayView = fx.texture(map)
-  .stage("background")
-  .blend(false)
-  .hide();
 const nightView = fx.texture(darkMap)
   .secondary(satelliteMap)
   .tertiary(nightLights)
@@ -1350,19 +1348,15 @@ function updateSun(now) {
     new Date(SUN_DEBUG_DAY_START + cycle * 86400000) : new Date();
   const sun = fx.geo.sunPosition(sunTime, PLACE.mapCenter.latitude,
     PLACE.mapCenter.longitude);
-  const linear = clamp((3 - sun.elevationDegrees) / 11, 0, 1);
-  const amount = FORCE_NIGHT_DEBUG ? 1 : linear * linear * (3 - 2 * linear);
-  if (Math.abs(amount - nightAmount) >= 0.002) {
+  const amount = sun.elevationDegrees < NIGHT_SWITCH_ELEVATION ? 1 : 0;
+  if (amount !== nightAmount) {
     nightAmount = amount;
-    if (nightAmount <= 0.001) {
-      dayView.show().blend(false).opacity(1);
-      nightView.hide();
-    } else if (nightAmount >= 0.999) {
-      dayView.hide();
+    if (nightAmount === 1) {
+      map.hide();
       nightView.show().blend(false).opacity(1);
     } else {
-      dayView.show().blend(false).opacity(1);
-      nightView.show().blend(true).opacity(nightAmount);
+      nightView.hide();
+      map.show();
     }
   }
   // Screen north points upward. Only geographic sun azimuth controls the
@@ -1732,12 +1726,11 @@ function update(time, delta) {
   const startup = startupAssets.update(time);
   if (!startup.ready) {
     if (startup.sourcesReady) {
-      // Both final backgrounds are visible for the bounded settle window so
-      // their 1920x1080 RGB565 shader results bake behind the loading cover.
-      dayView.show().blend(false).opacity(1);
+      // Bake the opaque night composite once behind the loading cover. The
+      // first solar update then selects it or the direct daytime map.
       nightView.show().blend(false).opacity(1);
     } else {
-      dayView.hide();nightView.hide();
+      nightView.hide();
     }
     return;
   }
