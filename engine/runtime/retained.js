@@ -19,7 +19,119 @@
     throw new TypeError("expected a retained element or numeric handle");
   }
 
+  function obliqueStereographic(options) {
+    const settings = options || {};
+    const latitudeOrigin = Number(settings.latitudeOrigin);
+    const longitudeOrigin = Number(settings.longitudeOrigin);
+    const semiMajor = Number(settings.semiMajor === undefined ? 6378137 :
+      settings.semiMajor);
+    const inverseFlattening = Number(settings.inverseFlattening === undefined ?
+      298.257223563 : settings.inverseFlattening);
+    const scaleFactor = Number(settings.scaleFactor === undefined ? 1 :
+      settings.scaleFactor);
+    if (!Number.isFinite(latitudeOrigin) || latitudeOrigin === 0 ||
+        Math.abs(latitudeOrigin) >= 90 || !Number.isFinite(longitudeOrigin) ||
+        longitudeOrigin < -180 || longitudeOrigin > 180 ||
+        !Number.isFinite(semiMajor) || semiMajor <= 0 ||
+        !Number.isFinite(inverseFlattening) || inverseFlattening <= 1 ||
+        !Number.isFinite(scaleFactor) || scaleFactor <= 0) {
+      throw new RangeError("obliqueStereographic requires a valid origin and ellipsoid");
+    }
+    const radians = Math.PI / 180;
+    const degrees = 180 / Math.PI;
+    const latitude0 = latitudeOrigin * radians;
+    const longitude0 = longitudeOrigin * radians;
+    const flattening = 1 / inverseFlattening;
+    const eccentricitySquared = flattening * (2 - flattening);
+    const eccentricity = Math.sqrt(eccentricitySquared);
+    const ssfn = (latitude, sine) => Math.tan(0.5 *
+      (Math.PI / 2 + latitude)) * Math.pow(
+      (1 - eccentricity * sine) / (1 + eccentricity * sine),
+      0.5 * eccentricity);
+    const originSine = Math.sin(latitude0);
+    const originConformal = 2 * Math.atan(ssfn(latitude0, originSine)) -
+      Math.PI / 2;
+    const sinOriginConformal = Math.sin(originConformal);
+    const cosOriginConformal = Math.cos(originConformal);
+    const eccentricOrigin = eccentricity * originSine;
+    const scale = 2 * scaleFactor * Math.cos(latitude0) /
+      Math.sqrt(1 - eccentricOrigin * eccentricOrigin);
+
+    const forward = (longitude, latitude) => {
+      const lon = Number(longitude);
+      const lat = Number(latitude);
+      if (!Number.isFinite(lon) || !Number.isFinite(lat) ||
+          lat < -90 || lat > 90) {
+        throw new RangeError("stereographic forward requires longitude and latitude");
+      }
+      const longitudeDelta = lon * radians - longitude0;
+      const latitudeRadians = lat * radians;
+      const conformal = 2 * Math.atan(ssfn(latitudeRadians,
+        Math.sin(latitudeRadians))) - Math.PI / 2;
+      const sinConformal = Math.sin(conformal);
+      const cosConformal = Math.cos(conformal);
+      const sinLongitude = Math.sin(longitudeDelta);
+      const cosLongitude = Math.cos(longitudeDelta);
+      const denominator = cosOriginConformal * (1 +
+        sinOriginConformal * sinConformal +
+        cosOriginConformal * cosConformal * cosLongitude);
+      if (Math.abs(denominator) < 1e-14) {
+        throw new RangeError("coordinate lies outside stereographic projection");
+      }
+      const amount = scale / denominator;
+      return Object.freeze({
+        x: semiMajor * amount * cosConformal * sinLongitude,
+        y: semiMajor * amount * (cosOriginConformal * sinConformal -
+          sinOriginConformal * cosConformal * cosLongitude)
+      });
+    };
+
+    const inverse = (x, y) => {
+      const projectedX = Number(x);
+      const projectedY = Number(y);
+      if (!Number.isFinite(projectedX) || !Number.isFinite(projectedY)) {
+        throw new RangeError("stereographic inverse requires projected x and y");
+      }
+      const normalizedX = projectedX / semiMajor;
+      const normalizedY = projectedY / semiMajor;
+      const radius = Math.hypot(normalizedX, normalizedY);
+      const angularDistance = 2 * Math.atan2(
+        radius * cosOriginConformal, scale);
+      const cosine = Math.cos(angularDistance);
+      const sine = Math.sin(angularDistance);
+      let latitude = radius === 0 ?
+        Math.asin(cosine * sinOriginConformal) :
+        Math.asin(cosine * sinOriginConformal +
+          normalizedY * sine * cosOriginConformal / radius);
+      const conformalTangent = Math.tan(0.5 * (Math.PI / 2 + latitude));
+      const longitudeX = normalizedX * sine;
+      const longitudeY = radius * cosOriginConformal * cosine -
+        normalizedY * sinOriginConformal * sine;
+      for (let iteration = 0; iteration < 8; iteration++) {
+        const eccentricSine = eccentricity * Math.sin(latitude);
+        const next = 2 * Math.atan(conformalTangent * Math.pow(
+          (1 + eccentricSine) / (1 - eccentricSine),
+          0.5 * eccentricity)) - Math.PI / 2;
+        if (Math.abs(next - latitude) < 1e-10) {
+          latitude = next;
+          break;
+        }
+        latitude = next;
+      }
+      let longitude = (radius === 0 ? 0 :
+        Math.atan2(longitudeX, longitudeY)) + longitude0;
+      longitude = (longitude + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+      return Object.freeze({
+        longitude: longitude * degrees,
+        latitude: latitude * degrees
+      });
+    };
+
+    return Object.freeze({ forward, inverse });
+  }
+
   fx.geo = Object.freeze({
+    obliqueStereographic,
     sunPosition(date, latitude, longitude) {
       const instant = date instanceof Date ? date : new Date(date);
       const epoch = instant.getTime();

@@ -97,7 +97,7 @@ const flightDataUrl = () =>
   `/lon/${PLACE.mapCenter.longitude}/dist/${PLACE.searchRadiusNm}`;
 const RADAR = {
   listUrl: "https://opendataapi.dmi.dk/v1/radardata/collections/composite/items" +
-    "?limit=4&sortorder=datetime,DESC",
+    "?limit=4&sortorder=datetime,DESC&scanType=fullRange",
   dataset: "/dataset1/data1/data",
   stride: 4,
   threshold: 72,
@@ -106,7 +106,8 @@ const RADAR = {
   regions: 14,
   scanBudget: 120,
   motionSample: 8,
-  motionRange: 12
+  motionRange: 12,
+  motionMaxSeconds: 30 * 60
 };
 
 const mirrorVertical = left => left.concat(
@@ -1641,23 +1642,41 @@ function radarNumber(value) {
   return Array.isArray(value) ? Number(value[0]) : Number(value);
 }
 
-function radarPosition(column, row, decoded) {
+function radarProjection(decoded) {
+  if (decoded.radarProjection) return decoded.radarProjection;
   const where = decoded.attributes["/where"];
-  const rows = decoded.sourceShape[0];
-  const columns = decoded.sourceShape[1];
-  const u = column / (columns - 1);
-  const v = row / (rows - 1);
-  const leftLongitude = radarNumber(where.UL_lon) +
-    (radarNumber(where.LL_lon) - radarNumber(where.UL_lon)) * v;
-  const rightLongitude = radarNumber(where.UR_lon) +
-    (radarNumber(where.LR_lon) - radarNumber(where.UR_lon)) * v;
-  const longitude = leftLongitude + (rightLongitude - leftLongitude) * u;
-  const leftLatitude = radarNumber(where.UL_lat) +
-    (radarNumber(where.LL_lat) - radarNumber(where.UL_lat)) * v;
-  const rightLatitude = radarNumber(where.UR_lat) +
-    (radarNumber(where.LR_lat) - radarNumber(where.UR_lat)) * v;
-  return mapPoint(longitude,
-    leftLatitude + (rightLatitude - leftLatitude) * u);
+  const parameters = {};
+  String(where.projdef || "").trim().split(/\s+/).forEach(part => {
+    const match = /^\+([^=]+)=(.+)$/.exec(part);
+    if (match) parameters[match[1]] = match[2];
+  });
+  if (parameters.proj !== "stere") {
+    throw new Error(`unsupported radar projection ${parameters.proj || "missing"}`);
+  }
+  const projection = fx.geo.obliqueStereographic({
+    latitudeOrigin: Number(parameters.lat_0),
+    longitudeOrigin: Number(parameters.lon_0),
+    semiMajor: 6378137,
+    inverseFlattening: 298.257223563,
+    scaleFactor: Number(parameters.k_0 || parameters.k || 1)
+  });
+  const upperLeft = projection.forward(radarNumber(where.UL_lon),
+    radarNumber(where.UL_lat));
+  decoded.radarProjection = {
+    projection,
+    upperLeft,
+    xScale: radarNumber(where.xscale),
+    yScale: radarNumber(where.yscale)
+  };
+  return decoded.radarProjection;
+}
+
+function radarPosition(column, row, decoded) {
+  const grid = radarProjection(decoded);
+  const location = grid.projection.inverse(
+    grid.upperLeft.x + column * grid.xScale,
+    grid.upperLeft.y - row * grid.yScale);
+  return mapPoint(location.longitude, location.latitude);
 }
 
 function makeComponentScanner(decoded) {
@@ -1967,7 +1986,11 @@ function requestRadar() {
 
 function positionRadar() {
   if (!radarObservationEpoch) return;
-  const age = clamp(Date.now() / 1000 - radarObservationEpoch, 0, 600);
+  // DMI commonly publishes a completed composite 10-20 minutes after its
+  // observation time. Keep extrapolating after it arrives instead of landing
+  // immediately on the old ten-minute cap and freezing until the next file.
+  const age = clamp(Date.now() / 1000 - radarObservationEpoch, 0,
+    RADAR.motionMaxSeconds);
   const dx = radarVelocityX * age;
   const dy = radarVelocityY * age;
   radarRegions.forEach(slot => {

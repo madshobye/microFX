@@ -261,6 +261,27 @@ test("solar position is geographic and world-wide", () => {
   assert.equal(result.southernSummer.daylight, true);
 });
 
+test("oblique stereographic projection round-trips DMI radar coordinates", () => {
+  const { context } = networkContext();
+  const result = vm.runInContext(`(() => {
+    const projection = fx.geo.obliqueStereographic({
+      latitudeOrigin: 56,
+      longitudeOrigin: 10.5666
+    });
+    const upperLeft = projection.forward(3, 60);
+    const copenhagen = projection.inverse(125919.510827, -34246.066198);
+    const projected = projection.forward(12.5683, 55.6761);
+    const roundTrip = projection.inverse(projected.x, projected.y);
+    return { upperLeft, copenhagen, roundTrip };
+  })()`, context);
+  assert.ok(Math.abs(result.upperLeft.x - -422114.801161) < 0.01);
+  assert.ok(Math.abs(result.upperLeft.y - 469381.012754) < 0.01);
+  assert.ok(Math.abs(result.copenhagen.longitude - 12.5683) < 0.01);
+  assert.ok(Math.abs(result.copenhagen.latitude - 55.6761) < 0.01);
+  assert.ok(Math.abs(result.roundTrip.longitude - 12.5683) < 1e-8);
+  assert.ok(Math.abs(result.roundTrip.latitude - 55.6761) < 1e-8);
+});
+
 test("earth maps align global day and fixed-date night imagery", async () => {
   const { context, passes, cacheReads } = networkContext();
   const result = await vm.runInContext(`
