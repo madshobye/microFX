@@ -8,12 +8,13 @@ typedef struct {
     GLuint program;
     GLuint vertexBuffer;
     GLint viewportLocation;
-    int vertexCount;
+    int vertexFirst[2];
+    int vertexCount[2];
 } MicroFxSdfRenderer;
 
 bool MicroFxSdfRendererInit(MicroFxSdfRenderer *renderer);
 void MicroFxSdfRendererDraw(MicroFxSdfRenderer *renderer, MicroFxScene *scene,
-                           int width, int height);
+                           int width, int height, bool foreground);
 void MicroFxSdfRendererDestroy(MicroFxSdfRenderer *renderer);
 
 #endif

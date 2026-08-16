@@ -95,22 +95,26 @@ static void SetVertex(SdfVertex *vertex, const MicroFxSdfElement *e,
 }
 
 void MicroFxSdfRendererDraw(MicroFxSdfRenderer *renderer, MicroFxScene *scene,
-                           int width, int height)
+                           int width, int height, bool foreground)
 {
     if (!renderer->program || scene->sdfCount == 0) return;
     if (scene->sdfDirty) {
         SdfVertex vertices[MICROFX_MAX_SDF_ELEMENTS*6];
         int cursor = 0;
         const int corners[6][2] = {{-1,-1},{1,-1},{1,1},{-1,-1},{1,1},{-1,1}};
-        for (int i = 0; i < scene->sdfCount; i++) {
-            const MicroFxSdfElement *e = &scene->sdf[i];
-            if (!e->visible) continue;
-            for (int v = 0; v < 6; v++) {
-                SetVertex(&vertices[cursor++], e, corners[v][0]*e->width*0.5f,
-                          corners[v][1]*e->height*0.5f);
+        for (int pass = 0; pass < 2; pass++) {
+            renderer->vertexFirst[pass] = cursor;
+            for (int i = 0; i < scene->sdfCount; i++) {
+                const MicroFxSdfElement *e = &scene->sdf[i];
+                if (!e->visible || e->foreground != (pass == 1)) continue;
+                for (int v = 0; v < 6; v++) {
+                    SetVertex(&vertices[cursor++], e,
+                              corners[v][0]*e->width*0.5f,
+                              corners[v][1]*e->height*0.5f);
+                }
             }
+            renderer->vertexCount[pass] = cursor-renderer->vertexFirst[pass];
         }
-        renderer->vertexCount = cursor;
         glBindBuffer(GL_ARRAY_BUFFER, renderer->vertexBuffer);
         glBufferData(GL_ARRAY_BUFFER, cursor*(GLsizeiptr)sizeof(SdfVertex),
                      vertices, GL_DYNAMIC_DRAW);
@@ -134,7 +138,9 @@ void MicroFxSdfRendererDraw(MicroFxSdfRenderer *renderer, MicroFxScene *scene,
     glDepthMask(GL_FALSE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDrawArrays(GL_TRIANGLES, 0, renderer->vertexCount);
+    const int pass = foreground ? 1 : 0;
+    glDrawArrays(GL_TRIANGLES, renderer->vertexFirst[pass],
+                 renderer->vertexCount[pass]);
     for (int i = 0; i < 6; i++) glDisableVertexAttribArray((GLuint)i);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glUseProgram(0);

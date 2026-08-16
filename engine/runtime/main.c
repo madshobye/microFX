@@ -728,9 +728,11 @@ int main(void)
         if (synchronizedProfiling) glFinish();
         double overlayQuadsEnd = GetTime();
         MicroFxSdfRendererDraw(&sdfRenderer, &scriptScene,
-                              DESIGN_WIDTH, DESIGN_HEIGHT);
+                              DESIGN_WIDTH, DESIGN_HEIGHT, false);
         MicroFxOutlineRendererDraw(&outlineRenderer,&scriptScene,
                                    DESIGN_WIDTH,DESIGN_HEIGHT);
+        MicroFxSdfRendererDraw(&sdfRenderer, &scriptScene,
+                              DESIGN_WIDTH, DESIGN_HEIGHT, true);
         if (synchronizedProfiling) glFinish();
         double sdfEnd = GetTime();
         if (!MicroFxImageRendererDraw(&imageRenderer, &scriptScene,

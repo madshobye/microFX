@@ -61,6 +61,9 @@ const METRO_MODES = new Set(["SUBWAY"]);
 const BUS_MODES = new Set(["BUS", "COACH"]);
 const METRO_COLOR = 0xffd55aff;
 const METRO_PATH_COLOR = 0x8f742fff;
+const TRAIN_COLOR = 0x65e6ffff;
+const BUS_DAY_COLOR = 0xf2f5f6ff;
+const BUS_NIGHT_COLOR = 0x899399ff;
 const TRANSIT_URL = "https://api.transitous.org/api/v6/map/trips";
 const TRANSIT_USER_AGENT =
   "microFX-copenhagen-map/0.1 (+https://github.com/madshobye/microFX)";
@@ -258,7 +261,7 @@ const flights = Array.from({ length: MAX_FLIGHTS }, (_, slotIndex) => {
 
 const transit = HAS_TRANSIT ? Array.from({ length: MAX_RAIL_TRANSIT }, () => {
   const marker = scene.add(fx.sdfRoundedRect(0, 0, 18, 6, 3,
-    0x65e6ffff).visible(false));
+    TRAIN_COLOR).stage("foreground").visible(false));
   return {
     id: "", mode: "", active: false, marker,
     lastSeen: 0,
@@ -273,7 +276,7 @@ const transit = HAS_TRANSIT ? Array.from({ length: MAX_RAIL_TRANSIT }, () => {
 }) : [];
 
 const busTransit = HAS_BUSES ? Array.from({ length: MAX_BUSES }, () => {
-  const marker = scene.add(fx.rect(0, 0, 4, 4, 0xb9c3c9ff).visible(false));
+  const marker = scene.add(fx.rect(0, 0, 4, 4, BUS_DAY_COLOR).visible(false));
   return {
     id: "", mode: "BUS", active: false, marker,
     lastSeen: 0,
@@ -1059,7 +1062,7 @@ function styleTransit(slot, mode) {
   if (mode === "SUBWAY") {
     slot.marker.shape("circle", 5, 5, 2.5).color(METRO_COLOR);
   } else {
-    slot.marker.shape("circle", 6, 6, 3).color(0x65e6ffff);
+    slot.marker.shape("circle", 6, 6, 3).color(TRAIN_COLOR);
   }
 }
 
@@ -1356,6 +1359,9 @@ function updateSun(now) {
     }
     flights.forEach(slot => {
       slot.shadow.visible(slot.active && !slot.onGround && nightAmount === 0);
+    });
+    busTransit.forEach(slot => {
+      slot.marker.color(nightAmount === 0 ? BUS_DAY_COLOR : BUS_NIGHT_COLOR);
     });
   }
   // Screen north points upward. Only geographic sun azimuth controls the

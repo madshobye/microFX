@@ -26,6 +26,10 @@ int main(void)
     assert(scene.sdf[0].kind==MICROFX_SDF_ROUNDED_RECT &&
            scene.sdf[0].width==20 && scene.sdf[0].height==12 &&
            scene.sdf[0].radius==4);
+    assert(!scene.sdf[0].foreground);
+    assert(MicroFxSceneSetSdfForeground(&scene,circle,true));
+    assert(scene.sdf[0].foreground && scene.sdfDirty);
+    assert(!MicroFxSceneSetSdfForeground(&scene,-1,true));
 
     int plainRect=MicroFxSceneAddRoundedRect(&scene,20,30,40,50,0,0xffffffff);
     int roundedRect=MicroFxSceneAddRoundedRect(&scene,20,30,40,50,6,0xffffffff);

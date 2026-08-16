@@ -30,6 +30,18 @@ test("rejects per-frame GPU object allocation", () => {
   assert.throws(() => runtime.runFrame(0, 1 / 30), /must be retained/);
 });
 
+test("SDF elements can select a foreground stage", () => {
+  const runtime = app(`
+    const marker = fx.sdfCircle(10, 20, 3, 0xffffffff).stage("foreground");
+    function update() { marker.show(); }
+  `);
+  assert.equal(runtime.runFrames(2, 30).counts.sdf, 1);
+  assert.throws(() => app(`
+    fx.rect(0, 0, 1, 1, 0xffffffff).stage("foreground");
+    function update() {}
+  `), /stage.*SDF/);
+});
+
 test("rejects non-finite transforms", () => {
   const runtime = app(`
     const item = fx.rect(0, 0, 1, 1, 0xffffffff);

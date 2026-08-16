@@ -213,6 +213,11 @@ function instrumentedNativeFx(root, capacities) {
       if (phase === "update") frameCalls += 1;
       return true;
     },
+    _sdfForeground(handle, enabled) {
+      knownHandle(handle, "SDF stage");
+      assert.equal(typeof enabled, "boolean", "SDF foreground must be boolean");
+      return true;
+    },
     _color(handle, value) {
       return mutation("color", handle, [value]);
     },

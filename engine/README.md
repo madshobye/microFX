@@ -130,6 +130,7 @@ relative offset. Both are fluent and return the same object.
 | `texture.shader(fragmentPath)` | Apply a project-local GLES2 fragment shader to that GPU texture |
 | `texture.field(width,height,rgbaBytes)` | Attach one bounded RGBA data texture of at most 64×64 cells |
 | `texture.params(values)` | Update up to 32 finite shader parameters without rebuilding textures |
+| `sdfElement.stage("foreground")` | Draw selected SDF markers after retained outline paths; the default `"overlay"` stage remains below outlines |
 | `texture.stage("background"|"overlay")` | Place the texture below or above retained scene geometry |
 | `texture.blend(boolean)` | Select source-alpha composition (`true`) or opaque replacement (`false`) |
 | `texture.opacity(value)` | Composite cached texture opacity from 0 to 1 without rebaking its shader |

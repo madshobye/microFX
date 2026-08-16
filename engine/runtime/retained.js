@@ -291,6 +291,18 @@
         return object;
       },
 
+      stage(value) {
+        if (state.kind !== "sdf") {
+          throw new TypeError("stage() is available on SDF elements");
+        }
+        const name = String(value);
+        if (name !== "overlay" && name !== "foreground") {
+          throw new RangeError("SDF stage must be overlay or foreground");
+        }
+        fx._sdfForeground(handle, name === "foreground");
+        return object;
+      },
+
       shape(kind, width, height, radius) {
         if (state.kind !== "sdf") throw new TypeError("shape() is only available on SDF elements");
         fx._sdfGeometry(handle, String(kind), Number(width), Number(height),

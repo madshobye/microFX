@@ -776,6 +776,17 @@ static JSValue SetVisible(JSContext *ctx,JSValueConst thisValue,int argc,JSValue
     return JS_NewBool(ctx,MicroFxSceneSetVisible(script->scene,handle,JS_ToBool(ctx,argv[1])>0));
 }
 
+static JSValue SetSdfForeground(JSContext *ctx,JSValueConst thisValue,int argc,
+                                JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc<2||JS_ToInt32(ctx,&handle,argv[0]))
+        return JS_ThrowTypeError(ctx,"sdfForeground(handle,value)");
+    if(!MicroFxSceneSetSdfForeground(script->scene,handle,JS_ToBool(ctx,argv[1])>0))
+        return JS_ThrowTypeError(ctx,"stage() is available on SDF elements");
+    return JS_UNDEFINED;
+}
+
 static JSValue SetOpacity(JSContext *ctx,JSValueConst thisValue,int argc,JSValueConst *argv)
 {
     (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
@@ -1195,6 +1206,7 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_textAntialias",JS_NewCFunction(script->context,SetTextAntialias,"_textAntialias",2));
     JS_SetPropertyStr(script->context,fx,"_color",JS_NewCFunction(script->context,SetColor,"_color",2));
     JS_SetPropertyStr(script->context,fx,"_visible",JS_NewCFunction(script->context,SetVisible,"_visible",2));
+    JS_SetPropertyStr(script->context,fx,"_sdfForeground",JS_NewCFunction(script->context,SetSdfForeground,"_sdfForeground",2));
     JS_SetPropertyStr(script->context,fx,"_opacity",JS_NewCFunction(script->context,SetOpacity,"_opacity",2));
     JS_SetPropertyStr(script->context,fx,"_effect",JS_NewCFunction(script->context,SetEffect,"_effect",4));
     JS_SetPropertyStr(script->context,fx,"camera",JS_NewCFunction(script->context,SetCamera,"camera",7));

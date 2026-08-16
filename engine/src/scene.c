@@ -679,6 +679,18 @@ bool MicroFxSceneSetVisible(MicroFxScene *scene, int handle, bool visible)
     }
 }
 
+bool MicroFxSceneSetSdfForeground(MicroFxScene *scene, int handle,
+                                  bool foreground)
+{
+    if ((handle & MICROFX_HANDLE_KIND_MASK) != MICROFX_HANDLE_SDF) return false;
+    int index = handle & MICROFX_HANDLE_INDEX_MASK;
+    if (index < 0 || index >= scene->sdfCount) return false;
+    if (scene->sdf[index].foreground == foreground) return true;
+    scene->sdf[index].foreground = foreground;
+    scene->sdfDirty = true;
+    return true;
+}
+
 bool MicroFxSceneSetEffect(MicroFxScene *scene, int handle, int effect,
                           float amount, float scale)
 {
