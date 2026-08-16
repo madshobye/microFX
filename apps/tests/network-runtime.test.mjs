@@ -186,16 +186,30 @@ test("tile maps project coordinates and submit one atomic cached generation", as
          .params([1, 2, 3])
          .stage("overlay")
          .blend(true);
-      return map.ready().then(() => ({ center, location, ready: map.isReady() }));
+      return map.ready().then(() => {
+        map.viewport(-73.93, 40.715, 10.5);
+        return map.ready();
+      }).then(() => ({
+        center,
+        location,
+        moved: map.project(-73.93, 40.715),
+        ready: map.isReady()
+      }));
     })()
   `, context);
   assert.ok(Math.abs(result.center.x - 960) < 0.001);
   assert.ok(Math.abs(result.center.y - 540) < 0.001);
   assert.ok(Math.abs(result.location.longitude - 12.635) < 0.000001);
   assert.ok(Math.abs(result.location.latitude - 55.67) < 0.000001);
+  assert.ok(Math.abs(result.moved.x - 960) < 0.001);
+  assert.ok(Math.abs(result.moved.y - 540) < 0.001);
   assert.equal(result.ready, true);
   assert.equal(tiles[0][0], "begin");
-  assert.equal(tiles.filter(value => value[0] === "tile").length, tiles[0][3]);
+  const generations = tiles.filter(value => value[0] === "begin");
+  assert.equal(generations.length, 2,
+    "viewport must start exactly one additional tile generation");
+  assert.equal(tiles.filter(value => value[0] === "tile").length,
+    generations[0][3] + generations[1][3]);
   assert.deepEqual(passes.map(value => value[0]),
     ["texture", "shader", "field", "params", "stage", "blend"]);
   assert.deepEqual(Array.from(passes[3][2]), [1, 2, 3]);

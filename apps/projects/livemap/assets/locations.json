@@ -25,7 +25,8 @@
         { "zoom": 9, "min": [40.52, -73.68], "max": [40.98, -73.95], "kinds": ["metro"] }
       ]
     },
-    "aisBounds": null
+    "aisBounds": null,
+    "radar": false
   },
   "copenhagen": {
     "label": "COPENHAGEN",
@@ -54,7 +55,60 @@
         { "zoom": 9, "min": [55.60, 12.70], "max": [55.70, 12.62], "kinds": ["train", "metro"] }
       ]
     },
-    "aisBounds": [[55.36, 12.10], [55.98, 13.18]]
+    "aisBounds": [[55.36, 12.10], [55.98, 13.18]],
+    "radar": true
+  },
+  "trekroner": {
+    "label": "TREKRONER / RUC",
+    "airport": {
+      "iata": "RKE",
+      "icao": "EKRK",
+      "latitude": 55.5856,
+      "longitude": 12.1314,
+      "markerOffset": [-25, 10]
+    },
+    "mapCenter": { "latitude": 55.6526842, "longitude": 12.1403964 },
+    "mapZoom": 11.45,
+    "searchRadiusNm": 25,
+    "airportGroundRadiusKm": 3,
+    "localAirports": ["RKE", "EKRK"],
+    "landmarks": [
+      { "latitude": 55.6526842, "longitude": 12.1403964, "radius": 3, "color": 4014224639 }
+    ],
+    "transit": {
+      "windowSeconds": 20,
+      "regions": [
+        { "zoom": 9, "min": [55.48, 11.88], "max": [55.82, 12.42], "kinds": ["train", "bus"] }
+      ]
+    },
+    "aisBounds": null,
+    "radar": true
+  },
+  "odense": {
+    "label": "ODENSE",
+    "airport": {
+      "iata": "ODE",
+      "icao": "EKOD",
+      "latitude": 55.4767,
+      "longitude": 10.3309,
+      "markerOffset": [-25, 10]
+    },
+    "mapCenter": { "latitude": 55.3860384, "longitude": 10.4032496 },
+    "mapZoom": 11.45,
+    "searchRadiusNm": 25,
+    "airportGroundRadiusKm": 3,
+    "localAirports": ["ODE", "EKOD"],
+    "landmarks": [
+      { "latitude": 55.3860384, "longitude": 10.4032496, "radius": 3, "color": 4014224639 }
+    ],
+    "transit": {
+      "windowSeconds": 20,
+      "regions": [
+        { "zoom": 9, "min": [55.24, 10.10], "max": [55.56, 10.72], "kinds": ["train", "bus"] }
+      ]
+    },
+    "aisBounds": null,
+    "radar": true
   },
   "cordoba": {
     "label": "CORDOBA",
@@ -72,6 +126,7 @@
     "localAirports": ["COR", "SACO"],
     "landmarks": [],
     "transit": null,
-    "aisBounds": null
+    "aisBounds": null,
+    "radar": false
   }
 }

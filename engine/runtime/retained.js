@@ -1022,6 +1022,10 @@
           beginReload();return object;
         },
         zoom(value) { state.zoom = Number(value);beginReload();return object; },
+        viewport(longitude, latitude, zoom) {
+          state.longitude = Number(longitude);state.latitude = Number(latitude);
+          state.zoom = Number(zoom);beginReload();return object;
+        },
         reload() { return beginReload(); },
         ready() { return state.ready; },
         isReady() { return Boolean(fx._tileMapReady(handle)); },
@@ -1110,6 +1114,10 @@
           day.center(longitude, latitude);night.center(longitude, latitude);return object;
         },
         zoom(value) { day.zoom(value);night.zoom(value);return object; },
+        viewport(longitude, latitude, value) {
+          day.viewport(longitude, latitude, value);
+          night.viewport(longitude, latitude, value);return object;
+        },
         reload() { return Promise.all([day.reload(), night.reload()]); },
         ready() { return Promise.all([day.ready(), night.ready()]); },
         isReady() { return day.isReady() && night.isReady(); },

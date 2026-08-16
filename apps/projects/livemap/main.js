@@ -5,19 +5,29 @@ fx.configure({
   debugBarStyle: "compact"
 });
 
-// Select a preset from assets/locations.json.
-const PLACE_NAME = "copenhagen";
+// Rotate through these presets. Other entries may remain in locations.json for
+// manual experiments without becoming part of the default installation.
 const LOCATIONS = fx.data("locations.json");
-const PLACE = LOCATIONS[PLACE_NAME];
-if (!PLACE) throw new Error(`Unknown location preset: ${PLACE_NAME}`);
+const PLACE_NAMES = ["copenhagen", "trekroner", "odense", "new-york"];
+const LOCATION_SWITCH_SECONDS = 60;
+let placeIndex = 0;
+let PLACE_NAME = PLACE_NAMES[placeIndex];
+let PLACE = LOCATIONS[PLACE_NAME];
+if (PLACE_NAMES.some(name => !LOCATIONS[name])) {
+  throw new Error("A default location preset is missing");
+}
 // Keep optional feeds as explicit application switches. AIS remains disabled
 // while the complete train, metro, and bus feed is enabled.
 const ENABLE_AIS = false;
 const ENABLE_TRANSIT = true;
-const HAS_TRANSIT = ENABLE_TRANSIT && Boolean(PLACE.transit && PLACE.transit.regions &&
-  PLACE.transit.regions.length);
-const HAS_BUSES = HAS_TRANSIT && PLACE.transit.regions.some(region =>
-  region.kinds.includes("bus"));
+// Allocate one retained pool large enough for every preset; each location can
+// independently decide whether it actually requests transit data.
+const HAS_TRANSIT = ENABLE_TRANSIT && PLACE_NAMES.some(name =>
+  LOCATIONS[name].transit && LOCATIONS[name].transit.regions.length);
+const HAS_BUSES = HAS_TRANSIT && PLACE_NAMES.some(name =>
+  LOCATIONS[name].transit.regions.some(region => region.kinds.includes("bus")));
+const placeHasTransit = () => ENABLE_TRANSIT && Boolean(PLACE.transit &&
+  PLACE.transit.regions && PLACE.transit.regions.length);
 
 const POLL_SECONDS = 5;
 const CORRECTION_SECONDS = 8;
@@ -72,8 +82,9 @@ const TRANSIT_USER_AGENT =
   "microFX-copenhagen-map/0.1 (+https://github.com/madshobye/microFX)";
 const AIS_API_KEY = ENABLE_AIS ? fx.secret("AISSTREAM_API_KEY", "") : "";
 const AIS_URL = "wss://stream.aisstream.io/v0/stream";
-const DATA_URL = `https://opendata.adsb.fi/api/v3/lat/${PLACE.airport.latitude}` +
-  `/lon/${PLACE.airport.longitude}/dist/${PLACE.searchRadiusNm}`;
+const flightDataUrl = () =>
+  `https://opendata.adsb.fi/api/v3/lat/${PLACE.mapCenter.latitude}` +
+  `/lon/${PLACE.mapCenter.longitude}/dist/${PLACE.searchRadiusNm}`;
 const RADAR = {
   listUrl: "https://opendataapi.dmi.dk/v1/radardata/collections/composite/items" +
     "?limit=4&sortorder=datetime,DESC",
@@ -196,7 +207,7 @@ const radarRegions = Array.from({ length: RADAR.regions }, () => {
     0x0d151d88).visible(false));
   return { outer, inner, centerX: 0, centerY: 0 };
 });
-scene.add(fx.text(PLACE.label, 55, 45, 28, 0x606060ff));
+const placeLabel = scene.add(fx.text(PLACE.label, 55, 45, 28, 0x606060ff));
 scene.add(fx.text("ESRI / NASA / DMI / ADSB.FI / TRANSITOUS",
   1530, 1040, 14, 0x596166ff).antialias(false));
 
@@ -208,19 +219,19 @@ const trainMapPaths = HAS_TRANSIT ? Array.from({ length: MAX_TRAIN_MAP_PATHS }, 
 const metroMapPaths = HAS_TRANSIT ? Array.from({ length: MAX_METRO_MAP_PATHS }, () =>
   scene.add(fx.outline([[0, 0], [1, 0]], 0, 0, 1, 2,
     METRO_PATH_COLOR).opacity(0.72).visible(false))) : [];
-const landmarks = PLACE.landmarks.map(landmark => {
-  const point = mapPoint(landmark.longitude, landmark.latitude);
+const MAX_LANDMARKS = Math.max(...PLACE_NAMES.map(name =>
+  (LOCATIONS[name].landmarks || []).length));
+const landmarks = Array.from({ length: MAX_LANDMARKS }, () => {
   return {
-    element: scene.add(fx.circle(point.x, point.y, landmark.radius, landmark.color)),
-    color: landmark.color,
+    element: scene.add(fx.circle(0, 0, 3, 0xef466fff).visible(false)),
+    color: 0xef466fff,
+    active: false,
     brightnessStep: -1
   };
 });
 const airportPoint = mapPoint(PLACE.airport.longitude, PLACE.airport.latitude);
-const airportX = airportPoint.x;
-const airportY = airportPoint.y;
-const airportClusterX = airportX + PLACE.airport.markerOffset[0];
-const airportClusterY = airportY + PLACE.airport.markerOffset[1];
+let airportClusterX = airportPoint.x + PLACE.airport.markerOffset[0];
+let airportClusterY = airportPoint.y + PLACE.airport.markerOffset[1];
 const airportCirclePoints = Array.from({ length: 32 }, (_, index) => {
   const angle = index / 32 * Math.PI * 2;
   return [Math.cos(angle), Math.sin(angle)];
@@ -307,6 +318,9 @@ const ships = AIS_API_KEY && PLACE.aisBounds ? Array.from({ length: MAX_SHIPS },
 }) : [];
 
 let clockTime = 0;
+let placeRevision = 0;
+let locationSwitching = false;
+let nextLocationSwitch = LOCATION_SWITCH_SECONDS;
 let denseFlightMode = false;
 let requestInFlight = false;
 let nextRequestTime = 0;
@@ -342,6 +356,96 @@ let radarObservationEpoch = 0;
 let radarVelocityX = 0;
 let radarVelocityY = 0;
 
+function updatePlaceLayout() {
+  placeLabel.text(PLACE.label).visible(true);
+  const configured = PLACE.landmarks || [];
+  landmarks.forEach((slot, index) => {
+    const landmark = configured[index];
+    if (!landmark) {
+      slot.active = false;
+      slot.element.visible(false);
+      return;
+    }
+    const point = mapPoint(landmark.longitude, landmark.latitude);
+    slot.active = true;
+    slot.color = landmark.color;
+    slot.brightnessStep = -1;
+    slot.element.position(point.x, point.y).color(landmark.color).visible(true);
+  });
+  const point = mapPoint(PLACE.airport.longitude, PLACE.airport.latitude);
+  airportClusterX = point.x + PLACE.airport.markerOffset[0];
+  airportClusterY = point.y + PLACE.airport.markerOffset[1];
+  airportRing.position(airportClusterX, airportClusterY).visible(false);
+  airportDots.forEach(dot => dot.position(airportClusterX, airportClusterY)
+    .visible(false));
+}
+
+function clearLocationData() {
+  flights.forEach(slot => {
+    slot.active = false;slot.id = "";slot.callsign = "";
+    slot.positionTime = 0;slot.speedMetresPerSecond = 0;
+    slot.correctionRemaining = 0;slot.trailInitialized = false;
+    slot.marker.visible(false);slot.shadow.visible(false);
+    slot.trail.forEach(segment => segment.visible(false));
+    if (slot.label) slot.label.visible(false);
+  });
+  movingTransit.forEach(slot => {
+    slot.active = false;slot.id = "";slot.positionInitialized = false;
+    slot.marker.visible(false);
+  });
+  ships.forEach(slot => {
+    slot.active = false;slot.id = "";slot.outline.visible(false);
+  });
+  trainMapPaths.forEach(path => path.visible(false));
+  metroMapPaths.forEach(path => path.visible(false));
+  radarRegions.forEach(slot => {
+    slot.outer.visible(false);slot.inner.visible(false);
+  });
+  landmarks.forEach(slot => { slot.active = false;slot.element.visible(false); });
+  airportRing.visible(false);airportDots.forEach(dot => dot.visible(false));
+  placeLabel.visible(false);
+  routeQueue.length = 0;
+  railwayQueue.length = 0;railwayNodes.length = 0;
+  railwaySeen.clear();railwayNodeCells.clear();railwayEdges.clear();
+  trainMapPathCount = 0;metroMapPathCount = 0;
+  pendingTrainMapPaths = 0;pendingMetroMapPaths = 0;
+  transitJob = null;transitRequestInFlight = false;
+  requestInFlight = false;routeInFlight = false;
+  radarJob = null;radarRequestInFlight = false;radarFrameId = "";
+  radarObservationEpoch = 0;radarVelocityX = 0;radarVelocityY = 0;
+  nextRequestTime = 0;nextTransitRequestTime = 0;nextRadarPoll = 0;
+  nightAmount = -1;nextSolarUpdate = 0;
+}
+
+function switchLocation(index) {
+  const nextIndex = (index + PLACE_NAMES.length) % PLACE_NAMES.length;
+  const nextPlace = LOCATIONS[PLACE_NAMES[nextIndex]];
+  const revision = ++placeRevision;
+  locationSwitching = true;
+  placeIndex = nextIndex;PLACE_NAME = PLACE_NAMES[nextIndex];PLACE = nextPlace;
+  clearLocationData();
+  const longitude = PLACE.mapCenter.longitude;
+  const latitude = PLACE.mapCenter.latitude;
+  const zoom = PLACE.mapZoom;
+  const sources = [map, darkMap, satelliteMap, nightLights];
+  sources.forEach(source => source.viewport(longitude, latitude, zoom));
+  Promise.all(sources.map(source => source.ready())).then(ready => {
+    if (revision !== placeRevision) return;
+    if (ready.some(value => !value)) {
+      throw new Error(`map tiles failed for ${PLACE_NAME}`);
+    }
+    updatePlaceLayout();
+    locationSwitching = false;
+    nextLocationSwitch = clockTime + LOCATION_SWITCH_SECONDS;
+    requestFlights();
+    if (PLACE.radar !== false) requestRadar();
+    if (placeHasTransit()) requestTransit();
+  }).catch(error => {
+    if (revision !== placeRevision) return;
+    fx.log(`LOCATION ${PLACE_NAME} failed: ${error.message || error}`);
+  });
+}
+
 function brightnessColor(color, brightness) {
   const channel = shift => Math.round(clamp(((color >>> shift) & 255) * brightness,
     0, 255));
@@ -353,6 +457,7 @@ function updateLandmarks(time) {
   const wave = 0.85 + Math.sin(time * Math.PI * 2 / LANDMARK_BREATH_SECONDS) * 0.15;
   const step = Math.round(wave * 12);
   landmarks.forEach(landmark => {
+    if (!landmark.active) return;
     if (landmark.brightnessStep === step) return;
     landmark.brightnessStep = step;
     landmark.element.color(brightnessColor(landmark.color, step / 12));
@@ -1207,8 +1312,8 @@ function applyTransit(slots, values, styleMarkers, holdSeconds) {
 
 function pumpTransitRequests(job) {
   while (transitJob === job && job.active < TRANSIT_REQUEST_CONCURRENCY &&
-      job.nextRegion < PLACE.transit.regions.length) {
-    const region = PLACE.transit.regions[job.nextRegion++];
+      job.nextRegion < job.regions.length) {
+    const region = job.regions[job.nextRegion++];
     const url = `${TRANSIT_URL}?zoom=${region.zoom}` +
       `&min=${region.min[0]},${region.min[1]}` +
       `&max=${region.max[0]},${region.max[1]}` +
@@ -1239,12 +1344,13 @@ function pumpTransitRequests(job) {
 }
 
 function requestTransit() {
-  if (!HAS_TRANSIT || transitRequestInFlight || transitJob) return;
+  if (!placeHasTransit() || transitRequestInFlight || transitJob) return;
   transitRequestInFlight = true;
   const now = Date.now();
   const windowSeconds = PLACE.transit.windowSeconds || TRANSIT_WINDOW_SECONDS;
   const job = {
     pending: PLACE.transit.regions.length,
+    regions: PLACE.transit.regions,
     active: 0,
     nextRegion: 0,
     start: encodeURIComponent(new Date(now - windowSeconds * 1000).toISOString()),
@@ -1763,13 +1869,16 @@ function positionRadar() {
 
 function requestFlights() {
   if (requestInFlight) return;
+  const revision = placeRevision;
+  const url = flightDataUrl();
   requestInFlight = true;
-  fetch(DATA_URL)
+  fetch(url)
     .then(response => {
       if (!response.ok) throw new Error(`flight request failed: HTTP ${response.status}`);
       return response.json();
     })
     .then(payload => {
+      if (revision !== placeRevision) return;
       const airborne = normalizeFlights(payload);
       updateAirportCount(payload);
       applyFlights(airborne, true);
@@ -1777,6 +1886,7 @@ function requestFlights() {
       nextRequestTime = clockTime + POLL_SECONDS;
     })
     .catch(() => {
+      if (revision !== placeRevision) return;
       requestInFlight = false;
       nextRequestTime = clockTime + POLL_SECONDS;
     });
