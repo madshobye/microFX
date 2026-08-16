@@ -10,8 +10,8 @@ const PLACE_NAME = "copenhagen";
 const LOCATIONS = fx.data("locations.json");
 const PLACE = LOCATIONS[PLACE_NAME];
 if (!PLACE) throw new Error(`Unknown location preset: ${PLACE_NAME}`);
-// Keep optional feeds as explicit application switches. AIS is currently
-// unreliable, and transit is disabled while profiling the background path.
+// Keep optional feeds as explicit application switches. AIS remains disabled
+// while the complete train, metro, and bus feed is enabled.
 const ENABLE_AIS = false;
 const ENABLE_TRANSIT = true;
 const HAS_TRANSIT = ENABLE_TRANSIT && Boolean(PLACE.transit && PLACE.transit.regions &&
@@ -124,7 +124,7 @@ const map = scene.add(fx.tileMap({
   cacheDays: 30,
   // Positron is intentionally subdued so the transport symbols remain clear
   // on televisions, whose picture processing otherwise makes it look washed out.
-  filter: { grayscale: 0, contrast: 1.22, brightness: 0.82 }
+  filter: { grayscale: 0, contrast: 1.28, brightness: 0.58 }
 }));
 const darkMap = scene.add(fx.tileMap({
   source: {
@@ -239,9 +239,9 @@ const flights = Array.from({ length: MAX_FLIGHTS }, (_, slotIndex) => {
       .opacity(0.8 - segment * 0.2).visible(false)));
   const trailState = trail.map(() => ({ x: 0, y: 0, spacing: 0 }));
   const shadow = scene.add(fx.polygon(AIRCRAFT_SHAPES.small,
-    0, 0, 16, 0x020406ff).opacity(0.78).visible(false));
-  const outline = marker.add(fx.outline(AIRCRAFT_SHAPES.small,
-    0, 0, 16, 1.6, 0xffd55aff, { closed: true }));
+    0, 0, 16, 0x020406ff).opacity(0.32).visible(false));
+  const outline = marker.add(fx.polygon(AIRCRAFT_SHAPES.small,
+    0, 0, 16, 0xffffffff));
   const label = slotIndex < MAX_FLIGHT_LABELS ?
     fx.text("---", 0, 0, 18, 0xffffffff).antialias(false) : null;
   scene.add(marker);
@@ -620,12 +620,12 @@ function styleMarker(slot, item) {
   const radius = item.markerRadius;
   const kind = item.aircraftKind;
   const styles = {
-    helicopter: [AIRCRAFT_SHAPES.helicopter, 0x7ee5ffff, 2.3],
-    fighter: [AIRCRAFT_SHAPES.fighter, 0xfff1b8ff, 2.4],
-    cargo: [AIRCRAFT_SHAPES.cargo, 0xe8a83eff, 2.5],
-    propeller: [AIRCRAFT_SHAPES.propeller, 0xffc766ff, 2.4],
-    small: [AIRCRAFT_SHAPES.small, 0xffd55aff, 2.3],
-    big: [AIRCRAFT_SHAPES.big, 0xffd55aff, 2.5]
+    helicopter: [AIRCRAFT_SHAPES.helicopter, 2.3],
+    fighter: [AIRCRAFT_SHAPES.fighter, 2.4],
+    cargo: [AIRCRAFT_SHAPES.cargo, 2.5],
+    propeller: [AIRCRAFT_SHAPES.propeller, 2.4],
+    small: [AIRCRAFT_SHAPES.small, 2.3],
+    big: [AIRCRAFT_SHAPES.big, 2.5]
   };
   const style = styles[kind] || styles.small;
   const kindChanged = slot.aircraftKind !== kind;
@@ -635,8 +635,8 @@ function styleMarker(slot, item) {
     slot.outline.points(style[0]);
     slot.shadow.points(style[0]);
   }
-  slot.outline.scale(radius * style[2]).color(style[1]);
-  slot.shadow.scale(radius * style[2] * 0.94);
+  slot.outline.scale(radius * style[1]).color(0xffffffff);
+  slot.shadow.scale(radius * style[1] * 0.94);
 }
 
 function applyFlights(values, live) {
@@ -684,7 +684,7 @@ function applyFlights(values, live) {
     slot.velocityY = velocity.y;
     slot.active = true;
     slot.marker.visible(true).position(slot.currentX, slot.currentY);
-    slot.shadow.visible(!slot.onGround);
+    slot.shadow.visible(!slot.onGround && nightAmount === 0);
     positionShadow(slot);
     if (slot.label) slot.label.visible(!slot.onGround).text(labelText(slot));
     positionLabel(slot);
@@ -1360,6 +1360,9 @@ function updateSun(now) {
       nightView.hide();
       map.show();
     }
+    flights.forEach(slot => {
+      slot.shadow.visible(slot.active && !slot.onGround && nightAmount === 0);
+    });
   }
   // Screen north points upward. Only geographic sun azimuth controls the
   // direction; aircraft altitude alone controls the shadow distance.
