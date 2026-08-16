@@ -25,9 +25,14 @@ const ENABLE_TRANSIT = true;
 const HAS_TRANSIT = ENABLE_TRANSIT && PLACE_NAMES.some(name =>
   LOCATIONS[name].transit && LOCATIONS[name].transit.regions.length);
 const HAS_BUSES = HAS_TRANSIT && PLACE_NAMES.some(name =>
-  LOCATIONS[name].transit.regions.some(region => region.kinds.includes("bus")));
+  LOCATIONS[name].transit && LOCATIONS[name].transit.regions.some(region =>
+    region.kinds.includes("bus")));
 const placeHasTransit = () => ENABLE_TRANSIT && Boolean(PLACE.transit &&
   PLACE.transit.regions && PLACE.transit.regions.length);
+const placeCaches = new Map(PLACE_NAMES.map(name => [name, {
+  flights: [], airportCount: 0, rail: [], buses: [], railways: []
+}]));
+const placeCache = () => placeCaches.get(PLACE_NAME);
 
 const POLL_SECONDS = 5;
 const CORRECTION_SECONDS = 8;
@@ -320,7 +325,8 @@ const ships = AIS_API_KEY && PLACE.aisBounds ? Array.from({ length: MAX_SHIPS },
 let clockTime = 0;
 let placeRevision = 0;
 let locationSwitching = false;
-let nextLocationSwitch = LOCATION_SWITCH_SECONDS;
+let rotationStarted = false;
+let nextLocationSwitch = Infinity;
 let denseFlightMode = false;
 let requestInFlight = false;
 let nextRequestTime = 0;
@@ -417,11 +423,23 @@ function clearLocationData() {
   nightAmount = -1;nextSolarUpdate = 0;
 }
 
+function readyLocationSources(sources, revision, retries) {
+  return Promise.all(sources.map(source => source.ready())).then(ready => {
+    if (revision !== placeRevision) return false;
+    const failed = sources.filter((source, index) => !ready[index]);
+    if (!failed.length) return true;
+    if (retries <= 0) throw new Error(`map tiles failed for ${PLACE_NAME}`);
+    return Promise.all(failed.map(source => source.reload()))
+      .then(() => readyLocationSources(sources, revision, retries - 1));
+  });
+}
+
 function switchLocation(index) {
   const nextIndex = (index + PLACE_NAMES.length) % PLACE_NAMES.length;
   const nextPlace = LOCATIONS[PLACE_NAMES[nextIndex]];
   const revision = ++placeRevision;
   locationSwitching = true;
+  snapshotFlights();
   placeIndex = nextIndex;PLACE_NAME = PLACE_NAMES[nextIndex];PLACE = nextPlace;
   clearLocationData();
   const longitude = PLACE.mapCenter.longitude;
@@ -429,20 +447,38 @@ function switchLocation(index) {
   const zoom = PLACE.mapZoom;
   const sources = [map, darkMap, satelliteMap, nightLights];
   sources.forEach(source => source.viewport(longitude, latitude, zoom));
-  Promise.all(sources.map(source => source.ready())).then(ready => {
+  readyLocationSources(sources, revision, 3).then(ready => {
     if (revision !== placeRevision) return;
-    if (ready.some(value => !value)) {
-      throw new Error(`map tiles failed for ${PLACE_NAME}`);
-    }
+    if (!ready) return;
     updatePlaceLayout();
+    const cache = placeCache();
+    restoreFlights(cache);
+    renderAirportCount(cache.airportCount);
+    applyTransit(transit, cache.rail, true, TRANSIT_HOLD_SECONDS);
+    applyTransit(busTransit, cache.buses, false, TRANSIT_HOLD_SECONDS);
+    cache.railways.forEach(item => {
+      const key = `${item.kind}:${item.polyline}`;
+      if (railwaySeen.has(key)) return;
+      railwaySeen.add(key);railwayQueue.push(item);
+      if (item.kind === "metro") pendingMetroMapPaths++;
+      else pendingTrainMapPaths++;
+    });
     locationSwitching = false;
     nextLocationSwitch = clockTime + LOCATION_SWITCH_SECONDS;
     requestFlights();
     if (PLACE.radar !== false) requestRadar();
-    if (placeHasTransit()) requestTransit();
+    if (placeHasTransit()) {
+      if (cache.rail.length || cache.buses.length) {
+        nextTransitRequestTime = clockTime + TRANSIT_POLL_SECONDS;
+      } else {
+        requestTransit();
+      }
+    }
   }).catch(error => {
     if (revision !== placeRevision) return;
     fx.log(`LOCATION ${PLACE_NAME} failed: ${error.message || error}`);
+    locationSwitching = false;
+    nextLocationSwitch = clockTime + 10;
   });
 }
 
@@ -469,13 +505,16 @@ function labelText(slot) {
   return route && route.expiresAt > clockTime ? route.text : "";
 }
 
-function updateAirportCount(payload) {
-  const landed = payload.ac.filter(row => row && row.alt_baro === "ground" &&
+function airportCount(payload) {
+  return payload.ac.filter(row => row && row.alt_baro === "ground" &&
     Number.isFinite(row.lon) && Number.isFinite(row.lat) &&
     distanceKm(Number(row.lon), Number(row.lat), PLACE.airport.longitude,
       PLACE.airport.latitude) <= PLACE.airportGroundRadiusKm &&
-    row.t !== "TWR" && !String(row.category || "").startsWith("C"));
-  const count = Math.min(landed.length, airportDots.length);
+    row.t !== "TWR" && !String(row.category || "").startsWith("C")).length;
+}
+
+function renderAirportCount(value) {
+  const count = Math.min(value, airportDots.length);
   const growth = clamp((count - 9) / (MAX_AIRPORT_DOTS - 9), 0, 1);
   const clusterRadius = AIRPORT_CLUSTER_MIN_RADIUS +
     (AIRPORT_CLUSTER_MAX_RADIUS - AIRPORT_CLUSTER_MIN_RADIUS) * Math.sqrt(growth);
@@ -866,6 +905,43 @@ function applyFlights(values, live) {
 
 }
 
+function snapshotFlights() {
+  const cache = placeCache();
+  cache.flightSavedAt = Date.now();
+  cache.flights = flights.filter(slot => slot.active).map(slot => {
+    const point = map.unproject(slot.currentX, slot.currentY);
+    return {
+      id: slot.id,
+      callsign: slot.callsign,
+      longitude: point.longitude,
+      latitude: point.latitude,
+      positionTime: slot.positionTime,
+      velocity: slot.speedMetresPerSecond,
+      heading: slot.headingDegrees,
+      aircraftKind: slot.aircraftKind,
+      markerRadius: slot.markerRadius,
+      altitudeFeet: slot.altitudeFeet,
+      onGround: slot.onGround
+    };
+  });
+}
+
+function restoreFlights(cache) {
+  const age = clamp((Date.now() - Number(cache.flightSavedAt || Date.now())) / 1000,
+    0, 5 * 60);
+  const values = cache.flights.map(item => {
+    const radians = item.heading * Math.PI / 180;
+    const northMetres = Math.cos(radians) * item.velocity * age;
+    const eastMetres = Math.sin(radians) * item.velocity * age;
+    return Object.assign({}, item, {
+      longitude: item.longitude + eastMetres /
+        (111320 * Math.max(0.2, Math.cos(item.latitude * Math.PI / 180))),
+      latitude: item.latitude + northMetres / 111320
+    });
+  });
+  applyFlights(values, true);
+}
+
 function normalizeFlights(payload) {
   if (!payload || !Array.isArray(payload.ac)) throw new Error("missing aircraft data");
   const snapshotTime = Number(payload.now || Date.now()) / 1000;
@@ -1072,6 +1148,7 @@ function rememberRailwayPath(segment, kind) {
   }
   railwaySeen.add(key);
   railwayQueue.push({ kind, polyline: segment.polyline });
+  placeCache().railways.push({ kind, polyline: segment.polyline });
   if (kind === "metro") pendingMetroMapPaths++;
   else pendingTrainMapPaths++;
 }
@@ -1425,6 +1502,9 @@ function applyTransitProgress(job, final) {
   applyTransit(busTransit, buses.slice(0, MAX_BUSES), false,
     TRANSIT_HOLD_SECONDS);
   if (!final) return;
+  const cache = placeCache();
+  cache.rail = rail.slice(0, MAX_RAIL_TRANSIT);
+  cache.buses = buses.slice(0, MAX_BUSES);
   if (rail.length > MAX_RAIL_TRANSIT) {
     fx.log(`TRANSITOUS RAIL LIMITED ${rail.length}/${MAX_RAIL_TRANSIT}`);
   }
@@ -1837,20 +1917,26 @@ function decodeRadar(buffer) {
 }
 
 function requestRadar() {
-  if (radarRequestInFlight || radarJob) return;
+  if (PLACE.radar === false || radarRequestInFlight || radarJob) return;
+  const revision = placeRevision;
   radarRequestInFlight = true;
   fetch(RADAR.listUrl).then(response => {
     if (!response.ok) throw new Error(`DMI list HTTP ${response.status}`);
     return response.json();
   }).then(payload => {
+    if (revision !== placeRevision) return null;
     const features = (payload.features || []).filter(feature =>
       feature && feature.asset && feature.asset.data && feature.properties);
     if (features.length < 2 || features[0].id === radarFrameId) return null;
     return Promise.all([radarBytes(features[1]), radarBytes(features[0])])
-      .then(buffers => beginRadarJob(decodeRadar(buffers[0]),
-        decodeRadar(buffers[1]), features[1], features[0]));
+      .then(buffers => {
+        if (revision !== placeRevision) return;
+        beginRadarJob(decodeRadar(buffers[0]),
+          decodeRadar(buffers[1]), features[1], features[0]);
+      });
   }).catch(error => fx.log("RADAR update failed: " +
     String(error && error.message || error))).then(() => {
+    if (revision !== placeRevision) return;
     radarRequestInFlight = false;
     nextRadarPoll = clockTime + RADAR.pollSeconds;
   });
@@ -1880,7 +1966,9 @@ function requestFlights() {
     .then(payload => {
       if (revision !== placeRevision) return;
       const airborne = normalizeFlights(payload);
-      updateAirportCount(payload);
+      const count = airportCount(payload);
+      placeCache().airportCount = count;
+      renderAirportCount(count);
       applyFlights(airborne, true);
       requestInFlight = false;
       nextRequestTime = clockTime + POLL_SECONDS;
@@ -1892,6 +1980,7 @@ function requestFlights() {
     });
 }
 
+updatePlaceLayout();
 requestRadar();
 requestFlights();
 
@@ -1909,6 +1998,15 @@ function update(time, delta) {
     return;
   }
   scene.show();
+  if (locationSwitching) return;
+  if (!rotationStarted) {
+    rotationStarted = true;
+    nextLocationSwitch = time + LOCATION_SWITCH_SECONDS;
+  }
+  if (time >= nextLocationSwitch) {
+    switchLocation(placeIndex + 1);
+    return;
+  }
   updateSun(time);
   processRadarJob();
   positionRadar();
@@ -1918,7 +2016,7 @@ function update(time, delta) {
   processTransitJob();
   processRailwayQueue();
   if (!requestInFlight && time >= nextRequestTime) requestFlights();
-  if (HAS_TRANSIT && !transitRequestInFlight && !transitJob &&
+  if (placeHasTransit() && !transitRequestInFlight && !transitJob &&
       time >= nextTransitRequestTime) {
     requestTransit();
   }
