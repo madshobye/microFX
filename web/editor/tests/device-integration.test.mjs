@@ -419,7 +419,7 @@ while :; do sleep 1; done
       MICROFX_PRODUCT_CONFIG: join(sandbox, "missing-product.conf"),
       MICROFX_DATA_ROOT: data,
       MICROFX_RUN_ROOT: run,
-      MICROFX_FACTORY_APP: renderer,
+      MICROFX_RUNTIME_APP: renderer,
       MICROFX_ONBOARDING_SCRIPT: join(sandbox, "missing-onboarding.js"),
       MICROFX_REQUIRE_DATA_MOUNT: "0",
       MICROFX_HEALTH_SECONDS: "0.2",

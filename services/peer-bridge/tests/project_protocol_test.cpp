@@ -106,14 +106,13 @@ int main() {
   cJSON_Delete(response);
   assert(!fs::exists(reload));
 
-  // Save & Run is a single device transaction. If the reload request cannot
-  // be published, both the selected project and main.js remain unchanged.
+  // If the reload request cannot be published, Save & Run fails loudly while
+  // leaving the new code and selection installed. It must not revive an older
+  // application implicitly.
   response = command(root, reload,
       R"({"type":"project.create","name":"rollback-target","operation":"rollback-create","metadata":{"title":"Rollback target"}})");
   require_ok(response);
   cJSON_Delete(response);
-  const std::string original_code =
-      microfx::read_text(root / "projects/rollback-target/main.js");
   std::ofstream(sandbox / "not-a-directory") << "block reload path";
   const fs::path invalid_reload = sandbox / "not-a-directory" / "reload";
   const std::string failed_save_run =
@@ -123,10 +122,11 @@ int main() {
       sandbox / "canvas.log", sandbox / "run" / "status");
   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(response, "ok")));
   assert(string_value(response, "error") ==
-         "could not activate project; main.js was restored");
+         "could not publish activation; new project remains installed");
   cJSON_Delete(response);
-  assert(microfx::read_text(root / "projects/rollback-target/main.js") == original_code);
-  assert(fs::read_symlink(root / "current") == root / "projects/demo");
+  assert(microfx::read_text(root / "projects/rollback-target/main.js") ==
+         "FAIL_PARTIAL_WRITE");
+  assert(fs::read_symlink(root / "current") == root / "projects/rollback-target");
   fs::remove_all(root / "projects/rollback-target");
 
   response = command(root, reload,

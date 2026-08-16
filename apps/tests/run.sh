@@ -33,7 +33,7 @@ node --test "$APPS_DIR/tests/network-runtime.test.mjs"
 node "$APPS_DIR/tests/runtime-harness.mjs"
 
 if [ "$count" -ne 15 ]; then
-  echo "Expected exactly 15 selectable bundled projects plus the fallback demo, found $count" >&2
+  echo "Expected exactly 15 selectable bundled projects plus the initial demo, found $count" >&2
   exit 1
 fi
 

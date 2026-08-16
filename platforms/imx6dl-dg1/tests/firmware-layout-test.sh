@@ -47,7 +47,11 @@ if grep -Eq 'project-backups|restored prior|failed-new' "$PROJECT_TARGET"; then
   echo "project updater must fail loudly without retaining or restoring old versions" >&2
   exit 1
 fi
-grep -q 'live-component-backups' "$STUDIO_TARGET"
+grep -q 'current files remain installed' "$STUDIO_TARGET"
+if grep -q 'live-component-backups\|restored backup' "$STUDIO_TARGET"; then
+  echo "Studio updater must not retain or restore an older component" >&2
+  exit 1
+fi
 test ! -e "$ROOT/buildroot/board/imx6dl-dg1/rootfs-overlay/etc/init.d/S42dropbear-debug"
 grep -q 'root-update-backups' "$ACTIVE_ROOT_TARGET"
 grep -q "default .* dev wlan1" "$ACTIVE_ROOT_TARGET"

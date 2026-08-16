@@ -42,8 +42,9 @@ prevent the remaining selected files from being attempted.
 All interactive project requests use the same reconnect session and wait for a
 replacement DataChannel when the radio drops. Save & Run is one device-side
 transaction that persists `main.js`, selects the project, and publishes one
-health-checked activation. A failure before the activation is published
-restores the previous code and selection. Save & Run and Restore & Run carry
+health-checked activation. A publication failure is reported while the new
+code and selection remain installed; Studio never revives older code
+implicitly. Save & Run and Restore & Run carry
 stable activation tokens across retries, so an acknowledgement lost after the
 device accepted the request does not restart the renderer a second time.
 Project creation carries its own operation token, and replaying an

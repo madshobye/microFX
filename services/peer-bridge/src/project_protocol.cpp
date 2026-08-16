@@ -459,11 +459,6 @@ bool activate(const fs::path& apps_root, const std::string& name,
   fs::create_directories(apps_root, ec);
   if (ec) return false;
   const fs::path current = apps_root / "current";
-  const fs::file_status current_status = fs::symlink_status(current, ec);
-  const bool had_current = !ec && fs::is_symlink(current_status);
-  const fs::path previous = had_current ? fs::read_symlink(current, ec) : fs::path{};
-  if (had_current && ec) return false;
-  ec.clear();
   fs::path temporary = apps_root / "current.new";
   fs::remove(temporary, ec);
   ec.clear();
@@ -474,22 +469,10 @@ bool activate(const fs::path& apps_root, const std::string& name,
     fs::remove(temporary, ec);
     return false;
   }
-  if (atomic_write(reload_signal, token + "\t" + name + "\n")) return true;
-
-  // Publishing the selected project and asking the supervisor to reload it
-  // form one operation. Restore the previous selection if the durable reload
-  // request could not be written, so callers never observe a half-activation.
-  if (had_current) {
-    fs::path rollback = apps_root / "current.rollback";
-    fs::remove(rollback, ec);
-    ec.clear();
-    fs::create_symlink(previous, rollback, ec);
-    if (!ec) fs::rename(rollback, current, ec);
-    if (ec) fs::remove(rollback, ec);
-  } else {
-    fs::remove(current, ec);
-  }
-  return false;
+  // The selected project is authoritative once installed. If publishing the
+  // reload request fails, report the failure and leave the new selection in
+  // place; never revive an older application implicitly.
+  return atomic_write(reload_signal, token + "\t" + name + "\n");
 }
 
 struct ReloadStatus {
@@ -683,10 +666,7 @@ cJSON* handle_project_command(const char* data, size_t length,
         if (!saved) {
           fail(response, "could not write main.js");
         } else if (!activate(apps_root, selected, token, reload_signal)) {
-          const bool restored = !changed || atomic_write(*project / "main.js", *previous);
-          fail(response, restored
-                             ? "could not activate project; main.js was restored"
-                             : "could not activate project and could not restore main.js");
+          fail(response, "could not publish activation; new project remains installed");
         } else {
           accepted = true;
         }

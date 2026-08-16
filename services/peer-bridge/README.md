@@ -65,14 +65,15 @@ marks the exact read-only subset used by Studio's interaction check. The host
 conformance gate proves that the inventory, real handler branches, Studio
 requests, diagnostics, and real-handler tests do not drift apart.
 
-`project.save-run` is the Studio transaction: code persistence, active-project
-selection, and the supervisor reload request either succeed together or the
-previous code and selection are restored. Its caller-stable activation token
+`project.save-run` persists code, selects the project, and requests a supervisor
+reload. Once installed, the new code and selection remain authoritative even if
+the reload request cannot be published; the command fails loudly and never
+revives an older application. Its caller-stable activation token
 makes a replay after a lost transport acknowledgement return the existing
 state without another revision or renderer restart. `project.activate`
 remains available for selection and Restore & Run; it uses the same idempotent
-token contract and rolls the selection back if the reload request cannot be
-published.
+token contract and likewise leaves the requested selection installed if reload
+publication fails.
 
 `project.create` accepts a caller-stable operation token. A replay with the
 same project/token pair returns success, while an unrelated operation still

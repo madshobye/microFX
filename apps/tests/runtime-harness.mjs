@@ -41,6 +41,6 @@ for (const name of projects) {
   summary(name, runProject(root, join(root, "main.js")));
 }
 
-const fallbackRoot = join(apps, "demo");
-summary("factory-demo", runProject(fallbackRoot, join(fallbackRoot, "scripts", "main.js")));
+const initialDemoRoot = join(apps, "demo");
+summary("initial-demo", runProject(initialDemoRoot, join(initialDemoRoot, "scripts", "main.js")));
 console.log(`bundled runtime stress harness passed (${stressFrames} frames per app)`);

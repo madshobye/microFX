@@ -1,4 +1,4 @@
-// Firmware-owned fallback shown after an uploaded project fails to load or
+// Firmware-owned error screen shown after an uploaded project fails to load or
 // throws during its activation health check.
 fx.configure({
   outputWidth: 0,

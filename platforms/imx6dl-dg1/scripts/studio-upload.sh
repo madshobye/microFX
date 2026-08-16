@@ -15,6 +15,8 @@ case "$UPDATE_ID" in ''|*[!A-Za-z0-9._-]*) echo "Invalid update ID" >&2; exit 1;
 [ -f "$KEY" ] || { echo "Missing SSH key: $KEY" >&2; exit 1; }
 [ -x "$TARGET_INSTALLER" ] || { echo "Missing target installer: $TARGET_INSTALLER" >&2; exit 1; }
 
+"$SCRIPT_DIR/build-studio.sh"
+
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/microfx-studio-update.XXXXXX")
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT INT TERM

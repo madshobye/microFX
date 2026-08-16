@@ -1,6 +1,6 @@
 # Bundled projects
 
-microFX ships eleven small retained-mode projects. `demo` is the default fallback;
+microFX ships retained-mode projects. `demo` is the initial selected project;
 the other folders are independent examples installed into the same persistent
 project library on first boot. Each project consists of `main.js`,
 `project.json`, and an optional `assets/` directory.
@@ -21,7 +21,7 @@ handles, non-finite transforms, capacity overflow, project-escaping fixture
 paths, and any GPU-object construction from `update()`.
 
 The default gallery stress pass advances every selectable project and the
-fallback demo through 18,000 frames: ten simulated minutes at 30 FPS. It also
+firmware error scene through 18,000 frames: ten simulated minutes at 30 FPS. It also
 reports average and maximum native mutations per frame. Use
 `MICROFX_APP_TEST_FRAMES` to request a longer deterministic soak without
 changing an application or the target image.
