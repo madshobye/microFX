@@ -69,7 +69,7 @@ const TRANSIT_HOLD_SECONDS = 4 * 60;
 const TRANSIT_CORRECTION_SECONDS = 8;
 const TRANSIT_SNAP_DISTANCE_KM = 1.5;
 const MAX_RAIL_TRANSIT = 224;
-const MAX_BUSES = 128;
+const MAX_BUSES = 320;
 const MAX_RAILWAY_SEGMENTS = 4096;
 const RAILWAY_MERGE_PIXELS = 5;
 // Transitous can encode a valid station-to-station stretch with only its end
