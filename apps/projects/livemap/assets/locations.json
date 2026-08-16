@@ -59,7 +59,7 @@
     "radar": true
   },
   "trekroner": {
-    "label": "TREKRONER / RUC",
+    "label": "ROSKILDE / COPENHAGEN",
     "airport": {
       "iata": "RKE",
       "icao": "EKRK",
@@ -67,18 +67,37 @@
       "longitude": 12.1314,
       "markerOffset": [-25, 10]
     },
-    "mapCenter": { "latitude": 55.6526842, "longitude": 12.1403964 },
-    "mapZoom": 11.45,
-    "searchRadiusNm": 25,
+    "airports": [
+      {
+        "iata": "RKE",
+        "icao": "EKRK",
+        "latitude": 55.5856,
+        "longitude": 12.1314,
+        "markerOffset": [-25, 10]
+      },
+      {
+        "iata": "CPH",
+        "icao": "EKCH",
+        "latitude": 55.6181,
+        "longitude": 12.6561,
+        "markerOffset": [-25, 10]
+      }
+    ],
+    "mapCenter": { "latitude": 55.64, "longitude": 12.38 },
+    "mapZoom": 10.65,
+    "searchRadiusNm": 40,
     "airportGroundRadiusKm": 3,
-    "localAirports": ["RKE", "EKRK"],
+    "localAirports": ["RKE", "EKRK", "CPH", "EKCH"],
     "landmarks": [
       { "latitude": 55.6526842, "longitude": 12.1403964, "radius": 3, "color": 4014224639 }
     ],
     "transit": {
       "windowSeconds": 20,
       "regions": [
-        { "zoom": 9, "min": [55.48, 11.88], "max": [55.82, 12.42], "kinds": ["train", "bus"] }
+        { "zoom": 8, "min": [55.36, 11.85], "max": [55.95, 12.40], "kinds": ["train"] },
+        { "zoom": 8, "min": [55.36, 12.40], "max": [55.95, 12.85], "kinds": ["train"] },
+        { "zoom": 9, "min": [55.55, 11.98], "max": [55.75, 12.28], "kinds": ["train", "bus"] },
+        { "zoom": 9, "min": [55.60, 12.50], "max": [55.73, 12.70], "kinds": ["train", "metro", "bus"] }
       ]
     },
     "aisBounds": null,
@@ -104,7 +123,8 @@
     "transit": {
       "windowSeconds": 20,
       "regions": [
-        { "zoom": 9, "min": [55.24, 10.10], "max": [55.56, 10.72], "kinds": ["train", "bus"] }
+        { "zoom": 9, "min": [55.24, 10.10], "max": [55.56, 10.72], "kinds": ["train", "bus"] },
+        { "zoom": 10, "min": [55.30, 10.25], "max": [55.45, 10.55], "kinds": ["metro"] }
       ]
     },
     "aisBounds": null,

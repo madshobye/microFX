@@ -30,9 +30,10 @@ const HAS_BUSES = HAS_TRANSIT && PLACE_NAMES.some(name =>
 const placeHasTransit = () => ENABLE_TRANSIT && Boolean(PLACE.transit &&
   PLACE.transit.regions && PLACE.transit.regions.length);
 const placeCaches = new Map(PLACE_NAMES.map(name => [name, {
-  flights: [], airportCount: 0, rail: [], buses: [], railways: []
+  flights: [], airportCounts: [], rail: [], buses: [], railways: []
 }]));
 const placeCache = () => placeCaches.get(PLACE_NAME);
+const configuredAirports = () => PLACE.airports || [PLACE.airport];
 
 const POLL_SECONDS = 5;
 const CORRECTION_SECONDS = 8;
@@ -45,7 +46,10 @@ const ROUTE_MAX_HEADING_ERROR = 80;
 const MAX_FLIGHTS = 80;
 const MAX_FLIGHT_LABELS = 50;
 const DENSE_FLIGHT_THRESHOLD = 55;
-const MAX_AIRPORT_DOTS = 50;
+const MAX_AIRPORTS = Math.max(...PLACE_NAMES.map(name =>
+  (LOCATIONS[name].airports || [LOCATIONS[name].airport]).length));
+const MAX_AIRPORT_DOTS = 60;
+const MAX_AIRPORT_DOTS_PER_CLUSTER = Math.floor(MAX_AIRPORT_DOTS / MAX_AIRPORTS);
 const AIRPORT_CLUSTER_MIN_RADIUS = 9;
 const AIRPORT_CLUSTER_MAX_RADIUS = 24;
 const SHADOW_MIN_OFFSET = 7;
@@ -65,17 +69,20 @@ const TRANSIT_CORRECTION_SECONDS = 8;
 const TRANSIT_SNAP_DISTANCE_KM = 1.5;
 const MAX_RAIL_TRANSIT = 224;
 const MAX_BUSES = 128;
-const MAX_TRAIN_MAP_PATHS = 120;
-const MAX_METRO_MAP_PATHS = 48;
+// The shared outline pool also contains aircraft, trails, and radar shapes.
+// These values use the remaining capacity exactly; better topology and the
+// geographic edge rule provide coverage without stealing moving-object slots.
+const MAX_TRAIN_MAP_PATHS = 144;
+const MAX_METRO_MAP_PATHS = 50;
 const RAILWAY_MERGE_PIXELS = 5;
-// Transitous sometimes encodes valid station-to-station stretches as a single
-// long edge. Keep rejecting implausible cross-map joins, but do not discard a
-// real train's own route merely because stations are several kilometres apart.
-const RAILWAY_MAX_EDGE_PIXELS = 180;
+// Transitous can encode a valid station-to-station stretch with only its end
+// points. A geographic limit remains stable as presets change zoom, unlike a
+// screen-pixel cutoff which erased legitimate regional tracks when zoomed in.
+const RAILWAY_MAX_EDGE_KM = 35;
 const TRANSIT_MODES = new Set([
   "HIGHSPEED_RAIL", "LONG_DISTANCE", "REGIONAL_RAIL", "SUBURBAN"
 ]);
-const METRO_MODES = new Set(["SUBWAY"]);
+const METRO_MODES = new Set(["SUBWAY", "TRAM", "LIGHT_RAIL"]);
 const BUS_MODES = new Set(["BUS", "COACH"]);
 const METRO_COLOR = 0xffd55aff;
 const METRO_PATH_COLOR = 0x8f742fff;
@@ -234,19 +241,18 @@ const landmarks = Array.from({ length: MAX_LANDMARKS }, () => {
     brightnessStep: -1
   };
 });
-const airportPoint = mapPoint(PLACE.airport.longitude, PLACE.airport.latitude);
-let airportClusterX = airportPoint.x + PLACE.airport.markerOffset[0];
-let airportClusterY = airportPoint.y + PLACE.airport.markerOffset[1];
 const airportCirclePoints = Array.from({ length: 32 }, (_, index) => {
   const angle = index / 32 * Math.PI * 2;
   return [Math.cos(angle), Math.sin(angle)];
 });
-const airportRing = scene.add(fx.outline(airportCirclePoints,
-  airportClusterX, airportClusterY, AIRPORT_CLUSTER_MAX_RADIUS, 1.5,
-  0xffd55aff, { closed: true }).visible(false));
-const airportDots = Array.from({ length: MAX_AIRPORT_DOTS }, () =>
-  scene.add(fx.circle(airportClusterX, airportClusterY, 2.2, 0xffd55aff)
-    .visible(false)));
+const airportClusters = Array.from({ length: MAX_AIRPORTS }, () => {
+  const ring = scene.add(fx.outline(airportCirclePoints, 0, 0,
+    AIRPORT_CLUSTER_MAX_RADIUS, 1.5, 0xffd55aff,
+    { closed: true }).visible(false));
+  const dots = Array.from({ length: MAX_AIRPORT_DOTS_PER_CLUSTER }, () =>
+    scene.add(fx.circle(0, 0, 2.2, 0xffd55aff).visible(false)));
+  return { active: false, x: 0, y: 0, ring, dots };
+});
 
 // The retained slot count is bounded by the 64-element text batch. Geometry
 // and labels are allocated once; network responses only update their state.
@@ -327,6 +333,7 @@ let placeRevision = 0;
 let locationSwitching = false;
 let rotationStarted = false;
 let nextLocationSwitch = Infinity;
+let initialAssetsReady = false;
 let denseFlightMode = false;
 let requestInFlight = false;
 let nextRequestTime = 0;
@@ -378,12 +385,21 @@ function updatePlaceLayout() {
     slot.brightnessStep = -1;
     slot.element.position(point.x, point.y).color(landmark.color).visible(true);
   });
-  const point = mapPoint(PLACE.airport.longitude, PLACE.airport.latitude);
-  airportClusterX = point.x + PLACE.airport.markerOffset[0];
-  airportClusterY = point.y + PLACE.airport.markerOffset[1];
-  airportRing.position(airportClusterX, airportClusterY).visible(false);
-  airportDots.forEach(dot => dot.position(airportClusterX, airportClusterY)
-    .visible(false));
+  const airports = configuredAirports();
+  airportClusters.forEach((cluster, index) => {
+    const airport = airports[index];
+    if (!airport) {
+      cluster.active = false;cluster.ring.visible(false);
+      cluster.dots.forEach(dot => dot.visible(false));
+      return;
+    }
+    const point = mapPoint(airport.longitude, airport.latitude);
+    cluster.active = true;
+    cluster.x = point.x + airport.markerOffset[0];
+    cluster.y = point.y + airport.markerOffset[1];
+    cluster.ring.position(cluster.x, cluster.y).visible(false);
+    cluster.dots.forEach(dot => dot.position(cluster.x, cluster.y).visible(false));
+  });
 }
 
 function clearLocationData() {
@@ -408,7 +424,10 @@ function clearLocationData() {
     slot.outer.visible(false);slot.inner.visible(false);
   });
   landmarks.forEach(slot => { slot.active = false;slot.element.visible(false); });
-  airportRing.visible(false);airportDots.forEach(dot => dot.visible(false));
+  airportClusters.forEach(cluster => {
+    cluster.active = false;cluster.ring.visible(false);
+    cluster.dots.forEach(dot => dot.visible(false));
+  });
   placeLabel.visible(false);
   routeQueue.length = 0;
   railwayQueue.length = 0;railwayNodes.length = 0;
@@ -453,7 +472,7 @@ function switchLocation(index) {
     updatePlaceLayout();
     const cache = placeCache();
     restoreFlights(cache);
-    renderAirportCount(cache.airportCount);
+    renderAirportCounts(cache.airportCounts);
     applyTransit(transit, cache.rail, true, TRANSIT_HOLD_SECONDS);
     applyTransit(busTransit, cache.buses, false, TRANSIT_HOLD_SECONDS);
     cache.railways.forEach(item => {
@@ -463,6 +482,9 @@ function switchLocation(index) {
       if (item.kind === "metro") pendingMetroMapPaths++;
       else pendingTrainMapPaths++;
     });
+    // Select the new location's solar state before exposing its first frame;
+    // otherwise the freshly rebaked night texture can flash for one frame.
+    updateSun(clockTime, true);
     locationSwitching = false;
     nextLocationSwitch = clockTime + LOCATION_SWITCH_SECONDS;
     requestFlights();
@@ -505,31 +527,36 @@ function labelText(slot) {
   return route && route.expiresAt > clockTime ? route.text : "";
 }
 
-function airportCount(payload) {
-  return payload.ac.filter(row => row && row.alt_baro === "ground" &&
-    Number.isFinite(row.lon) && Number.isFinite(row.lat) &&
-    distanceKm(Number(row.lon), Number(row.lat), PLACE.airport.longitude,
-      PLACE.airport.latitude) <= PLACE.airportGroundRadiusKm &&
-    row.t !== "TWR" && !String(row.category || "").startsWith("C")).length;
+function airportCounts(payload) {
+  return configuredAirports().map(airport => payload.ac.filter(row => row &&
+    row.alt_baro === "ground" && Number.isFinite(row.lon) &&
+    Number.isFinite(row.lat) && distanceKm(Number(row.lon), Number(row.lat),
+      airport.longitude, airport.latitude) <= PLACE.airportGroundRadiusKm &&
+    row.t !== "TWR" && !String(row.category || "").startsWith("C")).length);
 }
 
-function renderAirportCount(value) {
-  const count = Math.min(value, airportDots.length);
-  const growth = clamp((count - 9) / (MAX_AIRPORT_DOTS - 9), 0, 1);
+function renderAirportCluster(cluster, value) {
+  if (!cluster.active) return;
+  const count = Math.min(Number(value || 0), cluster.dots.length);
+  const growth = clamp((count - 9) / Math.max(1, cluster.dots.length - 9), 0, 1);
   const clusterRadius = AIRPORT_CLUSTER_MIN_RADIUS +
     (AIRPORT_CLUSTER_MAX_RADIUS - AIRPORT_CLUSTER_MIN_RADIUS) * Math.sqrt(growth);
-  airportRing.scale(clusterRadius)
-    .color(count > 0 ? 0xb88f32ff : 0x585858ff)
-    .visible(true);
+  cluster.ring.scale(clusterRadius)
+    .color(count > 0 ? 0xb88f32ff : 0x585858ff).visible(true);
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-  airportDots.forEach((dot, index) => {
+  cluster.dots.forEach((dot, index) => {
     if (index >= count) { dot.visible(false); return; }
     const radius = Math.max(2, clusterRadius - 4) *
       Math.sqrt((index + 0.5) / count);
     const angle = index * goldenAngle;
-    dot.position(airportClusterX + Math.cos(angle) * radius,
-      airportClusterY + Math.sin(angle) * radius).visible(true);
+    dot.position(cluster.x + Math.cos(angle) * radius,
+      cluster.y + Math.sin(angle) * radius).visible(true);
   });
+}
+
+function renderAirportCounts(values) {
+  airportClusters.forEach((cluster, index) =>
+    renderAirportCluster(cluster, values[index]));
 }
 
 function positionLabel(slot) {
@@ -570,7 +597,8 @@ function placeName(airport) {
 }
 
 function isLocalAirport(airport) {
-  const codes = PLACE.localAirports || [PLACE.airport.iata, PLACE.airport.icao];
+  const codes = PLACE.localAirports || configuredAirports().reduce((all, value) =>
+    all.concat([value.iata, value.icao]), []);
   const iata = String(airport.iata_code || "").toUpperCase();
   const icao = String(airport.icao_code || "").toUpperCase();
   return codes.includes(iata) || codes.includes(icao);
@@ -1210,9 +1238,10 @@ function processRailwayQueue() {
   for (let index = 1; index < nodes.length; index++) {
     const first = nodes[index - 1];
     const second = nodes[index];
-    const dx = second.x - first.x;
-    const dy = second.y - first.y;
-    if (dx * dx + dy * dy > RAILWAY_MAX_EDGE_PIXELS * RAILWAY_MAX_EDGE_PIXELS) {
+    const firstLocation = map.unproject(first.x, first.y);
+    const secondLocation = map.unproject(second.x, second.y);
+    if (distanceKm(firstLocation.longitude, firstLocation.latitude,
+        secondLocation.longitude, secondLocation.latitude) > RAILWAY_MAX_EDGE_KM) {
       drawRailwayRun(item.kind, run);
       run = [];
       continue;
@@ -1292,7 +1321,7 @@ function mergeTransit(...groups) {
 
 function styleTransit(slot, mode) {
   slot.mode = mode;
-  if (mode === "SUBWAY") {
+  if (METRO_MODES.has(mode)) {
     slot.marker.shape("circle", 5, 5, 2.5).color(METRO_COLOR);
   } else {
     slot.marker.shape("circle", 6, 6, 3).color(TRAIN_COLOR);
@@ -1587,8 +1616,8 @@ function positionTransit(slot, now, delta) {
   slot.marker.position(slot.currentX, slot.currentY).rotation(0).visible(visible);
 }
 
-function updateSun(now) {
-  if (now < nextSolarUpdate) return;
+function updateSun(now, force) {
+  if (!force && now < nextSolarUpdate) return;
   nextSolarUpdate = now + SUN_UPDATE_SECONDS;
   const sun = fx.geo.sunPosition(new Date(), PLACE.mapCenter.latitude,
     PLACE.mapCenter.longitude);
@@ -1966,9 +1995,9 @@ function requestFlights() {
     .then(payload => {
       if (revision !== placeRevision) return;
       const airborne = normalizeFlights(payload);
-      const count = airportCount(payload);
-      placeCache().airportCount = count;
-      renderAirportCount(count);
+      const counts = airportCounts(payload);
+      placeCache().airportCounts = counts;
+      renderAirportCounts(counts);
       applyFlights(airborne, true);
       requestInFlight = false;
       nextRequestTime = clockTime + POLL_SECONDS;
@@ -1986,16 +2015,19 @@ requestFlights();
 
 function update(time, delta) {
   clockTime = time;
-  const startup = startupAssets.update(time);
-  if (!startup.ready) {
-    if (startup.sourcesReady) {
-      // Bake the opaque night composite once behind the loading cover. The
-      // first solar update then selects it or the direct daytime map.
-      nightView.show().blend(false).opacity(1);
-    } else {
-      nightView.hide();
+  if (!initialAssetsReady) {
+    const startup = startupAssets.update(time);
+    if (!startup.ready) {
+      if (startup.sourcesReady) {
+        // Bake the opaque night composite once behind the initial loading
+        // cover. Later viewport changes have their own atomic handoff.
+        nightView.show().blend(false).opacity(1);
+      } else {
+        nightView.hide();
+      }
+      return;
     }
-    return;
+    initialAssetsReady = true;
   }
   scene.show();
   if (locationSwitching) return;
