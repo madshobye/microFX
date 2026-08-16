@@ -35,12 +35,9 @@ const SHADOW_MAX_OFFSET = 62;
 const LANDMARK_BREATH_SECONDS = 3;
 // Sun position selects one opaque background. There is deliberately no
 // full-screen day/night alpha transition on this hardware.
-const SUN_DEBUG_CYCLE_SECONDS = 0;
+const DAY_NIGHT_DEBUG_SWITCH_SECONDS = 60;
 const NIGHT_SWITCH_ELEVATION = -3;
-const SUN_UPDATE_SECONDS = SUN_DEBUG_CYCLE_SECONDS ? 0.1 : 30;
-const sunDebugToday = new Date();
-const SUN_DEBUG_DAY_START = Date.UTC(sunDebugToday.getUTCFullYear(),
-  sunDebugToday.getUTCMonth(), sunDebugToday.getUTCDate());
+const SUN_UPDATE_SECONDS = DAY_NIGHT_DEBUG_SWITCH_SECONDS ? 1 : 30;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
@@ -1343,14 +1340,11 @@ function positionTransit(slot, now, delta) {
 function updateSun(now) {
   if (now < nextSolarUpdate) return;
   nextSolarUpdate = now + SUN_UPDATE_SECONDS;
-  const cycle = SUN_DEBUG_CYCLE_SECONDS ?
-    ((now % SUN_DEBUG_CYCLE_SECONDS) + SUN_DEBUG_CYCLE_SECONDS) %
-      SUN_DEBUG_CYCLE_SECONDS / SUN_DEBUG_CYCLE_SECONDS : 0;
-  const sunTime = SUN_DEBUG_CYCLE_SECONDS ?
-    new Date(SUN_DEBUG_DAY_START + cycle * 86400000) : new Date();
-  const sun = fx.geo.sunPosition(sunTime, PLACE.mapCenter.latitude,
+  const sun = fx.geo.sunPosition(new Date(), PLACE.mapCenter.latitude,
     PLACE.mapCenter.longitude);
-  const amount = sun.elevationDegrees < NIGHT_SWITCH_ELEVATION ? 1 : 0;
+  const amount = DAY_NIGHT_DEBUG_SWITCH_SECONDS ?
+    Math.floor(now / DAY_NIGHT_DEBUG_SWITCH_SECONDS) % 2 :
+    (sun.elevationDegrees < NIGHT_SWITCH_ELEVATION ? 1 : 0);
   if (amount !== nightAmount) {
     nightAmount = amount;
     if (nightAmount === 1) {
