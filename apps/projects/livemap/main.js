@@ -13,7 +13,7 @@ if (!PLACE) throw new Error(`Unknown location preset: ${PLACE_NAME}`);
 // Keep optional feeds as explicit application switches. AIS is currently
 // unreliable, and transit is disabled while profiling the background path.
 const ENABLE_AIS = false;
-const ENABLE_TRANSIT = false;
+const ENABLE_TRANSIT = true;
 const HAS_TRANSIT = ENABLE_TRANSIT && Boolean(PLACE.transit && PLACE.transit.regions &&
   PLACE.transit.regions.length);
 const HAS_BUSES = HAS_TRANSIT && PLACE.transit.regions.some(region =>
@@ -62,6 +62,8 @@ const TRANSIT_MODES = new Set([
 ]);
 const METRO_MODES = new Set(["SUBWAY"]);
 const BUS_MODES = new Set(["BUS", "COACH"]);
+const METRO_COLOR = 0xffd55aff;
+const METRO_PATH_COLOR = 0x8f742fff;
 const TRANSIT_URL = "https://api.transitous.org/api/v6/map/trips";
 const TRANSIT_USER_AGENT =
   "microFX-copenhagen-map/0.1 (+https://github.com/madshobye/microFX)";
@@ -202,7 +204,7 @@ const trainMapPaths = HAS_TRANSIT ? Array.from({ length: MAX_TRAIN_MAP_PATHS }, 
     0x29434aff).opacity(0.64).visible(false))) : [];
 const metroMapPaths = HAS_TRANSIT ? Array.from({ length: MAX_METRO_MAP_PATHS }, () =>
   scene.add(fx.outline([[0, 0], [1, 0]], 0, 0, 1, 2,
-    0x704966ff).opacity(0.72).visible(false))) : [];
+    METRO_PATH_COLOR).opacity(0.72).visible(false))) : [];
 const landmarks = PLACE.landmarks.map(landmark => {
   const point = mapPoint(landmark.longitude, landmark.latitude);
   return {
@@ -1058,7 +1060,7 @@ function mergeTransit(...groups) {
 function styleTransit(slot, mode) {
   slot.mode = mode;
   if (mode === "SUBWAY") {
-    slot.marker.shape("circle", 5, 5, 2.5).color(0xd783bfff);
+    slot.marker.shape("circle", 5, 5, 2.5).color(METRO_COLOR);
   } else {
     slot.marker.shape("circle", 6, 6, 3).color(0x65e6ffff);
   }
