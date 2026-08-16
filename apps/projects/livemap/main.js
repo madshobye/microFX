@@ -21,6 +21,9 @@ const HAS_BUSES = HAS_TRANSIT && PLACE.transit.regions.some(region =>
 
 const POLL_SECONDS = 5;
 const CORRECTION_SECONDS = 8;
+const FLIGHT_INFERENCE_MIN_DISTANCE_KM = 0.02;
+const FLIGHT_INFERENCE_MAX_SECONDS = 60;
+const FLIGHT_INFERENCE_MAX_SPEED = 400;
 const ROUTE_CACHE_SECONDS = 15 * 60;
 const ROUTE_MAX_CROSS_TRACK_KM = 220;
 const ROUTE_MAX_HEADING_ERROR = 80;
@@ -253,6 +256,7 @@ const flights = Array.from({ length: MAX_FLIGHTS }, (_, slotIndex) => {
     shadow, outline, label,
     labelX: NaN, labelY: NaN,
     longitude: 0, latitude: 0, headingDegrees: 0,
+    speedMetresPerSecond: 0,
     positionTime: 0,
     currentX: 0, currentY: 0, velocityX: 0, velocityY: 0,
     correctionX: 0, correctionY: 0, correctionRemaining: 0
@@ -538,6 +542,44 @@ function distanceKm(longitudeA, latitudeA, longitudeB, latitudeB) {
   return Math.sqrt(x * x + y * y) * 111.32;
 }
 
+function flightMotion(slot, item, sameAircraft, hasFreshPosition, positionTime) {
+  let heading = Number(item.heading);
+  let speed = Number(item.velocity);
+  const headingMissing = !Number.isFinite(heading) || heading === 0;
+  const speedMissing = !Number.isFinite(speed) || speed <= 0;
+
+  if (!item.onGround && sameAircraft && hasFreshPosition &&
+      (headingMissing || speedMissing)) {
+    const elapsed = positionTime - slot.positionTime;
+    const travelled = distanceKm(slot.longitude, slot.latitude,
+      item.longitude, item.latitude);
+    const inferredSpeed = elapsed > 0 ? travelled * 1000 / elapsed : 0;
+    const usableDisplacement = elapsed > 0 &&
+      elapsed <= FLIGHT_INFERENCE_MAX_SECONDS &&
+      travelled >= FLIGHT_INFERENCE_MIN_DISTANCE_KM &&
+      inferredSpeed <= FLIGHT_INFERENCE_MAX_SPEED;
+    if (usableDisplacement) {
+      if (headingMissing) {
+        heading = bearingDegrees(
+          { longitude: slot.longitude, latitude: slot.latitude },
+          { longitude: item.longitude, latitude: item.latitude });
+      }
+      if (speedMissing) speed = inferredSpeed;
+    }
+  }
+
+  // A repeated/stationary observation cannot produce a useful new vector.
+  // Retain the last usable vector instead of returning the marker to north
+  // and stopping it until another ADS-B response arrives.
+  if (!Number.isFinite(heading) || heading === 0) {
+    heading = sameAircraft ? slot.headingDegrees : 0;
+  }
+  if (!Number.isFinite(speed) || speed <= 0) {
+    speed = sameAircraft ? slot.speedMetresPerSecond : 0;
+  }
+  return { heading, velocity: speed };
+}
+
 function setHeading(slot, heading, speed) {
   const angle = heading * Math.PI / 180;
   const trailScale = clamp(speed / 130, 0.3, 1.5) *
@@ -655,17 +697,25 @@ function applyFlights(values, live) {
     const point = mapPoint(item.longitude, item.latitude);
     const x = point.x;
     const y = point.y;
-    const velocity = screenVelocity(item);
     const sameAircraft = slot.active && slot.id === item.id;
     const positionTime = Number(item.positionTime || 0);
     const hasFreshPosition = !sameAircraft || positionTime > slot.positionTime;
+    const motion = flightMotion(slot, item, sameAircraft, hasFreshPosition,
+      positionTime);
+    const velocity = screenVelocity({
+      longitude: item.longitude,
+      latitude: item.latitude,
+      heading: motion.heading,
+      velocity: motion.velocity
+    });
     slot.id = item.id;
     slot.callsign = item.callsign || `AIRCRAFT ${index + 1}`;
     slot.onGround = Boolean(item.onGround);
     slot.altitudeFeet = item.altitudeFeet;
     slot.longitude = item.longitude;
     slot.latitude = item.latitude;
-    slot.headingDegrees = item.heading;
+    slot.headingDegrees = motion.heading;
+    slot.speedMetresPerSecond = motion.velocity;
     styleMarker(slot, item);
     if (sameAircraft && hasFreshPosition) {
       slot.correctionX = x - slot.currentX;
@@ -689,7 +739,7 @@ function applyFlights(values, live) {
     if (slot.label) slot.label.visible(!slot.onGround).text(labelText(slot));
     positionLabel(slot);
     if (!slot.onGround) queueRoute(slot.callsign);
-    setHeading(slot, item.heading, item.velocity);
+    setHeading(slot, motion.heading, motion.velocity);
     updateTrail(slot);
   });
 
@@ -701,6 +751,7 @@ function applyFlights(values, live) {
     slot.onGround = false;
     slot.aircraftKind = "";
     slot.positionTime = 0;
+    slot.speedMetresPerSecond = 0;
     slot.trailInitialized = false;
     slot.marker.visible(false);
     slot.shadow.visible(false);
