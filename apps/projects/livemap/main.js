@@ -5,10 +5,11 @@ fx.configure({
   debugBarStyle: "compact"
 });
 
-// Rotate through these presets. Other entries may remain in locations.json for
-// manual experiments without becoming part of the default installation.
+// Keep Copenhagen fixed by default. Other presets remain available for manual
+// experiments without rotating the installed application away from CPH.
 const LOCATIONS = fx.data("locations.json");
 const PLACE_NAMES = ["copenhagen", "trekroner", "odense", "new-york"];
+const AUTO_SWITCH_LOCATIONS = false;
 const LOCATION_SWITCH_SECONDS = 60;
 let placeIndex = 0;
 let PLACE_NAME = PLACE_NAMES[placeIndex];
@@ -2031,11 +2032,11 @@ function update(time, delta) {
   }
   scene.show();
   if (locationSwitching) return;
-  if (!rotationStarted) {
+  if (AUTO_SWITCH_LOCATIONS && !rotationStarted) {
     rotationStarted = true;
     nextLocationSwitch = time + LOCATION_SWITCH_SECONDS;
   }
-  if (time >= nextLocationSwitch) {
+  if (AUTO_SWITCH_LOCATIONS && time >= nextLocationSwitch) {
     switchLocation(placeIndex + 1);
     return;
   }
