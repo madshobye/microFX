@@ -54,7 +54,7 @@ bool MicroFxGpuTextureRendererInit(MicroFxGpuTextureRenderer *renderer)
     static const char *cachedFragment=
         "#version 100\nprecision mediump float;varying mediump vec2 vUv;"
         "uniform sampler2D uTexture;uniform lowp float uOpacity;"
-        "void main(){lowp vec4 c=texture2D(uTexture,vec2(vUv.x,1.0-vUv.y));"
+        "void main(){lowp vec4 c=texture2D(uTexture,vUv);"
         "gl_FragColor=vec4(c.rgb,c.a*uOpacity);}\n";
     renderer->defaultProgram=LinkProgram(fragment);
     renderer->cachedProgram=LinkProgram(cachedFragment);
@@ -238,9 +238,19 @@ static bool EnsureCache(MicroFxGpuTextureRenderState *state,int width,int height
         return true;
     if(state->cachedFramebuffer)glDeleteFramebuffers(1,&state->cachedFramebuffer);
     if(state->cachedTexture)glDeleteTextures(1,&state->cachedTexture);
-    state->cachedFramebuffer=0;state->cachedTexture=0;state->cacheValid=false;
+    if(state->cachedSampleTexture)glDeleteTextures(1,&state->cachedSampleTexture);
+    state->cachedFramebuffer=0;state->cachedTexture=0;
+    state->cachedSampleTexture=0;state->cacheValid=false;
     glGenTextures(1,&state->cachedTexture);
     glBindTexture(GL_TEXTURE_2D,state->cachedTexture);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGB,width,height,0,GL_RGB,
+                 GL_UNSIGNED_SHORT_5_6_5,NULL);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    glGenTextures(1,&state->cachedSampleTexture);
+    glBindTexture(GL_TEXTURE_2D,state->cachedSampleTexture);
     glTexImage2D(GL_TEXTURE_2D,0,GL_RGB,width,height,0,GL_RGB,
                  GL_UNSIGNED_SHORT_5_6_5,NULL);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
@@ -258,6 +268,34 @@ static bool EnsureCache(MicroFxGpuTextureRenderState *state,int width,int height
         return false;
     }
     state->cachedWidth=width;state->cachedHeight=height;return true;
+}
+
+static bool SnapshotCacheForSampling(MicroFxGpuTextureRenderState *state,
+                                     int width,int height)
+{
+    const size_t pixelCount=(size_t)width*(size_t)height;
+    unsigned char *rgba=malloc(pixelCount*4);
+    uint16_t *rgb565=malloc(pixelCount*sizeof(*rgb565));
+    if(!rgba||!rgb565){free(rgba);free(rgb565);return false;}
+    while(glGetError()!=GL_NO_ERROR){}
+    glReadPixels(0,0,width,height,GL_RGBA,GL_UNSIGNED_BYTE,rgba);
+    if(glGetError()!=GL_NO_ERROR){free(rgba);free(rgb565);return false;}
+    for(int y=0;y<height;y++){
+        const size_t sourceRow=(size_t)y*(size_t)width;
+        const size_t targetRow=(size_t)(height-1-y)*(size_t)width;
+        for(int x=0;x<width;x++){
+            const unsigned char *source=&rgba[(sourceRow+(size_t)x)*4];
+            rgb565[targetRow+(size_t)x]=
+                (uint16_t)(((uint16_t)(source[0]>>3)<<11)|
+                           ((uint16_t)(source[1]>>2)<<5)|
+                           (uint16_t)(source[2]>>3));
+        }
+    }
+    glBindTexture(GL_TEXTURE_2D,state->cachedSampleTexture);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGB,width,height,0,GL_RGB,
+                 GL_UNSIGNED_SHORT_5_6_5,rgb565);
+    const bool ok=glGetError()==GL_NO_ERROR;
+    free(rgba);free(rgb565);return ok;
 }
 
 static void DrawPass(const MicroFxGpuTextureRenderer *renderer,
@@ -304,9 +342,11 @@ static void DrawPass(const MicroFxGpuTextureRenderer *renderer,
 static void DrawCachedPass(const MicroFxGpuTextureRenderer *renderer,
                            Texture2D source,bool blend,float opacity)
 {
-    glUseProgram(renderer->cachedProgram);
-    glUniform1i(renderer->cachedTextureLocation,0);
-    glUniform1f(renderer->cachedOpacityLocation,opacity);
+    const bool opaque=!blend&&opacity>=0.999f;
+    glUseProgram(opaque?renderer->defaultProgram:renderer->cachedProgram);
+    glUniform1i(opaque?renderer->defaultTextureLocation:
+                       renderer->cachedTextureLocation,0);
+    if(!opaque)glUniform1f(renderer->cachedOpacityLocation,opacity);
     if(blend){glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);}
     else glDisable(GL_BLEND);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,source.id);
@@ -378,6 +418,12 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
                 glViewport(0,0,width,height);
                 DrawPass(renderer,state,texture,source,secondary,tertiary,width,height,
                          state->program!=0,false,scene->time);
+                if(!SnapshotCacheForSampling(state,width,height)){
+                    fprintf(stderr,"MICROFX_GPU_TEXTURE cache snapshot failure\n");
+                    glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)framebuffer);
+                    glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
+                    continue;
+                }
                 glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)framebuffer);
                 glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
                 state->cachedShaderVersion=texture->shaderVersion;
@@ -390,7 +436,7 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
                 printf("MICROFX_GPU_TEXTURE cache_bake index=%d size=%dx%d\n",
                        i,width,height);fflush(stdout);
             }
-            Texture2D cached={.id=state->cachedTexture,.width=width,
+            Texture2D cached={.id=state->cachedSampleTexture,.width=width,
                 .height=height,.mipmaps=1,.format=PIXELFORMAT_UNCOMPRESSED_R5G6B5};
             DrawCachedPass(renderer,cached,texture->blend,texture->opacity);
         }else{
@@ -416,6 +462,8 @@ void MicroFxGpuTextureRendererDestroy(MicroFxGpuTextureRenderer *renderer,
         if(state->cachedFramebuffer)
             glDeleteFramebuffers(1,&state->cachedFramebuffer);
         if(state->cachedTexture)glDeleteTextures(1,&state->cachedTexture);
+        if(state->cachedSampleTexture)
+            glDeleteTextures(1,&state->cachedSampleTexture);
         if(IsTextureValid(state->assetTexture))UnloadTexture(state->assetTexture);
         if(IsTextureValid(state->secondaryAssetTexture))
             UnloadTexture(state->secondaryAssetTexture);

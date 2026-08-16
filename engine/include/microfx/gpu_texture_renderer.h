@@ -26,6 +26,7 @@ typedef struct {
     GLint timeLocation;
     GLint paramsLocation;
     GLuint cachedTexture;
+    GLuint cachedSampleTexture;
     GLuint cachedFramebuffer;
     int cachedWidth;
     int cachedHeight;
