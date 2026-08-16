@@ -1,0 +1,10 @@
+{
+  "updated": "sample",
+  "flights": [
+    { "callsign": "SK1428", "longitude": 12.36, "latitude": 55.62, "heading": 48, "speed": 45 },
+    { "callsign": "D83657", "longitude": 12.72, "latitude": 55.81, "heading": 205, "speed": 53 },
+    { "callsign": "LH824", "longitude": 12.08, "latitude": 55.51, "heading": 86, "speed": 61 },
+    { "callsign": "BA812", "longitude": 12.95, "latitude": 55.48, "heading": 278, "speed": 69 },
+    { "callsign": "KL1271", "longitude": 11.78, "latitude": 55.94, "heading": 132, "speed": 77 }
+  ]
+}
