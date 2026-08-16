@@ -62,6 +62,19 @@ construction out of `update(time, delta)`
 and extend the bindings only with bounded retained operations. See
 `engine/README.md` for the current API.
 
+`scene.show()` is only a per-frame render gate. It must never rewrite a
+member's authored `visible` or `enabled` state; effective visibility is scene
+active AND element visible/enabled. Tile maps and GPU textures follow the same
+rule. SDF elements normally render below outline paths and may explicitly use
+`stage("foreground")` for moving markers that must sit above those paths.
+
+Static multi-source full-screen shaders are baked once to RGB565. On GC880,
+do not sample the render-target allocation every frame: snapshot the finished
+bake into an ordinary RGB565 texture, correct orientation during that one-time
+copy, and use the minimal opaque texture shader. This made the composed night
+map cost the same as a direct daytime tile map. Any additional full-screen pass
+still requires synchronized target profiling.
+
 The output mode defaults to the first preferred connected DRM mode; do not
 replace that policy with a fixed 1080p mode. A future backend must atomic-test
 the preferred mode and try lower advertised modes when the SoC cannot drive it
@@ -123,6 +136,12 @@ The debug bar reads a RAM-only connectivity state produced by `S45status`.
 That service requires both a default IPv4 route and a bounded HTTP connectivity
 probe, without assuming Wi-Fi or Ethernet as the interface. The renderer never
 performs network I/O in its frame loop.
+
+JavaScript networking is asynchronous and event-driven, but resolving a
+promise does not make JSON parsing free. Large feed bodies must be decoded in
+bounded chunks across frames. Live positions should extrapolate between feed
+updates, correct small errors gradually, and snap implausibly large corrections
+instead of animating entities across the map.
 
 ## i.MX6DL-DG1 boot and storage model
 

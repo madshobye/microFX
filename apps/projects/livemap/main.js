@@ -35,9 +35,8 @@ const SHADOW_MAX_OFFSET = 62;
 const LANDMARK_BREATH_SECONDS = 3;
 // Sun position selects one opaque background. There is deliberately no
 // full-screen day/night alpha transition on this hardware.
-const DAY_NIGHT_DEBUG_SWITCH_SECONDS = 60;
 const NIGHT_SWITCH_ELEVATION = -3;
-const SUN_UPDATE_SECONDS = DAY_NIGHT_DEBUG_SWITCH_SECONDS ? 1 : 30;
+const SUN_UPDATE_SECONDS = 30;
 const MAX_SHIPS = 24;
 const SHIP_STALE_SECONDS = 180;
 const TRANSIT_POLL_SECONDS = 30;
@@ -45,6 +44,7 @@ const TRANSIT_WINDOW_SECONDS = 20;
 const TRANSIT_REQUEST_CONCURRENCY = 1;
 const TRANSIT_HOLD_SECONDS = 4 * 60;
 const TRANSIT_CORRECTION_SECONDS = 8;
+const TRANSIT_SNAP_DISTANCE_KM = 1.5;
 const MAX_RAIL_TRANSIT = 224;
 const MAX_BUSES = 128;
 const MAX_TRAIN_MAP_PATHS = 120;
@@ -1084,6 +1084,29 @@ function transitPoint(value, now) {
   };
 }
 
+function correctTransitPosition(slot, point, smooth) {
+  let separationKm = Infinity;
+  if (slot.positionInitialized) {
+    const current = map.unproject(slot.currentX, slot.currentY);
+    const target = map.unproject(point.x, point.y);
+    separationKm = distanceKm(current.longitude, current.latitude,
+      target.longitude, target.latitude);
+  }
+  if (!smooth || !slot.positionInitialized ||
+      separationKm > TRANSIT_SNAP_DISTANCE_KM) {
+    slot.currentX = point.x;
+    slot.currentY = point.y;
+    slot.positionInitialized = true;
+    slot.correctionX = 0;
+    slot.correctionY = 0;
+    slot.correctionRemaining = 0;
+    return;
+  }
+  slot.correctionX = point.x - slot.currentX;
+  slot.correctionY = point.y - slot.currentY;
+  slot.correctionRemaining = TRANSIT_CORRECTION_SECONDS;
+}
+
 function applyTransit(slots, values, styleMarkers, holdSeconds) {
   const now = Date.now();
   const assigned = new Set();
@@ -1117,18 +1140,7 @@ function applyTransit(slots, values, styleMarkers, holdSeconds) {
     slot.nextArrival = value.nextArrival;
     slot.velocityX = nextPoint.x - point.x;
     slot.velocityY = nextPoint.y - point.y;
-    if (continuing && slot.positionInitialized) {
-      slot.correctionX = point.x - slot.currentX;
-      slot.correctionY = point.y - slot.currentY;
-      slot.correctionRemaining = TRANSIT_CORRECTION_SECONDS;
-    } else {
-      slot.currentX = point.x;
-      slot.currentY = point.y;
-      slot.positionInitialized = true;
-      slot.correctionX = 0;
-      slot.correctionY = 0;
-      slot.correctionRemaining = 0;
-    }
+    correctTransitPosition(slot, point, continuing);
     slot.mode = value.mode;
     if (styleMarkers) styleTransit(slot, value.mode);
     slot.marker.visible(true);
@@ -1316,9 +1328,7 @@ function positionTransit(slot, now, delta) {
     const nextPoint = transitPoint(slot, now + 1000);
     slot.velocityX = nextPoint.x - point.x;
     slot.velocityY = nextPoint.y - point.y;
-    slot.correctionX = point.x - slot.currentX;
-    slot.correctionY = point.y - slot.currentY;
-    slot.correctionRemaining = TRANSIT_CORRECTION_SECONDS;
+    correctTransitPosition(slot, point, true);
   }
   const step = clamp(delta, 0, 0.25);
   if (now < slot.arrival) {
@@ -1345,9 +1355,7 @@ function updateSun(now) {
   nextSolarUpdate = now + SUN_UPDATE_SECONDS;
   const sun = fx.geo.sunPosition(new Date(), PLACE.mapCenter.latitude,
     PLACE.mapCenter.longitude);
-  const amount = DAY_NIGHT_DEBUG_SWITCH_SECONDS ?
-    Math.floor(now / DAY_NIGHT_DEBUG_SWITCH_SECONDS) % 2 :
-    (sun.elevationDegrees < NIGHT_SWITCH_ELEVATION ? 1 : 0);
+  const amount = sun.elevationDegrees < NIGHT_SWITCH_ELEVATION ? 1 : 0;
   if (amount !== nightAmount) {
     nightAmount = amount;
     if (nightAmount === 1) {
