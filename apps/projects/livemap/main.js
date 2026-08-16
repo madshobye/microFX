@@ -5,13 +5,13 @@ fx.configure({
   debugBarStyle: "compact"
 });
 
-// Keep Copenhagen fixed by default. Other presets remain available for manual
-// experiments without rotating the installed application away from CPH.
+// Keep Odense fixed by default. Other presets remain available for manual
+// experiments without rotating the installed application.
 const LOCATIONS = fx.data("locations.json");
 const PLACE_NAMES = ["copenhagen", "trekroner", "odense", "new-york"];
 const AUTO_SWITCH_LOCATIONS = false;
 const LOCATION_SWITCH_SECONDS = 60;
-let placeIndex = 0;
+let placeIndex = 2;
 let PLACE_NAME = PLACE_NAMES[placeIndex];
 let PLACE = LOCATIONS[PLACE_NAME];
 if (PLACE_NAMES.some(name => !LOCATIONS[name])) {
