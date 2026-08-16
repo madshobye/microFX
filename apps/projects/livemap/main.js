@@ -103,7 +103,7 @@ const RADAR = {
   threshold: 72,
   nodata: 255,
   pollSeconds: 60,
-  regions: 14,
+  renderCells: 192,
   scanBudget: 120,
   motionSample: 8,
   motionRange: 12,
@@ -217,19 +217,15 @@ const startupAssets = fx.assets.load({
   loading: { label: "LOADING", x: 805, y: 515, size: 24, color: 0x777777ff }
 });
 
-// Radar is retained below all moving symbols. Only its points and transform
-// change when a new five-minute observation has been processed.
-const emptyContour = Array.from({ length: 32 }, (_, index) => {
-  const angle = index / 32 * Math.PI * 2;
-  return [Math.cos(angle), Math.sin(angle)];
-});
-const radarRegions = Array.from({ length: RADAR.regions }, () => {
-  const outer = scene.add(fx.polygon(emptyContour, 0, 0, 1,
-    0x18212a55).visible(false));
-  const inner = scene.add(fx.polygon(emptyContour, 0, 0, 1,
-    0x0d151d88).visible(false));
-  return { outer, inner, centerX: 0, centerY: 0 };
-});
+// Keep the decoded radar grid as small retained cells below the moving
+// symbols. This preserves holes and narrow showers; a radial blob contour
+// falsely filled the empty space between distant radar samples.
+const radarCells = Array.from({ length: RADAR.renderCells }, () => ({
+  element: scene.add(fx.polygon([[-1, -1], [1, -1], [1, 1], [-1, 1]],
+    0, 0, 1, 0x00000000).visible(false)),
+  centerX: 0,
+  centerY: 0
+}));
 const placeLabel = scene.add(fx.text(PLACE.label, 55, 45, 28, 0x606060ff));
 scene.add(fx.text("ESRI / NASA / DMI / ADSB.FI / TRANSITOUS",
   1530, 1040, 14, 0x596166ff).antialias(false));
@@ -421,9 +417,7 @@ function clearLocationData() {
     slot.active = false;slot.id = "";slot.outline.visible(false);
   });
   if (railwayTexture) railwayTexture.clear(0).commit();
-  radarRegions.forEach(slot => {
-    slot.outer.visible(false);slot.inner.visible(false);
-  });
+  radarCells.forEach(slot => slot.element.visible(false));
   landmarks.forEach(slot => { slot.active = false;slot.element.visible(false); });
   airportClusters.forEach(cluster => {
     cluster.active = false;cluster.ring.visible(false);
@@ -1796,43 +1790,40 @@ function scoreRadarMotion(previous, current, dx, dy, sample) {
   return union >= 20 ? overlap / union : -1;
 }
 
-function smoothRadarContour(component, decoded) {
-  const points = component.cells.map(cell => radarPosition(
-    cell[0] * RADAR.stride, cell[1] * RADAR.stride, decoded));
-  const center = points.reduce((sum, point) => ({
-    x: sum.x + point.x,
-    y: sum.y + point.y
-  }), { x: 0, y: 0 });
-  center.x /= points.length;
-  center.y /= points.length;
-  const bins = 32;
-  let radii = Array(bins).fill(0);
-  points.forEach(point => {
-    const dx = point.x - center.x;
-    const dy = point.y - center.y;
-    const bin = Math.min(bins - 1, Math.floor(
-      (Math.atan2(dy, dx) + Math.PI) / (Math.PI * 2) * bins));
-    radii[bin] = Math.max(radii[bin], Math.sqrt(dx * dx + dy * dy));
-  });
-  for (let pass = 0; pass < 4; pass++) {
-    radii = radii.map((radius, index) => {
-      const before = radii[(index + bins - 1) % bins];
-      const after = radii[(index + 1) % bins];
-      return radius === 0 ? (before + after) * 0.5 :
-        before * 0.22 + radius * 0.56 + after * 0.22;
-    });
-  }
-  const contour = expansion => radii.map((radius, index) => {
-    const angle = index / bins * Math.PI * 2 - Math.PI;
-    const distance = Math.max(8, radius + expansion);
-    return [Math.cos(angle) * distance, Math.sin(angle) * distance];
-  });
+function radarCellShape(cell, decoded) {
+  const column = (cell[0] + 0.5) * RADAR.stride;
+  const row = (cell[1] + 0.5) * RADAR.stride;
+  const center = radarPosition(column, row, decoded);
+  const right = radarPosition(column + RADAR.stride, row, decoded);
+  const down = radarPosition(column, row + RADAR.stride, decoded);
+  const ux = (right.x - center.x) * 0.54;
+  const uy = (right.y - center.y) * 0.54;
+  const vx = (down.x - center.x) * 0.54;
+  const vy = (down.y - center.y) * 0.54;
   return {
     center,
-    inner: contour(2),
-    outer: contour(16),
-    intensity: component.intensity
+    points: [
+      [-ux - vx, -uy - vy],
+      [ux - vx, uy - vy],
+      [ux + vx, uy + vy],
+      [-ux + vx, -uy + vy]
+    ],
+    intensity: decoded.data[cell[1] * decoded.shape[1] + cell[0]]
   };
+}
+
+function radarColor(raw) {
+  // DMI composite values use gain 0.5 and offset -32 dBZ. These broad bands
+  // deliberately echo the public DMI legend without pretending to be an
+  // exact copy of the website's separately generated five-minute product.
+  if (raw < 84) return fx.rgba(116, 231, 222, 118);
+  if (raw < 104) return fx.rgba(28, 207, 188, 142);
+  if (raw < 124) return fx.rgba(38, 139, 221, 164);
+  if (raw < 144) return fx.rgba(255, 210, 0, 188);
+  if (raw < 154) return fx.rgba(255, 128, 70, 198);
+  if (raw < 164) return fx.rgba(255, 82, 82, 208);
+  if (raw < 174) return fx.rgba(211, 28, 31, 218);
+  return fx.rgba(112, 0, 40, 228);
 }
 
 function beginRadarJob(previous, current, previousFeature, currentFeature) {
@@ -1850,7 +1841,8 @@ function beginRadarJob(previous, current, previousFeature, currentFeature) {
     bestMotion: [0, 0],
     bestScore: -1,
     contourIndex: 0,
-    contours: []
+    contourCellIndex: 0,
+    renderCells: []
   };
 }
 
@@ -1866,22 +1858,16 @@ function finishRadarJob(job) {
   radarVelocityX = (moved.x - reference.x) / frameSeconds;
   radarVelocityY = (moved.y - reference.y) / frameSeconds;
   radarObservationEpoch = Date.parse(job.currentFeature.properties.datetime) / 1000;
-  job.contours.forEach((shape, index) => {
-    const slot = radarRegions[index];
-    const strength = clamp((shape.intensity - RADAR.threshold) / 48, 0, 1);
-    const night = nightAmount > 0.5;
+  job.renderCells.sort((a, b) => a.intensity - b.intensity);
+  job.renderCells.forEach((shape, index) => {
+    const slot = radarCells[index];
     slot.centerX = shape.center.x;
     slot.centerY = shape.center.y;
-    slot.outer.points(shape.outer).position(slot.centerX, slot.centerY)
-      .color(night ? fx.rgba(190, 205, 214, 46 + strength * 25) :
-        fx.rgba(24, 33, 42, 42 + strength * 30)).visible(true);
-    slot.inner.points(shape.inner).position(slot.centerX, slot.centerY)
-      .color(night ? fx.rgba(220, 229, 232, 72 + strength * 48) :
-        fx.rgba(13, 21, 29, 68 + strength * 58)).visible(true);
+    slot.element.points(shape.points).position(slot.centerX, slot.centerY)
+      .color(radarColor(shape.intensity)).visible(true);
   });
-  for (let index = job.contours.length; index < radarRegions.length; index++) {
-    radarRegions[index].outer.visible(false);
-    radarRegions[index].inner.visible(false);
+  for (let index = job.renderCells.length; index < radarCells.length; index++) {
+    radarCells[index].element.visible(false);
   }
   radarFrameId = job.currentFeature.id;
   radarJob = null;
@@ -1923,17 +1909,34 @@ function processRadarJob() {
     return;
   }
   const candidates = job.currentScanner.components;
+  let work = 0;
   while (job.contourIndex < candidates.length &&
-      job.contours.length < RADAR.regions) {
+      job.renderCells.length < RADAR.renderCells && work < RADAR.scanBudget) {
     const component = candidates[job.contourIndex++];
-    const shape = smoothRadarContour(component, job.current);
-    if (shape.center.x >= -300 && shape.center.x <= fx.width + 300 &&
-        shape.center.y >= -300 && shape.center.y <= fx.height + 300) {
-      job.contours.push(shape);
+    const componentCenter = radarPosition(component.column * RADAR.stride,
+      component.row * RADAR.stride, job.current);
+    if (componentCenter.x < -600 || componentCenter.x > fx.width + 600 ||
+        componentCenter.y < -600 || componentCenter.y > fx.height + 600) {
+      continue;
     }
-    return;
+    job.contourIndex--;
+    while (job.contourCellIndex < component.cells.length &&
+        job.renderCells.length < RADAR.renderCells && work < RADAR.scanBudget) {
+      const shape = radarCellShape(component.cells[job.contourCellIndex++],
+        job.current);
+      work++;
+      if (shape.center.x >= -100 && shape.center.x <= fx.width + 100 &&
+          shape.center.y >= -100 && shape.center.y <= fx.height + 100) {
+        job.renderCells.push(shape);
+      }
+    }
+    if (job.contourCellIndex >= component.cells.length) {
+      job.contourIndex++;
+      job.contourCellIndex = 0;
+    }
   }
-  finishRadarJob(job);
+  if (job.contourIndex >= candidates.length ||
+      job.renderCells.length >= RADAR.renderCells) finishRadarJob(job);
 }
 
 function radarBytes(feature) {
@@ -1993,10 +1996,8 @@ function positionRadar() {
     RADAR.motionMaxSeconds);
   const dx = radarVelocityX * age;
   const dy = radarVelocityY * age;
-  radarRegions.forEach(slot => {
-    slot.outer.position(slot.centerX + dx, slot.centerY + dy);
-    slot.inner.position(slot.centerX + dx, slot.centerY + dy);
-  });
+  radarCells.forEach(slot =>
+    slot.element.position(slot.centerX + dx, slot.centerY + dy));
 }
 
 function requestFlights() {
