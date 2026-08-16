@@ -18,7 +18,7 @@
 #define MICROFX_MAX_TEXT_BYTES 128
 #define MICROFX_MAX_ASSET_PATH 256
 #define MICROFX_MAX_MESH_SHADERS 8
-#define MICROFX_MAX_TILE_MAPS 3
+#define MICROFX_MAX_TILE_MAPS 4
 #define MICROFX_MAX_TILE_MAP_TILES 64
 #define MICROFX_MAX_GPU_TEXTURES 8
 #define MICROFX_MAX_GPU_TEXTURE_PARAMS 32
@@ -178,8 +178,12 @@ typedef struct {
     bool secondary;
     MicroFxGpuTextureSource secondarySource;
     int secondaryMapIndex;
+    bool tertiary;
+    MicroFxGpuTextureSource tertiarySource;
+    int tertiaryMapIndex;
     char assetPath[MICROFX_MAX_ASSET_PATH];
     char secondaryAssetPath[MICROFX_MAX_ASSET_PATH];
+    char tertiaryAssetPath[MICROFX_MAX_ASSET_PATH];
     char fragmentPath[MICROFX_MAX_ASSET_PATH];
     float params[MICROFX_MAX_GPU_TEXTURE_PARAMS];
     int paramCount;
@@ -189,6 +193,7 @@ typedef struct {
     int fieldHeight;
     int shaderVersion;
     int secondaryVersion;
+    int tertiaryVersion;
     int paramVersion;
     int fieldVersion;
     bool visible;
@@ -342,6 +347,10 @@ bool MicroFxSceneSetGpuTextureSecondaryMap(MicroFxScene *scene, int handle,
                                            int mapIndex);
 bool MicroFxSceneSetGpuTextureSecondaryAsset(MicroFxScene *scene, int handle,
                                              const char *assetPath);
+bool MicroFxSceneSetGpuTextureTertiaryMap(MicroFxScene *scene, int handle,
+                                         int mapIndex);
+bool MicroFxSceneSetGpuTextureTertiaryAsset(MicroFxScene *scene, int handle,
+                                           const char *assetPath);
 bool MicroFxSceneSetGpuTextureShader(MicroFxScene *scene, int handle,
                                      const char *fragmentPath);
 bool MicroFxSceneSetGpuTextureParams(MicroFxScene *scene, int handle,

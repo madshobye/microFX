@@ -216,6 +216,37 @@ static JSValue SetGpuTextureSecondaryAsset(JSContext *ctx,JSValueConst thisValue
     return JS_UNDEFINED;
 }
 
+static JSValue SetGpuTextureTertiaryMap(JSContext *ctx,JSValueConst thisValue,
+                                        int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0,mapIndex=0;
+    if(argc!=2||JS_ToInt32(ctx,&handle,argv[0])||
+       JS_ToInt32(ctx,&mapIndex,argv[1]))
+        return JS_ThrowTypeError(ctx,"texture.tertiary(tileMap)");
+    if(!MicroFxSceneSetGpuTextureTertiaryMap(script->scene,handle,mapIndex))
+        return JS_ThrowRangeError(ctx,"GPU texture tertiary map is invalid");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetGpuTextureTertiaryAsset(JSContext *ctx,JSValueConst thisValue,
+                                          int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0;if(argc!=2||JS_ToInt32(ctx,&handle,argv[0]))
+        return JS_ThrowTypeError(ctx,"texture.tertiary(assetPath)");
+    const char *asset=JS_ToCString(ctx,argv[1]);if(!asset)return JS_EXCEPTION;
+    char path[MICROFX_MAX_ASSET_PATH],error[128];
+    bool resolved=MicroFxResolveAsset(script->projectRoot,asset,path,sizeof(path),
+                                      error,sizeof(error));
+    JS_FreeCString(ctx,asset);
+    if(!resolved)return JS_ThrowReferenceError(ctx,
+        "GPU texture tertiary asset rejected: %s",error);
+    if(!MicroFxSceneSetGpuTextureTertiaryAsset(script->scene,handle,path))
+        return JS_ThrowRangeError(ctx,"GPU texture tertiary asset is invalid");
+    return JS_UNDEFINED;
+}
+
 static JSValue SetGpuTextureShader(JSContext *ctx,JSValueConst thisValue,int argc,
                                    JSValueConst *argv)
 {
@@ -1127,6 +1158,8 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_gpuTextureAsset",JS_NewCFunction(script->context,AddGpuAssetTexture,"_gpuTextureAsset",1));
     JS_SetPropertyStr(script->context,fx,"_gpuTextureSecondaryMap",JS_NewCFunction(script->context,SetGpuTextureSecondaryMap,"_gpuTextureSecondaryMap",2));
     JS_SetPropertyStr(script->context,fx,"_gpuTextureSecondaryAsset",JS_NewCFunction(script->context,SetGpuTextureSecondaryAsset,"_gpuTextureSecondaryAsset",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureTertiaryMap",JS_NewCFunction(script->context,SetGpuTextureTertiaryMap,"_gpuTextureTertiaryMap",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureTertiaryAsset",JS_NewCFunction(script->context,SetGpuTextureTertiaryAsset,"_gpuTextureTertiaryAsset",2));
     JS_SetPropertyStr(script->context,fx,"_gpuTextureShader",JS_NewCFunction(script->context,SetGpuTextureShader,"_gpuTextureShader",2));
     JS_SetPropertyStr(script->context,fx,"_gpuTextureParams",JS_NewCFunction(script->context,SetGpuTextureParams,"_gpuTextureParams",2));
     JS_SetPropertyStr(script->context,fx,"_gpuTextureField",JS_NewCFunction(script->context,SetGpuTextureField,"_gpuTextureField",4));

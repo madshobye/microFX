@@ -124,6 +124,7 @@ relative offset. Both are fluent and return the same object.
 | `tileMap.center(...)` / `zoom(...)` | Atomically prepare a replacement map texture |
 | `texture(tileMapOrAssetPath)` | Expose a cached map or image asset as a reusable GPU texture layer |
 | `texture.secondary(tileMapOrAssetPath)` | Bind one additional cached image as shader uniform `uTexture2` |
+| `texture.tertiary(tileMapOrAssetPath)` | Bind a third cached image as shader uniform `uTexture3` |
 | `texture.shader(fragmentPath)` | Apply a project-local GLES2 fragment shader to that GPU texture |
 | `texture.field(width,height,rgbaBytes)` | Attach one bounded RGBA data texture of at most 64×64 cells |
 | `texture.params(values)` | Update up to 32 finite shader parameters without rebuilding textures |
@@ -254,7 +255,8 @@ A GPU-texture fragment shader is a bounded full-screen texture pass. Its source
 may be a cached tile map or an image asset. It must use GLES 2 syntax and
 declare `uTexture`; the engine also supplies optional
 `uTexture2`, `uField`, `uFieldSize`, `uResolution`, `uTime`, and `uParams[8]`
-uniforms. `uTexture2` is bound only after calling `texture.secondary()`.
+uniforms. `uTexture2` and `uTexture3` are bound only after calling
+`texture.secondary()` and `texture.tertiary()` respectively.
 `texture.field()` uploads exactly `width * height * 4` bytes and uses nearest
 sampling so the shader owns interpolation. The composed map remains a single
 cached 1920×1080 texture; field and parameter updates never decode or rebuild

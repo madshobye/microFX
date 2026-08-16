@@ -131,11 +131,15 @@ platform contract uses the existing U-Boot and MBR layout; root slots are partit
 persistent `/data` is partition 4. The generated root filesystem fits either
 1536 MiB root slot.
 
-Application releases are copied to `/data/apps/incoming`, checksum-verified,
-renamed on the same filesystem and selected by `/data/apps/current`. The current
-development policy is fail-fast: a bad app stops rather than silently rolling
-back. SSH is independent so failures remain diagnosable. Root A/B firmware
-updates are separate and are not yet automated.
+Native runtime uploads are copied to `/data/apps/incoming`, checksum-verified,
+and atomically moved over the one fixed `/data/apps/runtime` directory. There
+are no dated, previous, or factory runtime copies on the data partition and no
+runtime fallback. `/data/apps/current-runtime` points only to that fixed latest
+runtime. Project uploads similarly leave failed code installed and stopped
+rather than restoring an older project. Only the web UI's bounded JavaScript
+project `revisions/` history retains versions. SSH remains independent so
+failures are diagnosable. Root A/B firmware updates are separate and are not
+yet automated.
 
 Once per firmware boot, the supervisor first runs the firmware-owned engine with
 `apps/onboarding/scripts/main.js`. For 40 seconds it shows the current PeerJS ID

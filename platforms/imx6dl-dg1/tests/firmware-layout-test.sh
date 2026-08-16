@@ -43,7 +43,10 @@ test -x "$PROJECT_BUNDLE_UPDATER"
 test -x "$PROJECT_TARGET"
 test -x "$STUDIO_UPDATER"
 test -x "$STUDIO_TARGET"
-grep -q 'project-backups' "$PROJECT_TARGET"
+if grep -Eq 'project-backups|restored prior|failed-new' "$PROJECT_TARGET"; then
+  echo "project updater must fail loudly without retaining or restoring old versions" >&2
+  exit 1
+fi
 grep -q 'live-component-backups' "$STUDIO_TARGET"
 test ! -e "$ROOT/buildroot/board/imx6dl-dg1/rootfs-overlay/etc/init.d/S42dropbear-debug"
 grep -q 'root-update-backups' "$ACTIVE_ROOT_TARGET"

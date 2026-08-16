@@ -202,8 +202,8 @@ Run request. The generated setup identity persists in
 Run the runtime upload before a project that uses a newly added API. The project
 uploader updates `main.js`, metadata, and the complete asset tree without
 disturbing revision history; when the project is active it stops the renderer,
-checks that the replacement stays alive, and restores the saved files on
-failure. The Studio uploader is separate because it replaces active-root web
+checks that the replacement stays alive, and leaves a failed replacement in
+place with the renderer stopped. It never restores an older project. The Studio uploader is separate because it replaces active-root web
 and service files, not the renderer release.
 
 ## Recovery expectations

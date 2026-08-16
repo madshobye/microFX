@@ -139,6 +139,14 @@ int main(void)
     assert(scene.gpuTexture[0].secondarySource==MICROFX_GPU_TEXTURE_ASSET&&
            strcmp(scene.gpuTexture[0].secondaryAssetPath,
                   "/project/assets/night.png")==0);
+    assert(MicroFxSceneSetGpuTextureTertiaryMap(&scene,gpuTexture,tileMap));
+    assert(scene.gpuTexture[0].tertiary&&
+           scene.gpuTexture[0].tertiaryMapIndex==tileMap);
+    assert(MicroFxSceneSetGpuTextureTertiaryAsset(
+        &scene,gpuTexture,"/project/assets/lights.png"));
+    assert(scene.gpuTexture[0].tertiarySource==MICROFX_GPU_TEXTURE_ASSET&&
+           strcmp(scene.gpuTexture[0].tertiaryAssetPath,
+                  "/project/assets/lights.png")==0);
     const float mapParams[]={1,2,3,4,5};
     assert(MicroFxSceneSetGpuTextureParams(&scene,gpuTexture,mapParams,5));
     assert(scene.gpuTexture[0].paramCount==5&&scene.gpuTexture[0].params[4]==5);

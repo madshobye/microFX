@@ -73,8 +73,9 @@ sudo ./scripts/install-full-sd.sh /dev/diskN
 ```
 
 Writing the wrong disk destroys data. UART is 3.3 V, 115200 8N1 on `ttymxc0`.
-Application releases are independent of the root slots and live below
-`/data/apps` on persistent partition 4.
+The single current application runtime is independent of the root slots and
+lives at `/data/apps/runtime` on persistent partition 4. Only web-UI project
+scripts retain revision history.
 
 ## Runtime and resolution
 
@@ -214,6 +215,11 @@ fixed `/data/apps/runtime` directory. No dated or previous runtime is retained,
 and there is no previous-release rollback target. A failed pending runtime
 stops loudly while SSH and the factory error renderer remain independent for
 diagnosis.
+
+Project uploads follow the same development policy: they replace the one fixed
+project directory without keeping a project backup. If the new project fails
+its health window, it remains installed and the renderer stays stopped so the
+error is visible; no older project is restored automatically.
 
 `install-active-root-ssh.sh` is the narrow development-only exception for
 updating tested init/configuration hardening without rewriting an SD card. It

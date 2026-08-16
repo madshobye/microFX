@@ -26,13 +26,15 @@ const DENSE_FLIGHT_THRESHOLD = 55;
 const MAX_AIRPORT_DOTS = 50;
 const AIRPORT_CLUSTER_MIN_RADIUS = 9;
 const AIRPORT_CLUSTER_MAX_RADIUS = 24;
-const SYMBOLIC_SUN_DIRECTION = { x: -0.72, y: -0.69 };
 const SHADOW_MIN_OFFSET = 7;
 const SHADOW_MAX_OFFSET = 62;
 const LANDMARK_BREATH_SECONDS = 3;
 // Debug: travel through one complete geographic day every minute. Set to 0
 // to return to wall-clock time after the visual transition has been tuned.
 const SUN_DEBUG_CYCLE_SECONDS = 60;
+// Hold the compositor at full night while the NASA light-mask alignment is
+// inspected on the target display.
+const FORCE_NIGHT_DEBUG = true;
 const SUN_UPDATE_SECONDS = SUN_DEBUG_CYCLE_SECONDS ? 0.1 : 30;
 const sunDebugToday = new Date();
 const SUN_DEBUG_DAY_START = Date.UTC(sunDebugToday.getUTCFullYear(),
@@ -116,7 +118,9 @@ const map = scene.add(fx.tileMap({
   center: [PLACE.mapCenter.longitude, PLACE.mapCenter.latitude],
   zoom: PLACE.mapZoom,
   cacheDays: 30,
-  filter: { grayscale: 0, contrast: 1, brightness: 1 }
+  // Positron is intentionally subdued so the transport symbols remain clear
+  // on televisions, whose picture processing otherwise makes it look washed out.
+  filter: { grayscale: 0, contrast: 1.22, brightness: 0.82 }
 }));
 const darkMap = scene.add(fx.tileMap({
   source: {
@@ -124,6 +128,19 @@ const darkMap = scene.add(fx.tileMap({
     tileSize: 256,
     maxZoom: 20,
     attribution: "© OpenStreetMap contributors · © CARTO"
+  },
+  center: [PLACE.mapCenter.longitude, PLACE.mapCenter.latitude],
+  zoom: PLACE.mapZoom,
+  cacheDays: 30,
+  filter: { grayscale: 0, contrast: 1, brightness: 1 }
+}));
+const satelliteMap = scene.add(fx.tileMap({
+  source: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/" +
+      "World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    tileSize: 256,
+    maxZoom: 20,
+    attribution: "Imagery © Esri, Maxar, Earthstar Geographics"
   },
   center: [PLACE.mapCenter.longitude, PLACE.mapCenter.latitude],
   zoom: PLACE.mapZoom,
@@ -144,19 +161,20 @@ const nightLights = scene.add(fx.tileMap({
   cacheDays: 3650,
   filter: { grayscale: 0, contrast: 1, brightness: 1 }
 }));
-map.hide();darkMap.hide();nightLights.hide();
+map.hide();darkMap.hide();satelliteMap.hide();nightLights.hide();
 const dayView = fx.texture(map)
   .stage("background")
   .blend(false)
   .hide();
 const nightView = fx.texture(darkMap)
-  .secondary(nightLights)
+  .secondary(satelliteMap)
+  .tertiary(nightLights)
   .shader("assets/shaders/weather-map.fs")
   .stage("background")
   .blend(false)
   .hide();
 const startupAssets = fx.assets.load({
-  required: [map, darkMap, nightLights],
+  required: [map, darkMap, satelliteMap, nightLights],
   lazy: [],
   settleFrames: 2,
   loading: { label: "LOADING", x: 805, y: 515, size: 24, color: 0x777777ff }
@@ -309,7 +327,7 @@ let trainMapPathCount = 0;
 let metroMapPathCount = 0;
 let pendingTrainMapPaths = 0;
 let pendingMetroMapPaths = 0;
-let solarDirection = SYMBOLIC_SUN_DIRECTION;
+let solarDirection = { x: -0.72, y: -0.69 };
 let nightAmount = -1;
 let nextSolarUpdate = 0;
 let nextRadarPoll = 0;
@@ -1333,7 +1351,7 @@ function updateSun(now) {
   const sun = fx.geo.sunPosition(sunTime, PLACE.mapCenter.latitude,
     PLACE.mapCenter.longitude);
   const linear = clamp((3 - sun.elevationDegrees) / 11, 0, 1);
-  const amount = linear * linear * (3 - 2 * linear);
+  const amount = FORCE_NIGHT_DEBUG ? 1 : linear * linear * (3 - 2 * linear);
   if (Math.abs(amount - nightAmount) >= 0.002) {
     nightAmount = amount;
     if (nightAmount <= 0.001) {
@@ -1347,10 +1365,9 @@ function updateSun(now) {
       nightView.show().blend(true).opacity(nightAmount);
     }
   }
-  // Screen north points upward. At night the symbolic shadow direction remains
-  // stable rather than pretending that light comes through the Earth.
-  solarDirection = sun.daylight ? { x: sun.east, y: -sun.north } :
-    SYMBOLIC_SUN_DIRECTION;
+  // Screen north points upward. Only geographic sun azimuth controls the
+  // direction; aircraft altitude alone controls the shadow distance.
+  solarDirection = { x: sun.east, y: -sun.north };
 }
 
 function radarNumber(value) {

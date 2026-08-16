@@ -80,13 +80,14 @@ static bool UpdateShader(MicroFxGpuTextureRenderState *state,
                          const MicroFxGpuTexture *texture)
 {
     if(state->shaderVersion==texture->shaderVersion)return true;
-    if(texture->secondary&&!texture->fragmentPath[0]){
+    if((texture->secondary||texture->tertiary)&&!texture->fragmentPath[0]){
         fprintf(stderr,
             "MICROFX_GPU_TEXTURE secondary source requires a custom shader\n");
         return false;
     }
     if(state->program){glDeleteProgram(state->program);state->program=0;}
     state->textureLocation=-1;state->secondaryTextureLocation=-1;
+    state->tertiaryTextureLocation=-1;
     state->fieldLocation=-1;
     state->fieldSizeLocation=-1;state->resolutionLocation=-1;
     state->timeLocation=-1;state->paramsLocation=-1;
@@ -101,6 +102,8 @@ static bool UpdateShader(MicroFxGpuTextureRenderState *state,
         state->textureLocation=glGetUniformLocation(state->program,"uTexture");
         state->secondaryTextureLocation=
             glGetUniformLocation(state->program,"uTexture2");
+        state->tertiaryTextureLocation=
+            glGetUniformLocation(state->program,"uTexture3");
         state->fieldLocation=glGetUniformLocation(state->program,"uField");
         state->fieldSizeLocation=glGetUniformLocation(state->program,"uFieldSize");
         state->resolutionLocation=glGetUniformLocation(state->program,"uResolution");
@@ -114,6 +117,11 @@ static bool UpdateShader(MicroFxGpuTextureRenderState *state,
         if(texture->secondary&&state->secondaryTextureLocation<0){
             fprintf(stderr,
                 "MICROFX_GPU_TEXTURE secondary source requires uTexture2: %s\n",
+                texture->fragmentPath);return false;
+        }
+        if(texture->tertiary&&state->tertiaryTextureLocation<0){
+            fprintf(stderr,
+                "MICROFX_GPU_TEXTURE tertiary source requires uTexture3: %s\n",
                 texture->fragmentPath);return false;
         }
         printf("MICROFX_GPU_TEXTURE shader loaded fragment=%s\n",
@@ -165,27 +173,51 @@ static bool UpdateAsset(MicroFxGpuTextureRenderState *state,
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
         glBindTexture(GL_TEXTURE_2D,0);state->assetLoaded=true;
     }
-    if(state->secondaryVersion==texture->secondaryVersion)return true;
-    if(IsTextureValid(state->secondaryAssetTexture))
-        UnloadTexture(state->secondaryAssetTexture);
-    state->secondaryAssetTexture=(Texture2D){0};
-    if(texture->secondary&&
-       texture->secondarySource==MICROFX_GPU_TEXTURE_ASSET){
-        Image image=LoadImage(texture->secondaryAssetPath);
-        if(!IsImageValid(image)){
-            fprintf(stderr,"MICROFX_GPU_TEXTURE failed to load secondary asset: %s\n",
-                    texture->secondaryAssetPath);return false;
+    if(state->secondaryVersion!=texture->secondaryVersion){
+        if(IsTextureValid(state->secondaryAssetTexture))
+            UnloadTexture(state->secondaryAssetTexture);
+        state->secondaryAssetTexture=(Texture2D){0};
+        if(texture->secondary&&
+           texture->secondarySource==MICROFX_GPU_TEXTURE_ASSET){
+            Image image=LoadImage(texture->secondaryAssetPath);
+            if(!IsImageValid(image)){
+                fprintf(stderr,"MICROFX_GPU_TEXTURE failed to load secondary asset: %s\n",
+                        texture->secondaryAssetPath);return false;
+            }
+            state->secondaryAssetTexture=LoadTextureFromImage(image);UnloadImage(image);
+            if(!IsTextureValid(state->secondaryAssetTexture))return false;
+            glBindTexture(GL_TEXTURE_2D,state->secondaryAssetTexture.id);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+            glBindTexture(GL_TEXTURE_2D,0);
         }
-        state->secondaryAssetTexture=LoadTextureFromImage(image);UnloadImage(image);
-        if(!IsTextureValid(state->secondaryAssetTexture))return false;
-        glBindTexture(GL_TEXTURE_2D,state->secondaryAssetTexture.id);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
-        glBindTexture(GL_TEXTURE_2D,0);
+        state->secondaryVersion=texture->secondaryVersion;
     }
-    state->secondaryVersion=texture->secondaryVersion;return true;
+    if(state->tertiaryVersion!=texture->tertiaryVersion){
+        if(IsTextureValid(state->tertiaryAssetTexture))
+            UnloadTexture(state->tertiaryAssetTexture);
+        state->tertiaryAssetTexture=(Texture2D){0};
+        if(texture->tertiary&&
+           texture->tertiarySource==MICROFX_GPU_TEXTURE_ASSET){
+            Image image=LoadImage(texture->tertiaryAssetPath);
+            if(!IsImageValid(image)){
+                fprintf(stderr,"MICROFX_GPU_TEXTURE failed to load tertiary asset: %s\n",
+                        texture->tertiaryAssetPath);return false;
+            }
+            state->tertiaryAssetTexture=LoadTextureFromImage(image);UnloadImage(image);
+            if(!IsTextureValid(state->tertiaryAssetTexture))return false;
+            glBindTexture(GL_TEXTURE_2D,state->tertiaryAssetTexture.id);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+            glBindTexture(GL_TEXTURE_2D,0);
+        }
+        state->tertiaryVersion=texture->tertiaryVersion;
+    }
+    return true;
 }
 
 bool MicroFxGpuTextureRendererUpdate(MicroFxGpuTextureRenderer *renderer,
@@ -231,7 +263,8 @@ static bool EnsureCache(MicroFxGpuTextureRenderState *state,int width,int height
 static void DrawPass(const MicroFxGpuTextureRenderer *renderer,
                      const MicroFxGpuTextureRenderState *state,
                      const MicroFxGpuTexture *texture,Texture2D source,
-                     Texture2D secondary,int width,int height,bool custom,
+                     Texture2D secondary,Texture2D tertiary,
+                     int width,int height,bool custom,
                      bool blend,float time)
 {
     GLuint program=custom?state->program:renderer->defaultProgram;
@@ -244,6 +277,10 @@ static void DrawPass(const MicroFxGpuTextureRenderer *renderer,
         if(texture->secondary){
             glUniform1i(state->secondaryTextureLocation,2);
             glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,secondary.id);
+        }
+        if(texture->tertiary){
+            glUniform1i(state->tertiaryTextureLocation,3);
+            glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D,tertiary.id);
         }
         if(state->fieldLocation>=0){
             glUniform1i(state->fieldLocation,1);glActiveTexture(GL_TEXTURE1);
@@ -302,6 +339,9 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
         if(texture->secondary&&texture->secondarySource==MICROFX_GPU_TEXTURE_MAP&&
            (texture->secondaryMapIndex<0||
             texture->secondaryMapIndex>=scene->tileMapCount))continue;
+        if(texture->tertiary&&texture->tertiarySource==MICROFX_GPU_TEXTURE_MAP&&
+           (texture->tertiaryMapIndex<0||
+            texture->tertiaryMapIndex>=scene->tileMapCount))continue;
         Texture2D source=texture->source==MICROFX_GPU_TEXTURE_MAP?
             MicroFxTileRendererTexture(tiles,texture->mapIndex):
             state->assetTexture;
@@ -311,6 +351,11 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
              MicroFxTileRendererTexture(tiles,texture->secondaryMapIndex):
              state->secondaryAssetTexture):(Texture2D){0};
         if(texture->secondary&&!IsTextureValid(secondary))continue;
+        Texture2D tertiary=texture->tertiary?
+            (texture->tertiarySource==MICROFX_GPU_TEXTURE_MAP?
+             MicroFxTileRendererTexture(tiles,texture->tertiaryMapIndex):
+             state->tertiaryAssetTexture):(Texture2D){0};
+        if(texture->tertiary&&!IsTextureValid(tertiary))continue;
         // Bake static background composition independently from final layer
         // opacity. Sun fades then blend two RGB565 caches without re-running
         // their multi-source shaders every frame.
@@ -323,14 +368,15 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
                 state->cachedParamVersion!=texture->paramVersion||
                 state->cachedFieldVersion!=texture->fieldVersion||
                 state->cachedSourceId!=source.id||
-                state->cachedSecondaryId!=secondary.id;
+                state->cachedSecondaryId!=secondary.id||
+                state->cachedTertiaryId!=tertiary.id;
             if(dirty){
                 GLint framebuffer=0,viewport[4]={0};
                 glGetIntegerv(GL_FRAMEBUFFER_BINDING,&framebuffer);
                 glGetIntegerv(GL_VIEWPORT,viewport);
                 glBindFramebuffer(GL_FRAMEBUFFER,state->cachedFramebuffer);
                 glViewport(0,0,width,height);
-                DrawPass(renderer,state,texture,source,secondary,width,height,
+                DrawPass(renderer,state,texture,source,secondary,tertiary,width,height,
                          state->program!=0,false,scene->time);
                 glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)framebuffer);
                 glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
@@ -339,6 +385,7 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
                 state->cachedFieldVersion=texture->fieldVersion;
                 state->cachedSourceId=source.id;
                 state->cachedSecondaryId=secondary.id;
+                state->cachedTertiaryId=tertiary.id;
                 state->cacheValid=true;
                 printf("MICROFX_GPU_TEXTURE cache_bake index=%d size=%dx%d\n",
                        i,width,height);fflush(stdout);
@@ -347,10 +394,11 @@ void MicroFxGpuTextureRendererDraw(MicroFxGpuTextureRenderer *renderer,
                 .height=height,.mipmaps=1,.format=PIXELFORMAT_UNCOMPRESSED_R5G6B5};
             DrawCachedPass(renderer,cached,texture->blend,texture->opacity);
         }else{
-            DrawPass(renderer,state,texture,source,secondary,width,height,
+            DrawPass(renderer,state,texture,source,secondary,tertiary,width,height,
                      state->program!=0,texture->blend,scene->time);
         }
     }
+    glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D,0);
     glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,0);
     glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,0);
     glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,0);
@@ -371,6 +419,8 @@ void MicroFxGpuTextureRendererDestroy(MicroFxGpuTextureRenderer *renderer,
         if(IsTextureValid(state->assetTexture))UnloadTexture(state->assetTexture);
         if(IsTextureValid(state->secondaryAssetTexture))
             UnloadTexture(state->secondaryAssetTexture);
+        if(IsTextureValid(state->tertiaryAssetTexture))
+            UnloadTexture(state->tertiaryAssetTexture);
     }
     for(int i=0;i<scene->gpuTextureCount;i++){
         free(scene->gpuTexture[i].fieldRgba);

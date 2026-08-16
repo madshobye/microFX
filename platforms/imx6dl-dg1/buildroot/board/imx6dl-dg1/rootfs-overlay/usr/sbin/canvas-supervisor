@@ -18,7 +18,6 @@ identity_library=${MICROFX_IDENTITY_LIBRARY:-/usr/lib/microfx/device-identity.sh
 }
 MICROFX_DATA_ROOT=${MICROFX_DATA_ROOT:-/data}
 MICROFX_RUN_ROOT=${MICROFX_RUN_ROOT:-/run}
-MICROFX_FACTORY_APP=${MICROFX_FACTORY_APP:-/usr/bin/canvas-demo}
 MICROFX_ONBOARDING_SCRIPT=${MICROFX_ONBOARDING_SCRIPT:-/usr/share/microfx/onboarding.js}
 MICROFX_ERROR_SCRIPT=${MICROFX_ERROR_SCRIPT:-/usr/share/microfx/error.js}
 MICROFX_HEALTH_SECONDS=${MICROFX_HEALTH_SECONDS:-2}
@@ -29,6 +28,7 @@ onboarding_marker=$MICROFX_RUN_ROOT/microfx-onboarding-shown
 benchmark_overrides=$MICROFX_RUN_ROOT/microfx-benchmark.env
 state_root=$MICROFX_DATA_ROOT/state
 apps_root=$MICROFX_DATA_ROOT/apps
+runtime_app=${MICROFX_RUNTIME_APP:-$apps_root/current-runtime/canvas-demo}
 
 apply_benchmark_overrides() {
     [ -r "$benchmark_overrides" ] || return 0
@@ -83,7 +83,7 @@ wait_for_activation_request() {
         echo "Starting project error application" >>"$log"
         MICROFX_SCRIPT="$MICROFX_ERROR_SCRIPT" \
         MICROFX_ERROR_DETAIL="$error_detail" \
-          "$MICROFX_FACTORY_APP" >>"$log" 2>&1 &
+          "$runtime_app" >>"$log" 2>&1 &
         child=$!
     fi
     while :; do
@@ -116,10 +116,12 @@ fi
 child=
 trap 'test -n "$child" && kill "$child" 2>/dev/null; exit 0' TERM INT
 
-onboarding_app=$MICROFX_FACTORY_APP
-data_available &&
-  [ -x "$apps_root/current-runtime/canvas-demo" ] &&
-  onboarding_app=$apps_root/current-runtime/canvas-demo
+onboarding_app=$runtime_app
+
+if ! data_available || [ ! -x "$runtime_app" ]; then
+    echo "Latest runtime is missing: $runtime_app; no fallback is configured" >>"$log"
+    exit 1
+fi
 
 if [ ! -e "$onboarding_marker" ] &&
    [ -x "$onboarding_app" ] &&
@@ -145,10 +147,7 @@ activation_project=
 renderer_log_start=0
 
 while :; do
-    app=$MICROFX_FACTORY_APP
-    data_available &&
-      [ -x "$apps_root/current-runtime/canvas-demo" ] &&
-      app=$apps_root/current-runtime/canvas-demo
+    app=$runtime_app
     renderer_log_start=$(wc -l "$log" 2>/dev/null | awk '{print $1}')
     case "$renderer_log_start" in ''|*[!0-9]*) renderer_log_start=0;; esac
     echo "Starting $app" >>"$log"

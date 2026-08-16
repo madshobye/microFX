@@ -36,6 +36,7 @@ stage_file "$OVERLAY/etc/fstab" etc/fstab 0644
 stage_file "$OVERLAY/etc/microfx.conf" etc/microfx.conf 0644
 stage_file "$OVERLAY/etc/microfx-release" etc/microfx-release 0644
 stage_file "$OVERLAY/etc/init.d/S39seedrng" etc/init.d/S39seedrng 0755
+stage_file "$OVERLAY/etc/init.d/S39data" etc/init.d/S39data 0755
 stage_file "$OVERLAY/etc/init.d/S40canvas" etc/init.d/S40canvas 0755
 stage_file "$OVERLAY/etc/init.d/S40provision" etc/init.d/S40provision 0755
 stage_file "$OVERLAY/etc/init.d/S45status" etc/init.d/S45status 0755

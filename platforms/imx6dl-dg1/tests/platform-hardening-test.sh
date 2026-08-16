@@ -22,7 +22,8 @@ microfx_assert_file_contains 'rm -f "${TARGET_DIR}/etc/init.d/S01seedrng"' "$ROO
 microfx_assert_file_contains 'rm -f "${TARGET_DIR}/etc/init.d/S80dnsmasq"' "$ROOT/buildroot/board/imx6dl-dg1/post-build.sh" "generic dnsmasq service removal"
 microfx_assert_file_contains 'MICROFX_PROVISIONING="${MICROFX_PROVISIONING:-0}"' "$OVERLAY/usr/sbin/canvas-supervisor" "onboarding provisioning policy"
 microfx_assert_file_contains 'provisioningEnabled.*MICROFX_PROVISIONING' "$REPO/apps/onboarding/scripts/main.js" "onboarding setup-network guard"
-microfx_assert_file_contains 'onboarding_app=.apps_root/current-runtime/canvas-demo' "$OVERLAY/usr/sbin/canvas-supervisor" "onboarding uses current runtime API"
+microfx_assert_file_contains 'runtime_app=.*apps_root/current-runtime/canvas-demo' "$OVERLAY/usr/sbin/canvas-supervisor" "supervisor has one current runtime"
+microfx_assert_file_contains 'no fallback is configured' "$OVERLAY/usr/sbin/canvas-supervisor" "missing runtime fails without fallback"
 
 mkdir -p "$TEMP/bin" "$TEMP/data/state" "$TEMP/run" "$TEMP/firmware/ath6k/AR6003/hw2.1.1"
 printf '/dev/mmcblk0p4 /data ext4 rw 0 0\n' >"$TEMP/mounts"

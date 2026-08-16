@@ -1144,6 +1144,13 @@
         else throw new TypeError("texture.secondary(source) expects a tile map or asset path");
         return object;
       },
+      tertiary(value) {
+        if (tileMaps.has(value)) fx._gpuTextureTertiaryMap(handle, value.handle);
+        else if (typeof value === "string")
+          fx._gpuTextureTertiaryAsset(handle, value);
+        else throw new TypeError("texture.tertiary(source) expects a tile map or asset path");
+        return object;
+      },
       params(values) {
         if (!Array.isArray(values) || values.length > 32 ||
             values.some(value => !Number.isFinite(Number(value)))) {

@@ -17,7 +17,6 @@ grep -q ' /data ' /proc/mounts || { echo "/data is not mounted" >&2; exit 1; }
 apps_root=/data/apps
 target=$apps_root/projects/$project
 stage=$apps_root/projects/.$project.update.$$
-backup=$apps_root/project-backups/$project/$update_id
 active=0
 log=/tmp/canvas.log
 log_start=0
@@ -28,7 +27,7 @@ fi
 
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT INT TERM
-mkdir -p "$stage" "$backup"
+mkdir -p "$stage"
 tar -xf "$archive" -C "$stage"
 [ -s "$stage/main.js" ] || { echo "Project has no main.js" >&2; exit 1; }
 [ -s "$stage/project.json" ] || { echo "Project has no project.json" >&2; exit 1; }
@@ -39,9 +38,7 @@ if [ "$active" = 1 ]; then
   /etc/init.d/S40canvas stop
 fi
 mkdir -p "$target"
-for path in main.js project.json assets; do
-  [ ! -e "$target/$path" ] || mv "$target/$path" "$backup/$path"
-done
+rm -rf "$target/main.js" "$target/project.json" "$target/assets"
 mv "$stage/main.js" "$target/main.js"
 mv "$stage/project.json" "$target/project.json"
 mv "$stage/assets" "$target/assets"
@@ -54,17 +51,10 @@ if [ "$active" = 1 ]; then
      sed -n "$((log_start + 1)),\$p" "$log" 2>/dev/null |
        grep -E 'MICROFX_JS_ERROR|[Ff]atal|fail-fast supervisor' >/dev/null; then
     /etc/init.d/S40canvas stop || true
-    mkdir -p "$backup/failed-new"
-    for path in main.js project.json assets; do
-      [ ! -e "$target/$path" ] || mv "$target/$path" "$backup/failed-new/$path"
-      [ ! -e "$backup/$path" ] || mv "$backup/$path" "$target/$path"
-    done
-    /etc/init.d/S40canvas start
-    echo "New project failed; restored prior files from $backup" >&2
+    echo "New project failed; rollback is disabled and the renderer remains stopped" >&2
     exit 1
   fi
 fi
 
 rm -f "$archive" "$0"
 echo "project\t$project"
-echo "backup\t$backup"

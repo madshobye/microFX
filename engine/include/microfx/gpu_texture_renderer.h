@@ -11,12 +11,15 @@ typedef struct {
     GLuint fieldTexture;
     Texture2D assetTexture;
     Texture2D secondaryAssetTexture;
+    Texture2D tertiaryAssetTexture;
     int shaderVersion;
     int secondaryVersion;
+    int tertiaryVersion;
     int fieldVersion;
     bool assetLoaded;
     GLint textureLocation;
     GLint secondaryTextureLocation;
+    GLint tertiaryTextureLocation;
     GLint fieldLocation;
     GLint fieldSizeLocation;
     GLint resolutionLocation;
@@ -31,6 +34,7 @@ typedef struct {
     int cachedFieldVersion;
     GLuint cachedSourceId;
     GLuint cachedSecondaryId;
+    GLuint cachedTertiaryId;
     bool cacheValid;
 } MicroFxGpuTextureRenderState;
 

@@ -422,7 +422,7 @@ int MicroFxSceneAddGpuMapTexture(MicroFxScene *scene,int mapIndex)
     int index=scene->gpuTextureCount++;
     scene->gpuTexture[index]=(MicroFxGpuTexture){.source=MICROFX_GPU_TEXTURE_MAP,
         .stage=MICROFX_GPU_TEXTURE_OVERLAY,.mapIndex=mapIndex,
-        .secondaryMapIndex=-1,.visible=true,
+        .secondaryMapIndex=-1,.tertiaryMapIndex=-1,.visible=true,
         .blend=true,.opacity=1.0f};
     return MICROFX_HANDLE_GPU_TEXTURE|index;
 }
@@ -435,7 +435,7 @@ int MicroFxSceneAddGpuAssetTexture(MicroFxScene *scene,const char *assetPath)
     MicroFxGpuTexture *texture=&scene->gpuTexture[index];
     *texture=(MicroFxGpuTexture){.source=MICROFX_GPU_TEXTURE_ASSET,
         .stage=MICROFX_GPU_TEXTURE_BACKGROUND,.mapIndex=-1,
-        .secondaryMapIndex=-1,.visible=true,.opacity=1.0f};
+        .secondaryMapIndex=-1,.tertiaryMapIndex=-1,.visible=true,.opacity=1.0f};
     snprintf(texture->assetPath,sizeof(texture->assetPath),"%s",assetPath);
     return MICROFX_HANDLE_GPU_TEXTURE|index;
 }
@@ -461,6 +461,29 @@ bool MicroFxSceneSetGpuTextureSecondaryAsset(MicroFxScene *scene,int handle,
     snprintf(texture->secondaryAssetPath,sizeof(texture->secondaryAssetPath),
              "%s",assetPath);
     texture->secondaryVersion++;texture->shaderVersion++;return true;
+}
+
+bool MicroFxSceneSetGpuTextureTertiaryMap(MicroFxScene *scene,int handle,
+                                          int mapIndex)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||mapIndex<0||mapIndex>=scene->tileMapCount)return false;
+    texture->tertiary=true;texture->tertiarySource=MICROFX_GPU_TEXTURE_MAP;
+    texture->tertiaryMapIndex=mapIndex;texture->tertiaryAssetPath[0]='\0';
+    texture->tertiaryVersion++;texture->shaderVersion++;return true;
+}
+
+bool MicroFxSceneSetGpuTextureTertiaryAsset(MicroFxScene *scene,int handle,
+                                            const char *assetPath)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||!assetPath||!assetPath[0]||
+       strlen(assetPath)>=MICROFX_MAX_ASSET_PATH)return false;
+    texture->tertiary=true;texture->tertiarySource=MICROFX_GPU_TEXTURE_ASSET;
+    texture->tertiaryMapIndex=-1;
+    snprintf(texture->tertiaryAssetPath,sizeof(texture->tertiaryAssetPath),
+             "%s",assetPath);
+    texture->tertiaryVersion++;texture->shaderVersion++;return true;
 }
 
 bool MicroFxSceneSetGpuTextureShader(MicroFxScene *scene,int handle,

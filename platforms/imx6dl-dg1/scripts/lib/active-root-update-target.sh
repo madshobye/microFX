@@ -44,6 +44,7 @@ etc/fstab
 etc/microfx.conf
 etc/microfx-release
 etc/init.d/S39seedrng
+etc/init.d/S39data
 etc/init.d/S40canvas
 etc/init.d/S40provision
 etc/init.d/S45status
@@ -84,6 +85,7 @@ done
 
 for path in \
   etc/init.d/S39seedrng \
+  etc/init.d/S39data \
   etc/init.d/S40canvas \
   etc/init.d/S40provision \
   etc/init.d/S45status \

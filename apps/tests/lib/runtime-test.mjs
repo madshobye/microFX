@@ -116,6 +116,12 @@ function instrumentedNativeFx(root, capacities) {
     _gpuTextureSecondaryAsset(handle, path) {
       assert.equal(handle, 0x07000000);assert.match(path, /^assets\//);
     },
+    _gpuTextureTertiaryMap(handle, mapHandle) {
+      assert.equal(handle, 0x07000000);assert.equal(mapHandle, 0);
+    },
+    _gpuTextureTertiaryAsset(handle, path) {
+      assert.equal(handle, 0x07000000);assert.match(path, /^assets\//);
+    },
     _gpuTextureShader(handle, path) {
       assert.equal(handle, 0x07000000);assert.match(path, /^assets\//);
       assert.ok(readFileSync(resolve(root, path)).byteLength > 0);
