@@ -10,6 +10,8 @@ fail() {
 
 for path in \
   "$ROOT/scripts/build.sh" \
+  "$ROOT/scripts/build-linux.sh" \
+  "$ROOT/scripts/build-graphics.sh" \
   "$ROOT/scripts/install-full-sd.sh" \
   "$ROOT/buildroot/configs/imx6dl_dg1_defconfig" \
   "$ROOT/buildroot/board/imx6dl-dg1/post-build.sh"; do

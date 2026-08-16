@@ -124,8 +124,20 @@ Run the portable gate first, then build the target image:
 ```sh
 ./tests/run.sh
 cd platforms/imx6dl-dg1
-./scripts/build.sh
+./scripts/build-linux.sh
 ```
+
+For ordinary renderer, engine, shader, or JavaScript development, preserve the
+Linux build and compile only the deployable graphics runtime:
+
+```sh
+./scripts/build-graphics.sh
+./scripts/canvas-upload.sh 192.168.3.109
+```
+
+`build-linux.sh --clean` archives the existing VM output as a timestamped
+`microfx-imx6dl-output.cache-*` directory before starting fresh. It does not
+delete the prior cache. The old ambiguous `build.sh` command is disabled.
 
 Outputs are ignored and written under `artifacts/`:
 
@@ -226,8 +238,10 @@ read again from the device.
 | Script | Purpose | Writes device state |
 | --- | --- | --- |
 | `setup-build-vm.sh` | Reproducibly create/provision the pinned Lima VM | No |
-| `test-vm.sh` | Cross-build the engine/app from the current checkout | No |
-| `build.sh` | Produce and checksum the complete root image | No |
+| `test-vm.sh` | Alias for the cache-preserving graphics smoke build | No |
+| `build-graphics.sh` | Build raylib and the deployable graphics/runtime packages | No |
+| `build-linux.sh` | Produce and checksum the complete root image | No |
+| `build.sh` | Disabled chooser that explains the two explicit workflows | No |
 | `canvas-ssh.sh` | Key-only SSH wrapper | Only the supplied command |
 | `canvas-upload.sh` | Atomic application release build/upload | `/data/apps` |
 | `project-upload.sh` | Backed-up demo project/API and asset update | `/data/apps/projects` |

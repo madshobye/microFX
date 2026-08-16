@@ -21,6 +21,15 @@ for (const root of roots) {
       `${script}: asset escapes project: ${match[1]}`);
     assert.equal(existsSync(absolute), true, `${script}: missing ${match[1]}`);
   }
+  for (const match of source.matchAll(/\.shader\(\s*["']([^"']+)["']/g)) {
+    const requested = normalize(match[1]);
+    assert.equal(requested.startsWith("assets/") && !requested.includes(".."), true,
+      `${script}: unsafe shader path ${match[1]}`);
+    const absolute = resolve(root, requested);
+    assert.equal(relative(resolve(root, "assets"), absolute).startsWith(".."), false,
+      `${script}: shader escapes project: ${match[1]}`);
+    assert.equal(existsSync(absolute), true, `${script}: missing ${match[1]}`);
+  }
 }
 
 console.log("bundled asset reference tests passed");

@@ -7,6 +7,11 @@
 
 typedef struct { float position[2]; float uv[2]; } TileVertex;
 
+static const char *TileVertexSource=
+    "#version 100\nprecision highp float;attribute vec2 aPosition;"
+    "attribute vec2 aUv;varying mediump vec2 vUv;"
+    "void main(){gl_Position=vec4(aPosition,0.0,1.0);vUv=aUv;}\n";
+
 static GLuint Compile(GLenum type,const char *source)
 {
     GLuint shader=glCreateShader(type);glShaderSource(shader,1,&source,NULL);
@@ -18,25 +23,35 @@ static GLuint Compile(GLenum type,const char *source)
     return shader;
 }
 
+static GLuint LinkProgram(const char *fragmentSource)
+{
+    GLuint vertex=Compile(GL_VERTEX_SHADER,TileVertexSource);
+    GLuint fragment=Compile(GL_FRAGMENT_SHADER,fragmentSource);
+    if(!vertex||!fragment){
+        if(vertex)glDeleteShader(vertex);if(fragment)glDeleteShader(fragment);
+        return 0;
+    }
+    GLuint program=glCreateProgram();glAttachShader(program,vertex);
+    glAttachShader(program,fragment);glBindAttribLocation(program,0,"aPosition");
+    glBindAttribLocation(program,1,"aUv");glLinkProgram(program);
+    glDeleteShader(vertex);glDeleteShader(fragment);GLint linked=GL_FALSE;
+    glGetProgramiv(program,GL_LINK_STATUS,&linked);
+    if(!linked){
+        char log[1024]={0};glGetProgramInfoLog(program,sizeof(log),NULL,log);
+        fprintf(stderr,"MICROFX_TILE shader link failure: %s\n",log);
+        glDeleteProgram(program);return 0;
+    }
+    return program;
+}
+
 bool MicroFxTileRendererInit(MicroFxTileRenderer *renderer)
 {
     *renderer=(MicroFxTileRenderer){0};
-    static const char *vs=
-        "#version 100\nprecision highp float;attribute vec2 aPosition;"
-        "attribute vec2 aUv;varying mediump vec2 vUv;"
-        "void main(){gl_Position=vec4(aPosition,0.0,1.0);vUv=aUv;}\n";
     static const char *fs=
         "#version 100\nprecision mediump float;varying mediump vec2 vUv;"
         "uniform sampler2D uTexture;"
         "void main(){gl_FragColor=texture2D(uTexture,vUv);}\n";
-    GLuint vertex=Compile(GL_VERTEX_SHADER,vs),fragment=Compile(GL_FRAGMENT_SHADER,fs);
-    if(!vertex||!fragment)return false;
-    renderer->program=glCreateProgram();glAttachShader(renderer->program,vertex);
-    glAttachShader(renderer->program,fragment);
-    glBindAttribLocation(renderer->program,0,"aPosition");
-    glBindAttribLocation(renderer->program,1,"aUv");glLinkProgram(renderer->program);
-    glDeleteShader(vertex);glDeleteShader(fragment);GLint linked=GL_FALSE;
-    glGetProgramiv(renderer->program,GL_LINK_STATUS,&linked);if(!linked)return false;
+    renderer->program=LinkProgram(fs);if(!renderer->program)return false;
     renderer->textureLocation=glGetUniformLocation(renderer->program,"uTexture");
     const TileVertex vertices[6]={
         {{-1,1},{0,0}},{{1,1},{1,0}},{{1,-1},{1,1}},
@@ -57,6 +72,15 @@ static float ClampUnit(float value)
 static unsigned char ColorByte(float value)
 {
     return (unsigned char)(ClampUnit(value)*255.0f+0.5f);
+}
+
+static const char *EncodedImageType(const unsigned char *data,size_t size)
+{
+    static const unsigned char pngSignature[8]={137,80,78,71,13,10,26,10};
+    if(size>=sizeof(pngSignature)&&
+       memcmp(data,pngSignature,sizeof(pngSignature))==0)return ".png";
+    if(size>=3&&data[0]==0xff&&data[1]==0xd8&&data[2]==0xff)return ".jpg";
+    return NULL;
 }
 
 static bool BakeFilter(Image *image,const MicroFxTileMap *map,bool neutralRgb565)
@@ -110,14 +134,17 @@ bool MicroFxTileRendererUpdate(MicroFxTileRenderer *renderer,MicroFxScene *scene
         for(int i=0;i<map->tileCount&&processed<4;i++){
             MicroFxTileMapTile *tile=&map->tiles[i];
             if(!tile->received||tile->consumed)continue;
-            Image image=LoadImageFromMemory(".png",tile->encoded,(int)tile->encodedSize);
+            const char *imageType=EncodedImageType(tile->encoded,tile->encodedSize);
+            Image image=imageType?LoadImageFromMemory(imageType,tile->encoded,
+                                                       (int)tile->encodedSize):
+                                  (Image){0};
             if(IsImageValid(image)){
                 Rectangle source={0,0,(float)image.width,(float)image.height};
                 float left=floorf(tile->x),top=floorf(tile->y);
                 float right=ceilf(tile->x+tile->size),bottom=ceilf(tile->y+tile->size);
                 Rectangle target={left,top,right-left,bottom-top};
                 ImageDraw(&state->staging,image,source,target,WHITE);UnloadImage(image);
-            }else fprintf(stderr,"MICROFX_TILE ignored invalid PNG tile %d/%d\n",
+            }else fprintf(stderr,"MICROFX_TILE ignored invalid PNG/JPEG tile %d/%d\n",
                           i,map->tileCount);
             free(tile->encoded);tile->encoded=NULL;tile->encodedSize=0;
             tile->consumed=true;state->decodedCount++;processed++;
@@ -149,21 +176,32 @@ bool MicroFxTileRendererUpdate(MicroFxTileRenderer *renderer,MicroFxScene *scene
 void MicroFxTileRendererDraw(MicroFxTileRenderer *renderer,const MicroFxScene *scene)
 {
     if(!renderer->program)return;
-    glUseProgram(renderer->program);glUniform1i(renderer->textureLocation,0);
     glBindBuffer(GL_ARRAY_BUFFER,renderer->vertexBuffer);
     glEnableVertexAttribArray(0);glEnableVertexAttribArray(1);
     glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(TileVertex),(void *)offsetof(TileVertex,position));
     glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,sizeof(TileVertex),(void *)offsetof(TileVertex,uv));
     glDisable(GL_CULL_FACE);glDisable(GL_DEPTH_TEST);glDepthMask(GL_FALSE);glDisable(GL_BLEND);
-    glActiveTexture(GL_TEXTURE0);
     for(int i=0;i<scene->tileMapCount;i++){
         const MicroFxTileMap *map=&scene->tileMap[i];
-        Texture2D texture=renderer->maps[i].active;
+        MicroFxTileMapRenderState *state=&renderer->maps[i];
+        Texture2D texture=state->active;
         if(!map->visible||!IsTextureValid(texture))continue;
+        glUseProgram(renderer->program);
+        glUniform1i(renderer->textureLocation,0);
+        glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D,texture.id);glDrawArrays(GL_TRIANGLES,0,6);
     }
-    glBindTexture(GL_TEXTURE_2D,0);glDisableVertexAttribArray(0);
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,0);
+    glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);glBindBuffer(GL_ARRAY_BUFFER,0);glUseProgram(0);
+}
+
+Texture2D MicroFxTileRendererTexture(const MicroFxTileRenderer *renderer,
+                                     int mapIndex)
+{
+    if(!renderer||mapIndex<0||mapIndex>=MICROFX_MAX_TILE_MAPS)
+        return (Texture2D){0};
+    return renderer->maps[mapIndex].active;
 }
 
 void MicroFxTileRendererDestroy(MicroFxTileRenderer *renderer,MicroFxScene *scene)

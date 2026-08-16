@@ -46,9 +46,11 @@ path builds static mesh VBO data and updates object transforms/colors through
 uniforms. GLES 2 safely accommodates 16 mesh objects per uniform batch; larger
 scenes are divided into adjacent batches and at project-shader boundaries.
 Lighting in the embedded default shader is per vertex.
-Cube outlines are baked into the same VBO. Per-fragment procedural outlines,
-separate line passes and full-screen layered effects have all exceeded the frame
-budget on this GPU.
+Cube outlines are baked into the same VBO. Per-fragment procedural outlines and
+separate line passes have exceeded the frame budget on this GPU. A bounded
+single-pass GPU texture shader can combine a cached map or image with one small
+RGBA data field; treat additional full-screen passes and high-octave fragment effects as
+experiments that require target profiling.
 
 QuickJS is statically embedded with a 32 MiB heap limit and 512 KiB stack. The
 implemented JS API uses a cheap retained quad/geometry batch for ordinary
@@ -186,11 +188,20 @@ name is selected by `VM_NAME`, then ignored `private/build-vm`, then the
 cd platforms/imx6dl-dg1
 ./scripts/setup-build-vm.sh
 ./scripts/test-vm.sh
-./scripts/build.sh
+./scripts/build-graphics.sh
+./scripts/build-linux.sh
 ./scripts/canvas-upload.sh 192.168.3.109
 ./scripts/canvas-ssh.sh 192.168.3.109
 ./scripts/canvas-screenshot.sh 192.168.3.109
 ```
+
+Use `build-graphics.sh` for normal engine, renderer, shader, and embedded
+JavaScript changes. It rebuilds only raylib and the microFX runtime and refuses
+to alter or invalidate the Linux Buildroot cache. Use `build-linux.sh` only
+when producing a complete root-filesystem image. Its `--clean` option preserves
+the old output directory under a timestamped `.cache-*` name before creating a
+fresh build; it never deletes the cache. The ambiguous `build.sh` entry point
+is intentionally disabled and prints these choices.
 
 Run shell syntax checks and a full Buildroot build before firmware commits.
 Application changes should be uploaded transactionally and verified from

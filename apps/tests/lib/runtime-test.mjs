@@ -106,6 +106,33 @@ function instrumentedNativeFx(root, capacities) {
     _tileMapTile() {},
     _tileMapVisible() {},
     _tileMapReady() { return true; },
+    _gpuTextureMap(handle) { assert.equal(handle, 0);return 0x07000000; },
+    _gpuTextureAsset(path) {
+      assert.match(path, /^assets\//);return 0x07000000;
+    },
+    _gpuTextureSecondaryMap(handle, mapHandle) {
+      assert.equal(handle, 0x07000000);assert.equal(mapHandle, 0);
+    },
+    _gpuTextureSecondaryAsset(handle, path) {
+      assert.equal(handle, 0x07000000);assert.match(path, /^assets\//);
+    },
+    _gpuTextureShader(handle, path) {
+      assert.equal(handle, 0x07000000);assert.match(path, /^assets\//);
+      assert.ok(readFileSync(resolve(root, path)).byteLength > 0);
+    },
+    _gpuTextureParams(handle, values) {
+      assert.equal(handle, 0x07000000);assert.ok(Array.isArray(values));
+      finite("texture params", values);
+    },
+    _gpuTextureField(handle, width, height, buffer) {
+      assert.equal(handle, 0x07000000);assert.ok(width > 0 && width <= 64);
+      assert.ok(height > 0 && height <= 64);
+      assert.equal(buffer.byteLength, width * height * 4);
+    },
+    _gpuTextureStage() {},
+    _gpuTextureBlend() {},
+    _gpuTextureOpacity() {},
+    _gpuTextureVisible() {},
     _cacheRead() { return null; },
     _cacheWrite() { return true; },
     _netUdpOpen() { return 1; },

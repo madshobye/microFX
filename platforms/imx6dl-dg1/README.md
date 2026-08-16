@@ -3,7 +3,8 @@
 This directory is the microFX platform adapter for the i.MX6 DualLite DG1
 profile. It combines Buildroot, mainline Linux, Mesa/Etnaviv, DRM/KMS,
 OpenGL ES 2, raylib, the microFX engine, and the optional network services into
-a boot-to-HDMI appliance image.
+a boot-to-HDMI appliance image. It is the authoritative general-development setup;
+the independent bootloader work remains an isolated prototype.
 
 The current adapter uses the board's four-partition SD layout:
 
@@ -23,7 +24,7 @@ On macOS install `lima`, `e2fsprogs`, and `dtc`, then run:
 ```sh
 ./scripts/setup-build-vm.sh
 ./scripts/test-vm.sh
-./scripts/build.sh
+./scripts/build-linux.sh
 ```
 
 The mount-free Lima VM uses Buildroot 2025.02.16. `setup-build-vm.sh` creates
@@ -36,8 +37,15 @@ Generated files go in the ignored `artifacts/` directory. The main output,
 For a faster compile-only check run:
 
 ```sh
-./scripts/test-vm.sh
+./scripts/build-graphics.sh
 ```
+
+This is the normal development path for engine, renderer, raylib backend,
+shader, and embedded JavaScript changes. It preserves the Linux cache and does
+not generate a root image. `build-linux.sh` is the explicit complete-image
+workflow. `build-linux.sh --clean` moves the existing output to a timestamped
+cache backup instead of deleting it. The ambiguous `build.sh` entry point is
+disabled.
 
 The VM verifies the ARM build and package graph. DRM page flips, HDMI modes,
 Etnaviv behavior, SDIO Wi-Fi, and the device tree still require physical
@@ -46,7 +54,7 @@ hardware testing.
 ## Experimental mappings
 
 The custom bootloader files in `bootloader/` are an isolated prototype. They
-are not inputs to `build.sh`, the Buildroot configuration, the SD installers,
+are not inputs to `build-linux.sh`, the Buildroot configuration, the SD installers,
 or the runtime supervisor. The existing boot chain and single Etnaviv OpenGL ES
 render path remain authoritative. Hardware validation gates are recorded in
 [`HARDWARE-VALIDATION.md`](HARDWARE-VALIDATION.md).
@@ -201,10 +209,11 @@ and retrieve a screenshot with:
 ./scripts/canvas-profile.sh 192.168.3.109 off
 ```
 
-Uploads stage below `/data/apps/incoming`, verify SHA-256, and atomically select
-the new release. The default `CANVAS_FAIL_FAST=1` stops when an application
-fails instead of silently restoring another revision. SSH remains independent
-for diagnosis.
+Uploads stage below `/data/apps/incoming`, verify SHA-256, and replace the single
+fixed `/data/apps/runtime` directory. No dated or previous runtime is retained,
+and there is no previous-release rollback target. A failed pending runtime
+stops loudly while SSH and the factory error renderer remain independent for
+diagnosis.
 
 `install-active-root-ssh.sh` is the narrow development-only exception for
 updating tested init/configuration hardening without rewriting an SD card. It

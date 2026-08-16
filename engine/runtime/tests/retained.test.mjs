@@ -302,6 +302,36 @@ test("rgba clamps and packs channels as RRGGBBAA", () => {
   assert.equal(fx.rgba(1, 2, 3, 4), 0x01020304);
 });
 
+test("asset loading separates required gates from lazy progress", async () => {
+  const { fx, calls } = runtime();
+  let requiredReady = false;
+  let lazyReady = false;
+  const resource = ready => ({
+    isReady: ready,
+    ready: () => Promise.resolve(true)
+  });
+  const required = resource(() => requiredReady);
+  const lazy = resource(() => lazyReady);
+  const loading = fx.assets.load({
+    required: [required], lazy: [lazy], settleFrames: 2, loading: true
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(loading.update())), {
+    requiredReady: 0, requiredTotal: 1, lazyReady: 0, lazyTotal: 1,
+    sourcesReady: false, ready: false
+  });
+  requiredReady = true;
+  assert.equal(loading.update(0.4).ready, false);
+  assert.match(calls.filter(call => call[0] === "_setText").at(-1)[2],
+               /^LOADING 1 \/ 1\./);
+  assert.equal(loading.update(0.8).ready, true);
+  assert.equal(loading.status().lazyReady, 0);
+  lazyReady = true;
+  assert.equal(loading.status().lazyReady, 1);
+  assert.equal(loading.status().ready, true);
+  await loading.ready();
+  assert.throws(() => fx.assets.load({ required: [{}] }), /isReady/);
+});
+
 test("feed caches one bounded platform snapshot per activation", () => {
   const { fx } = runtime();
   let reads = 0;

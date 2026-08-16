@@ -125,6 +125,37 @@ int main(void)
            scene.tileMap[0].tiles[0].encodedSize==sizeof(png));
     assert(MicroFxSceneSetTileMapVisible(&scene,tileMap,false));
     assert(!scene.tileMap[0].visible);
+    int gpuTexture=MicroFxSceneAddGpuMapTexture(&scene,tileMap);
+    assert((gpuTexture&MICROFX_HANDLE_KIND_MASK)==MICROFX_HANDLE_GPU_TEXTURE);
+    assert(MicroFxSceneSetGpuTextureShader(&scene,gpuTexture,
+                                           "/project/assets/shaders/map.fs"));
+    assert(scene.gpuTexture[0].shaderVersion==1);
+    assert(MicroFxSceneSetGpuTextureSecondaryMap(&scene,gpuTexture,tileMap));
+    assert(scene.gpuTexture[0].secondary&&
+           scene.gpuTexture[0].secondaryMapIndex==tileMap&&
+           scene.gpuTexture[0].shaderVersion==2);
+    assert(MicroFxSceneSetGpuTextureSecondaryAsset(
+        &scene,gpuTexture,"/project/assets/night.png"));
+    assert(scene.gpuTexture[0].secondarySource==MICROFX_GPU_TEXTURE_ASSET&&
+           strcmp(scene.gpuTexture[0].secondaryAssetPath,
+                  "/project/assets/night.png")==0);
+    const float mapParams[]={1,2,3,4,5};
+    assert(MicroFxSceneSetGpuTextureParams(&scene,gpuTexture,mapParams,5));
+    assert(scene.gpuTexture[0].paramCount==5&&scene.gpuTexture[0].params[4]==5);
+    const uint8_t field[]={1,2,3,4,5,6,7,8};
+    assert(MicroFxSceneSetGpuTextureField(&scene,gpuTexture,2,1,field,sizeof(field)));
+    assert(scene.gpuTexture[0].fieldWidth==2&&
+           scene.gpuTexture[0].fieldHeight==1&&
+           scene.gpuTexture[0].fieldRgba[7]==8);
+    assert(!MicroFxSceneSetGpuTextureField(&scene,gpuTexture,65,1,
+                                            field,sizeof(field)));
+    assert(MicroFxSceneSetGpuTextureStage(&scene,gpuTexture,
+                                           MICROFX_GPU_TEXTURE_BACKGROUND));
+    assert(MicroFxSceneSetGpuTextureBlend(&scene,gpuTexture,false));
+    assert(!scene.gpuTexture[0].blend);
+    assert(MicroFxSceneSetGpuTextureOpacity(&scene,gpuTexture,0.35f));
+    assert(scene.gpuTexture[0].opacity==0.35f);
+    assert(!MicroFxSceneSetGpuTextureOpacity(&scene,gpuTexture,1.1f));
     assert(MicroFxSceneBeginTileMap(&scene,tileMap,2,1));
     assert(!scene.imageDirty);
     assert(MicroFxSceneSetOpacity(&scene,image,0.5f));

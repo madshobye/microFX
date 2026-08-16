@@ -116,16 +116,6 @@ fi
 child=
 trap 'test -n "$child" && kill "$child" 2>/dev/null; exit 0' TERM INT
 
-rollback() {
-    if [ -L "$apps_root/previous-runtime" ]; then
-        previous=$(readlink "$apps_root/previous-runtime")
-        ln -s "$previous" "$apps_root/current-runtime.new"
-        mv -Tf "$apps_root/current-runtime.new" "$apps_root/current-runtime"
-        echo "Rolled back canvas application to $previous" >>"$log"
-    fi
-    rm -f "$state_root/app-pending"
-}
-
 onboarding_app=$MICROFX_FACTORY_APP
 data_available &&
   [ -x "$apps_root/current-runtime/canvas-demo" ] &&
@@ -206,13 +196,8 @@ while :; do
             child=
             rm -f "$state_root/app-pending"
             echo "Canvas pending release failed its health window" >>"$log"
-            if [ "$CANVAS_FAIL_FAST" = "1" ]; then
-                echo "Fail-fast enabled; canvas supervisor is stopping" >>"$log"
-                exit 1
-            fi
-            rollback
-            sleep 1
-            continue
+            echo "Runtime rollback is disabled; canvas supervisor is stopping" >>"$log"
+            exit 1
         fi
     fi
 

@@ -1,7 +1,7 @@
 # Independent boot prototype
 
 This directory is an isolated feasibility prototype. It is deliberately not
-connected to the normal Buildroot configuration or `build.sh`, and nothing in
+connected to the normal Buildroot configuration or `build-linux.sh`, and nothing in
 this directory is installed by the development SD-card scripts.
 
 ## Proposed boot chain

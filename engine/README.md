@@ -117,8 +117,20 @@ relative offset. Both are fluent and return the same object.
 | `configure(settings)` | Set startup output/FPS policy from the application |
 | `fetch(url, { headers })` / `fx.net.fetch(url, { headers })` | Non-blocking HTTP(S) GET with optional request headers and text, JSON, and ArrayBuffer responses |
 | `tileMap(options)` | Cached XYZ raster map with Mercator projection and a GPU color filter |
+| `maps.earth(options)` | Aligned worldwide Esri daytime and fixed-date NASA Black Marble night maps |
+| `assets.load({required,lazy,settleFrames})` | Track blocking and lazy resources with bounded GPU-cache warmup frames |
 | `tileMap.project(lon,lat)` | Project geographic coordinates into the design canvas |
+| `tileMap.unproject(x,y)` | Convert a design-canvas point back to longitude and latitude |
 | `tileMap.center(...)` / `zoom(...)` | Atomically prepare a replacement map texture |
+| `texture(tileMapOrAssetPath)` | Expose a cached map or image asset as a reusable GPU texture layer |
+| `texture.secondary(tileMapOrAssetPath)` | Bind one additional cached image as shader uniform `uTexture2` |
+| `texture.shader(fragmentPath)` | Apply a project-local GLES2 fragment shader to that GPU texture |
+| `texture.field(width,height,rgbaBytes)` | Attach one bounded RGBA data texture of at most 64×64 cells |
+| `texture.params(values)` | Update up to 32 finite shader parameters without rebuilding textures |
+| `texture.stage("background"|"overlay")` | Place the texture below or above retained scene geometry |
+| `texture.blend(boolean)` | Select source-alpha composition (`true`) or opaque replacement (`false`) |
+| `texture.opacity(value)` | Composite cached texture opacity from 0 to 1 without rebaking its shader |
+| `fx.geo.sunPosition(date,latitude,longitude)` | Calculate world-wide solar elevation, azimuth, east/north direction, and daylight state |
 | `cache.read(...)` / `write(...)` | Bounded persistent binary cache used by tile sources and apps |
 | `fx.net.udp.open(options)` | Open a non-blocking UDP socket with byte-oriented send/message helpers |
 | `fx.net.tcp.connect(options)` | Open a non-blocking TCP client |
@@ -237,6 +249,39 @@ must provide `aPosition`, `aNormal`, and `aObject`, and the uniforms `uView`,
 syntax and match any varyings emitted by the vertex shader. Missing files,
 compile failures, and an incomplete required contract are fatal and visible;
 the runtime never silently substitutes a different project shader.
+
+A GPU-texture fragment shader is a bounded full-screen texture pass. Its source
+may be a cached tile map or an image asset. It must use GLES 2 syntax and
+declare `uTexture`; the engine also supplies optional
+`uTexture2`, `uField`, `uFieldSize`, `uResolution`, `uTime`, and `uParams[8]`
+uniforms. `uTexture2` is bound only after calling `texture.secondary()`.
+`texture.field()` uploads exactly `width * height * 4` bytes and uses nearest
+sampling so the shader owns interpolation. The composed map remains a single
+cached 1920×1080 texture; field and parameter updates never decode or rebuild
+map tiles. Transparent overlay textures allow maps, transit symbols, weather,
+and interface elements to remain independently ordered. Missing shaders,
+compilation failures, oversized fields, and excess parameters fail visibly
+rather than falling back to an unshaded texture.
+
+Startup asset policy is explicit. Resources in `required` block an
+application-defined loading cover; `lazy` resources are counted but never
+block. Both must expose `isReady()` and `ready()`. `settleFrames` keeps the
+cover visible for a bounded number of rendered frames after the sources become
+ready, allowing an assembled full-screen GPU cache to bake behind it.
+
+```js
+const startup = fx.assets.load({
+  required: [earth.day, earth.night],
+  lazy: [],
+  settleFrames: 2,
+  loading: true
+});
+const state = startup.update(time);
+```
+
+`loading: true` uses the engine's neutral animated progress cover. Pass an
+options object with `label`, `x`, `y`, `size`, `color`, and `antialias` to tune
+its retained text without rebuilding loading behavior in each project.
 
 The text renderer caches at most four faces, including the built-in default,
 and preserves scene order by batching only adjacent strings that share a face.

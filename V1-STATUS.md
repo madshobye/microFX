@@ -45,7 +45,7 @@ data mount, client Wi-Fi, SSH, Peer bridge, and graphics startup on hardware.
 
 ```sh
 ./tests/run.sh
-./platforms/imx6dl-dg1/scripts/build.sh
+./platforms/imx6dl-dg1/scripts/build-linux.sh
 ```
 
 The first command is the host verification gate. The second produces the

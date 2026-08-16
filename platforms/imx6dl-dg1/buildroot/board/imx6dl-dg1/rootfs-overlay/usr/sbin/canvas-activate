@@ -10,7 +10,9 @@ case "$release" in
 esac
 
 incoming=/data/apps/incoming/$release
-destination=/data/apps/releases/$release
+runtime=/data/apps/runtime
+staged=/data/apps/runtime.new
+retired=/data/apps/runtime.retired
 
 grep -q ' /data ' /proc/mounts || { echo "/data is not mounted" >&2; exit 1; }
 [ -d "$incoming" ] || { echo "Missing incoming release: $release" >&2; exit 1; }
@@ -18,18 +20,22 @@ grep -q ' /data ' /proc/mounts || { echo "/data is not mounted" >&2; exit 1; }
 [ -f "$incoming/manifest.sha256" ] || { echo "Release has no manifest" >&2; exit 1; }
 
 (cd "$incoming" && sha256sum -c manifest.sha256)
-[ ! -e "$destination" ] || { echo "Release already exists: $release" >&2; exit 1; }
 
-if [ -L /data/apps/current-runtime ]; then
-    current=$(readlink /data/apps/current-runtime)
-    ln -s "$current" /data/apps/previous-runtime.new
-    mv -Tf /data/apps/previous-runtime.new /data/apps/previous-runtime
-fi
+rm -rf "$staged" "$retired"
+mv "$incoming" "$staged"
 
-mv "$incoming" "$destination"
-ln -s "$destination" /data/apps/current-runtime.new
+# Stop only after the replacement is complete and verified. The fixed runtime
+# directory is then replaced in one short transition; no dated or previous
+# runtime is retained on the data partition.
+/etc/init.d/S40canvas stop
+[ ! -e "$runtime" ] || mv "$runtime" "$retired"
+mv "$staged" "$runtime"
+rm -f /data/apps/current-runtime /data/apps/current-runtime.new
+ln -s "$runtime" /data/apps/current-runtime.new
 mv -Tf /data/apps/current-runtime.new /data/apps/current-runtime
+rm -f /data/apps/previous-runtime /data/apps/previous-runtime.new
+rm -rf "$retired" /data/apps/releases /data/apps/incoming/*
 touch /data/state/app-pending
 sync
-/etc/init.d/S40canvas restart
-echo "Activated canvas release $release"
+/etc/init.d/S40canvas start
+echo "Activated canvas runtime $release"

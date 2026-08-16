@@ -12,11 +12,14 @@ function networkContext() {
   const callbacks = new Map();
   const sends = [];
   const tiles = [];
+  const passes = [];
   const requests = [];
+  const cacheReads = [];
   let nextHandle = 1;
   const fx = {
     width: 1920,
     height: 1080,
+    data: () => null,
     _netFetch: async (url, headers) => {
       requests.push({ url, headers });
       return { status: 200, url, body: '{"answer":42}',
@@ -43,12 +46,43 @@ function networkContext() {
     },
     _tileMapVisible() {},
     _tileMapReady: () => true,
-    _cacheRead: () => Uint8Array.from([1, 2, 3]).buffer,
-    _cacheWrite: () => true
+    _gpuTextureMap(map) { passes.push(["texture", map]);return 0x07000000; },
+    _gpuTextureAsset(path) { passes.push(["textureAsset", path]);return 0x07000000; },
+    _gpuTextureSecondaryMap(handle, map) {
+      passes.push(["secondaryMap", handle, map]);
+    },
+    _gpuTextureSecondaryAsset(handle, path) {
+      passes.push(["secondaryAsset", handle, path]);
+    },
+    _gpuTextureShader(handle, path) { passes.push(["shader", handle, path]); },
+    _gpuTextureParams(handle, values) { passes.push(["params", handle, values.slice()]); },
+    _gpuTextureField(handle, width, height, bytes) {
+      passes.push(["field", handle, width, height, bytes.byteLength]);
+    },
+    _gpuTextureStage(handle, stage) { passes.push(["stage", handle, stage]); },
+    _gpuTextureBlend(handle, blend) { passes.push(["blend", handle, blend]); },
+    _gpuTextureOpacity(handle, opacity) { passes.push(["textureOpacity", handle, opacity]); },
+    _gpuTextureVisible() {},
+    _cacheRead(namespace, key) {
+      cacheReads.push([namespace, key]);return Uint8Array.from([1, 2, 3]).buffer;
+    },
+    _cacheWrite: () => true,
+    _hdf5Decode(bytes, dataset, start, count, stride, attributes) {
+      return {
+        format: "hdf5",
+        dataset,
+        type: "uint8",
+        shape: [2, 2],
+        sourceShape: [4, 4],
+        buffer: Uint8Array.from([1, 2, 3, 4]).buffer,
+        attributes: { "/what": { gain: 0.5, offset: -32 } },
+        request: { size: bytes.byteLength, start, count, stride, attributes }
+      };
+    }
   };
   const context = vm.createContext({ fx, console });
   vm.runInContext(runtime, context, { filename: "retained.js" });
-  return { context, callbacks, sends, tiles, requests };
+  return { context, callbacks, sends, tiles, passes, requests, cacheReads };
 }
 
 test("fetch exposes a standard response surface", async () => {
@@ -69,6 +103,32 @@ test("fetch exposes a standard response surface", async () => {
   assert.deepEqual(Array.from(result.bytes), [1, 2, 3]);
   assert.equal(requests[0].headers,
     "User-Agent: microFX-test/1 (+https://example.test)");
+});
+
+test("generic data decoder exposes typed HDF5 datasets and selections", () => {
+  const { context } = networkContext();
+  const result = vm.runInContext(`(() => {
+    const decoded = fx.data.decode(new Uint8Array([1, 2, 3]), {
+      format: "hdf5",
+      dataset: "/dataset1/data1/data",
+      start: [4, 8],
+      count: [2, 2],
+      stride: [3, 3],
+      attributes: ["/what"]
+    });
+    return {
+      dataset: decoded.dataset,
+      values: Array.from(decoded.data),
+      gain: decoded.attributes["/what"].gain,
+      request: decoded.request
+    };
+  })()`, context);
+  assert.equal(result.dataset, "/dataset1/data1/data");
+  assert.deepEqual(Array.from(result.values), [1, 2, 3, 4]);
+  assert.equal(result.gain, 0.5);
+  assert.deepEqual(Array.from(result.request.start), [4, 8]);
+  assert.deepEqual(Array.from(result.request.count), [2, 2]);
+  assert.deepEqual(Array.from(result.request.stride), [3, 3]);
 });
 
 test("UDP and TCP wrappers carry bytes and peer metadata", () => {
@@ -108,7 +168,7 @@ test("WebSocket wrapper exposes text messages and lifecycle callbacks", () => {
 });
 
 test("tile maps project coordinates and submit one atomic cached generation", async () => {
-  const { context, tiles } = networkContext();
+  const { context, tiles, passes } = networkContext();
   const result = await vm.runInContext(`
     (() => {
       const map = fx.tileMap({
@@ -116,14 +176,75 @@ test("tile maps project coordinates and submit one atomic cached generation", as
         center: [12.635, 55.67], zoom: 11.45, cacheDays: 7
       });
       const center = map.project(12.635, 55.67);
-      return map.ready().then(() => ({ center, ready: map.isReady() }));
+      const location = map.unproject(center.x, center.y);
+      fx.texture(map)
+         .shader("assets/shaders/weather.fs")
+         .field(2, 1, new Uint8Array(8))
+         .params([1, 2, 3])
+         .stage("overlay")
+         .blend(true);
+      return map.ready().then(() => ({ center, location, ready: map.isReady() }));
     })()
   `, context);
   assert.ok(Math.abs(result.center.x - 960) < 0.001);
   assert.ok(Math.abs(result.center.y - 540) < 0.001);
+  assert.ok(Math.abs(result.location.longitude - 12.635) < 0.000001);
+  assert.ok(Math.abs(result.location.latitude - 55.67) < 0.000001);
   assert.equal(result.ready, true);
   assert.equal(tiles[0][0], "begin");
   assert.equal(tiles.filter(value => value[0] === "tile").length, tiles[0][3]);
+  assert.deepEqual(passes.map(value => value[0]),
+    ["texture", "shader", "field", "params", "stage", "blend"]);
+  assert.deepEqual(Array.from(passes[3][2]), [1, 2, 3]);
+});
+
+test("solar position is geographic and world-wide", () => {
+  const { context } = networkContext();
+  const result = vm.runInContext(`(() => {
+    const sunrise = fx.geo.sunPosition(new Date("2026-03-20T06:00:00Z"), 0, 0);
+    const noon = fx.geo.sunPosition(new Date("2026-03-20T12:00:00Z"), 0, 0);
+    const sunset = fx.geo.sunPosition(new Date("2026-03-20T18:00:00Z"), 0, 0);
+    const arcticWinter = fx.geo.sunPosition(
+      new Date("2026-12-21T11:00:00Z"), 69.6492, 18.9553);
+    const southernSummer = fx.geo.sunPosition(
+      new Date("2026-12-21T02:00:00Z"), -33.8688, 151.2093);
+    return { sunrise, noon, sunset, arcticWinter, southernSummer };
+  })()`, context);
+  assert.ok(result.sunrise.east > 0.9);
+  assert.ok(result.noon.sinElevation > 0.99);
+  assert.ok(result.sunset.east < -0.9);
+  assert.equal(result.arcticWinter.daylight, false);
+  assert.equal(result.southernSummer.daylight, true);
+});
+
+test("earth maps align global day and fixed-date night imagery", async () => {
+  const { context, passes, cacheReads } = networkContext();
+  const result = await vm.runInContext(`
+    (() => {
+      const earth = fx.maps.earth({ center: [12.5683, 55.6761], zoom: 11.25 });
+      fx.texture(earth.day)
+        .secondary(earth.night)
+        .shader("assets/shaders/day-night.fs")
+        .params([0.5]);
+      earth.hide();
+      return earth.ready().then(() => ({
+        date: earth.nightDate,
+        center: earth.project(12.5683, 55.6761),
+        ready: earth.isReady()
+      }));
+    })()
+  `, context);
+  assert.equal(result.date, "2016-01-01");
+  assert.ok(Math.abs(result.center.x - 960) < 0.001);
+  assert.ok(Math.abs(result.center.y - 540) < 0.001);
+  assert.equal(result.ready, true);
+  const nightUrls = cacheReads.map(value => value[1])
+    .filter(value => value.includes("gibs.earthdata.nasa.gov"));
+  assert.ok(nightUrls.length > 0);
+  assert.ok(nightUrls.every(value =>
+    value.includes("/2016-01-01/GoogleMapsCompatible_Level8/8/")));
+  assert.deepEqual(passes.map(value => value[0]),
+    ["texture", "secondaryMap", "shader", "params"]);
 });
 
 test("HTTP server parsing and response generation stay in JavaScript", async () => {

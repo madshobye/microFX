@@ -13,6 +13,7 @@
 #include "microfx/image_renderer.h"
 #include "microfx/outline_renderer.h"
 #include "microfx/tile_renderer.h"
+#include "microfx/gpu_texture_renderer.h"
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include <math.h>
@@ -632,6 +633,11 @@ int main(void)
         fprintf(stderr, "MICROFX_TILE fatal initialization failure\n");
         exit(EXIT_FAILURE);
     }
+    MicroFxGpuTextureRenderer gpuTextureRenderer;
+    if (!MicroFxGpuTextureRendererInit(&gpuTextureRenderer)) {
+        fprintf(stderr, "MICROFX_GPU_TEXTURE fatal initialization failure\n");
+        exit(EXIT_FAILURE);
+    }
     int renderedFrames = 0;
     float cpuAverageMs = 0.0f;
     float gpuAverageMs = 0.0f;
@@ -660,6 +666,10 @@ int main(void)
             fprintf(stderr, "MICROFX_TILE fatal cache or texture failure\n");
             break;
         }
+        if (!MicroFxGpuTextureRendererUpdate(&gpuTextureRenderer, &scriptScene)) {
+            fprintf(stderr, "MICROFX_GPU_TEXTURE fatal texture or shader failure\n");
+            break;
+        }
         double scriptEnd = GetTime();
 
         BeginDrawing();
@@ -677,6 +687,9 @@ int main(void)
             break;
         }
         MicroFxTileRendererDraw(&tileRenderer, &scriptScene);
+        MicroFxGpuTextureRendererDraw(&gpuTextureRenderer,&tileRenderer,
+            &scriptScene,MICROFX_GPU_TEXTURE_BACKGROUND,
+            DESIGN_WIDTH,DESIGN_HEIGHT);
         if (synchronizedProfiling) glFinish();
         double backgroundEnd = GetTime();
         Matrix scriptView = { 0 };
@@ -725,6 +738,9 @@ int main(void)
             fprintf(stderr, "MICROFX_IMAGE fatal asset or renderer failure\n");
             break;
         }
+        MicroFxGpuTextureRendererDraw(&gpuTextureRenderer,&tileRenderer,
+            &scriptScene,MICROFX_GPU_TEXTURE_OVERLAY,
+            DESIGN_WIDTH,DESIGN_HEIGHT);
         if (synchronizedProfiling) glFinish();
         double imageEnd = GetTime();
         if (!MicroFxTextRendererDraw(&textRenderer, &scriptScene,
@@ -844,6 +860,7 @@ int main(void)
     MicroFxMeshRendererDestroy(&meshRenderer);
     MicroFxImageRendererDestroy(&imageRenderer);
     MicroFxOutlineRendererDestroy(&outlineRenderer);
+    MicroFxGpuTextureRendererDestroy(&gpuTextureRenderer, &scriptScene);
     MicroFxTileRendererDestroy(&tileRenderer, &scriptScene);
     MicroFxTextRendererDestroy(&textRenderer);
     CloseWindow();

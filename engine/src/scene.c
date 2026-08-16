@@ -407,6 +407,130 @@ bool MicroFxSceneSetTileMapVisible(MicroFxScene *scene,int handle,bool visible)
     scene->tileMap[handle].visible=visible;return true;
 }
 
+static MicroFxGpuTexture *GpuTexture(MicroFxScene *scene,int handle)
+{
+    if((handle&MICROFX_HANDLE_KIND_MASK)!=MICROFX_HANDLE_GPU_TEXTURE)return NULL;
+    int index=handle&MICROFX_HANDLE_INDEX_MASK;
+    if(index<0||index>=scene->gpuTextureCount)return NULL;
+    return &scene->gpuTexture[index];
+}
+
+int MicroFxSceneAddGpuMapTexture(MicroFxScene *scene,int mapIndex)
+{
+    if(scene->gpuTextureCount>=MICROFX_MAX_GPU_TEXTURES||mapIndex<0||
+       mapIndex>=scene->tileMapCount)return -1;
+    int index=scene->gpuTextureCount++;
+    scene->gpuTexture[index]=(MicroFxGpuTexture){.source=MICROFX_GPU_TEXTURE_MAP,
+        .stage=MICROFX_GPU_TEXTURE_OVERLAY,.mapIndex=mapIndex,
+        .secondaryMapIndex=-1,.visible=true,
+        .blend=true,.opacity=1.0f};
+    return MICROFX_HANDLE_GPU_TEXTURE|index;
+}
+
+int MicroFxSceneAddGpuAssetTexture(MicroFxScene *scene,const char *assetPath)
+{
+    if(scene->gpuTextureCount>=MICROFX_MAX_GPU_TEXTURES||!assetPath||
+       !assetPath[0]||strlen(assetPath)>=MICROFX_MAX_ASSET_PATH)return -1;
+    int index=scene->gpuTextureCount++;
+    MicroFxGpuTexture *texture=&scene->gpuTexture[index];
+    *texture=(MicroFxGpuTexture){.source=MICROFX_GPU_TEXTURE_ASSET,
+        .stage=MICROFX_GPU_TEXTURE_BACKGROUND,.mapIndex=-1,
+        .secondaryMapIndex=-1,.visible=true,.opacity=1.0f};
+    snprintf(texture->assetPath,sizeof(texture->assetPath),"%s",assetPath);
+    return MICROFX_HANDLE_GPU_TEXTURE|index;
+}
+
+bool MicroFxSceneSetGpuTextureSecondaryMap(MicroFxScene *scene,int handle,
+                                           int mapIndex)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||mapIndex<0||mapIndex>=scene->tileMapCount)return false;
+    texture->secondary=true;texture->secondarySource=MICROFX_GPU_TEXTURE_MAP;
+    texture->secondaryMapIndex=mapIndex;texture->secondaryAssetPath[0]='\0';
+    texture->secondaryVersion++;texture->shaderVersion++;return true;
+}
+
+bool MicroFxSceneSetGpuTextureSecondaryAsset(MicroFxScene *scene,int handle,
+                                             const char *assetPath)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||!assetPath||!assetPath[0]||
+       strlen(assetPath)>=MICROFX_MAX_ASSET_PATH)return false;
+    texture->secondary=true;texture->secondarySource=MICROFX_GPU_TEXTURE_ASSET;
+    texture->secondaryMapIndex=-1;
+    snprintf(texture->secondaryAssetPath,sizeof(texture->secondaryAssetPath),
+             "%s",assetPath);
+    texture->secondaryVersion++;texture->shaderVersion++;return true;
+}
+
+bool MicroFxSceneSetGpuTextureShader(MicroFxScene *scene,int handle,
+                                     const char *fragmentPath)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||!fragmentPath||!fragmentPath[0]||
+       strlen(fragmentPath)>=MICROFX_MAX_ASSET_PATH)return false;
+    if(strcmp(texture->fragmentPath,fragmentPath)==0)return true;
+    snprintf(texture->fragmentPath,sizeof(texture->fragmentPath),"%s",fragmentPath);
+    texture->shaderVersion++;return true;
+}
+
+bool MicroFxSceneSetGpuTextureParams(MicroFxScene *scene,int handle,
+                                     const float *params,int count)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||count<0||count>MICROFX_MAX_GPU_TEXTURE_PARAMS||
+       (count>0&&!params))return false;
+    if(texture->paramCount==count&&
+       (count==0||memcmp(texture->params,params,(size_t)count*sizeof(float))==0))
+        return true;
+    memset(texture->params,0,sizeof(texture->params));
+    if(count>0)memcpy(texture->params,params,(size_t)count*sizeof(float));
+    texture->paramCount=count;texture->paramVersion++;return true;
+}
+
+bool MicroFxSceneSetGpuTextureField(MicroFxScene *scene,int handle,int width,
+                                    int height,const uint8_t *rgba,size_t size)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||width<=0||height<=0||
+       width>MICROFX_MAX_GPU_TEXTURE_FIELD_SIZE||
+       height>MICROFX_MAX_GPU_TEXTURE_FIELD_SIZE||!rgba||
+       size!=(size_t)width*(size_t)height*4u)return false;
+    uint8_t *copy=malloc(size);if(!copy)return false;
+    memcpy(copy,rgba,size);free(texture->fieldRgba);
+    texture->fieldRgba=copy;texture->fieldSize=size;
+    texture->fieldWidth=width;texture->fieldHeight=height;
+    texture->fieldVersion++;return true;
+}
+
+bool MicroFxSceneSetGpuTextureStage(MicroFxScene *scene,int handle,
+                                    MicroFxGpuTextureStage stage)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||(stage!=MICROFX_GPU_TEXTURE_BACKGROUND&&
+       stage!=MICROFX_GPU_TEXTURE_OVERLAY))return false;
+    texture->stage=stage;return true;
+}
+
+bool MicroFxSceneSetGpuTextureBlend(MicroFxScene *scene,int handle,bool blend)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture)return false;texture->blend=blend;return true;
+}
+
+bool MicroFxSceneSetGpuTextureOpacity(MicroFxScene *scene,int handle,float opacity)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture||opacity<0.0f||opacity>1.0f)return false;
+    texture->opacity=opacity;return true;
+}
+
+bool MicroFxSceneSetGpuTextureVisible(MicroFxScene *scene,int handle,bool visible)
+{
+    MicroFxGpuTexture *texture=GpuTexture(scene,handle);
+    if(!texture)return false;texture->visible=visible;return true;
+}
+
 bool MicroFxSceneSetText(MicroFxScene *scene, int handle, const char *text)
 {
     if ((handle & MICROFX_HANDLE_KIND_MASK) != MICROFX_HANDLE_TEXT) return false;

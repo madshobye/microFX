@@ -25,6 +25,33 @@ Responses expose `ok`, `status`, `url`, `text()`, `json()`, and
 `arrayBuffer()`. The binary response is still subject to the same 2 MiB
 limit.
 
+## Scientific binary data
+
+`fx.data.decode()` decodes a named numeric dataset directly from an HDF5
+`ArrayBuffer`. It accepts integer and floating-point grids with one to four
+dimensions. Optional `start`, `count`, and `stride` arrays select a bounded
+hyperslab before it enters the JavaScript heap; `attributes` requests metadata
+from named HDF5 objects. Unsupported types, invalid selections, inputs above
+2 MiB, and decoded selections above 12 MiB fail loudly.
+
+```js
+const bytes = await fetch(radarUrl).then(response => response.arrayBuffer());
+const radar = fx.data.decode(bytes, {
+  format: "hdf5",
+  dataset: "/dataset1/data1/data",
+  stride: [4, 4],
+  attributes: ["/what", "/where", "/dataset1/data1"]
+});
+
+// radar.data is the matching typed array. Shape describes the selected grid;
+// sourceShape describes the full dataset.
+const firstValue = radar.data[0];
+```
+
+The decoder performs no rendering and contains no source-specific radar logic.
+Projection, thresholding, contours, and retained geometry remain ordinary
+JavaScript application code.
+
 ## WebSocket client
 
 `fx.net.websocket.connect()` supports non-blocking `ws://` and TLS-verified
@@ -55,6 +82,9 @@ concurrently, caches encoded tiles below persistent platform state, composites
 at most 64 visible tiles into one 1920x1080 texture, and replaces the active
 texture only after the new generation is complete. Normal frames therefore
 draw one GPU texture and perform no tile decoding or composition on the CPU.
+Sources with finite native coverage can set integer `minZoom` and `maxZoom`;
+the viewport remains geographically aligned while its nearest native zoom is
+scaled for display.
 
 ```js
 const map = fx.tileMap({
@@ -76,7 +106,59 @@ const map = fx.tileMap({
 });
 scene.add(map);
 const screenPoint = map.project(12.6561, 55.6181);
+const location = map.unproject(screenPoint.x, screenPoint.y);
 ```
+
+The cached map can become a general GPU texture without another map decode or
+CPU image pass. The same API accepts image assets. A shader may combine either
+source with one small RGBA field and a bounded parameter vector:
+
+```js
+const weather = fx.texture(map)
+  .shader("assets/shaders/weather.fs")
+  .field(30, 20, weatherRgbaBytes)
+  .params([sunElevation, sunDirectionX, sunDirectionY])
+  .stage("overlay")
+  .blend(true);
+```
+
+The shader receives `uTexture`, optional `uField`, `uFieldSize`, `uResolution`,
+`uTime`, and `uParams[8]`. Fields are limited to 64×64 RGBA cells and parameters
+to 32 floats. These limits keep the feature a predictable GPU composition path,
+not an unbounded CPU pixel API.
+
+The map remains a separate background layer. Retained trains, airports, and
+other symbols render above it, followed by transparent GPU texture overlays.
+Text and diagnostics remain the interface layer above those passes.
+
+`fx.maps.earth()` creates an aligned worldwide image pair. Its `day` map uses
+Esri World Imagery and its `night` map uses NASA Black Marble / VIIRS's
+lights-only composite pinned to 2016-01-01. The night source is native through
+zoom 8 and intentionally over-zooms for city views. Only the visible viewport
+tiles are requested; the appliance never downloads a global raster.
+
+```js
+const earth = fx.maps.earth({
+  center: [12.5683, 55.6761],
+  zoom: 11.25
+});
+scene.add(earth.day);
+scene.add(earth.night);
+earth.hide(); // retained as texture sources without drawing either map directly
+
+const view = fx.texture(earth.day)
+  .secondary(earth.night)
+  .shader("assets/shaders/day-night.fs")
+  .params([nightOpacity])
+  .stage("background")
+  .blend(false);
+```
+
+The shader receives the two aligned images as `uTexture` and `uTexture2`.
+The pair's `center()` and `zoom()` methods update both sources atomically. A
+different fixed `nightDate` may be supplied as `YYYY-MM-DD`; invalid or missing
+NASA dates fail through the normal tile request path instead of silently
+selecting another image.
 
 Applications remain responsible for provider terms and for displaying the
 source attribution. Tile cache durations shorter than seven days are rejected

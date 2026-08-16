@@ -24,6 +24,8 @@ bool MicroFxTileRendererUpdate(MicroFxTileRenderer *renderer,
                                MicroFxScene *scene);
 void MicroFxTileRendererDraw(MicroFxTileRenderer *renderer,
                              const MicroFxScene *scene);
+Texture2D MicroFxTileRendererTexture(const MicroFxTileRenderer *renderer,
+                                     int mapIndex);
 void MicroFxTileRendererDestroy(MicroFxTileRenderer *renderer,
                                 MicroFxScene *scene);
 

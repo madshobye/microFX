@@ -1,5 +1,6 @@
 #include "microfx/script.h"
 #include "microfx/assets.h"
+#include "microfx/hdf5_decoder.h"
 #include "microfx/identity.h"
 #include "microfx/network.h"
 #include <quickjs/quickjs.h>
@@ -157,6 +158,172 @@ static JSValue TileMapReady(JSContext *ctx,JSValueConst thisValue,int argc,
        handle>=script->scene->tileMapCount)return JS_ThrowRangeError(ctx,"tile map handle is invalid");
     MicroFxTileMap *map=&script->scene->tileMap[handle];
     return JS_NewBool(ctx,map->generation>0&&map->readyGeneration==map->generation);
+}
+
+static JSValue AddGpuMapTexture(JSContext *ctx,JSValueConst thisValue,int argc,
+                                JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t mapIndex=0;
+    if(argc!=1||JS_ToInt32(ctx,&mapIndex,argv[0]))
+        return JS_ThrowTypeError(ctx,"texture(tileMap)");
+    return Handle(ctx,MicroFxSceneAddGpuMapTexture(script->scene,mapIndex));
+}
+
+static JSValue AddGpuAssetTexture(JSContext *ctx,JSValueConst thisValue,int argc,
+                                  JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    if(argc!=1)return JS_ThrowTypeError(ctx,"texture(assetPath)");
+    const char *asset=JS_ToCString(ctx,argv[0]);if(!asset)return JS_EXCEPTION;
+    char path[MICROFX_MAX_ASSET_PATH],error[128];
+    bool resolved=MicroFxResolveAsset(script->projectRoot,asset,path,sizeof(path),
+                                      error,sizeof(error));
+    JS_FreeCString(ctx,asset);
+    if(!resolved)return JS_ThrowReferenceError(ctx,
+        "GPU texture asset rejected: %s",error);
+    return Handle(ctx,MicroFxSceneAddGpuAssetTexture(script->scene,path));
+}
+
+static JSValue SetGpuTextureSecondaryMap(JSContext *ctx,JSValueConst thisValue,
+                                         int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0,mapIndex=0;
+    if(argc!=2||JS_ToInt32(ctx,&handle,argv[0])||
+       JS_ToInt32(ctx,&mapIndex,argv[1]))
+        return JS_ThrowTypeError(ctx,"texture.secondary(tileMap)");
+    if(!MicroFxSceneSetGpuTextureSecondaryMap(script->scene,handle,mapIndex))
+        return JS_ThrowRangeError(ctx,"GPU texture secondary map is invalid");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetGpuTextureSecondaryAsset(JSContext *ctx,JSValueConst thisValue,
+                                           int argc,JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0;if(argc!=2||JS_ToInt32(ctx,&handle,argv[0]))
+        return JS_ThrowTypeError(ctx,"texture.secondary(assetPath)");
+    const char *asset=JS_ToCString(ctx,argv[1]);if(!asset)return JS_EXCEPTION;
+    char path[MICROFX_MAX_ASSET_PATH],error[128];
+    bool resolved=MicroFxResolveAsset(script->projectRoot,asset,path,sizeof(path),
+                                      error,sizeof(error));
+    JS_FreeCString(ctx,asset);
+    if(!resolved)return JS_ThrowReferenceError(ctx,
+        "GPU texture secondary asset rejected: %s",error);
+    if(!MicroFxSceneSetGpuTextureSecondaryAsset(script->scene,handle,path))
+        return JS_ThrowRangeError(ctx,"GPU texture secondary asset is invalid");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetGpuTextureShader(JSContext *ctx,JSValueConst thisValue,int argc,
+                                   JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc!=2||JS_ToInt32(ctx,&handle,argv[0]))
+        return JS_ThrowTypeError(ctx,"texture.shader(fragmentPath)");
+    const char *fragment=JS_ToCString(ctx,argv[1]);if(!fragment)return JS_EXCEPTION;
+    char path[MICROFX_MAX_ASSET_PATH],error[128];
+    bool resolved=MicroFxResolveAsset(script->projectRoot,fragment,path,sizeof(path),
+                                      error,sizeof(error));
+    JS_FreeCString(ctx,fragment);
+    if(!resolved)return JS_ThrowReferenceError(ctx,
+        "GPU texture shader asset rejected: %s",error);
+    if(!MicroFxSceneSetGpuTextureShader(script->scene,handle,path))
+        return JS_ThrowRangeError(ctx,"GPU texture shader could not be assigned");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetGpuTextureParams(JSContext *ctx,JSValueConst thisValue,int argc,
+                                   JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);int32_t handle=0;
+    if(argc!=2||JS_ToInt32(ctx,&handle,argv[0])||!JS_IsArray(ctx,argv[1]))
+        return JS_ThrowTypeError(ctx,"texture.params(values) requires an array");
+    JSValue lengthValue=JS_GetPropertyStr(ctx,argv[1],"length");uint32_t length=0;
+    if(JS_IsException(lengthValue)||JS_ToUint32(ctx,&length,lengthValue)){
+        JS_FreeValue(ctx,lengthValue);return JS_EXCEPTION;
+    }
+    JS_FreeValue(ctx,lengthValue);
+    if(length>MICROFX_MAX_GPU_TEXTURE_PARAMS)
+        return JS_ThrowRangeError(ctx,"GPU texture accepts at most 32 parameters");
+    float values[MICROFX_MAX_GPU_TEXTURE_PARAMS]={0};
+    for(uint32_t i=0;i<length;i++){
+        JSValue item=JS_GetPropertyUint32(ctx,argv[1],i);double value=0;
+        int failed=JS_IsException(item)||JS_ToFloat64(ctx,&value,item)||!isfinite(value);
+        JS_FreeValue(ctx,item);
+        if(failed)return JS_ThrowTypeError(ctx,"GPU texture parameters must be finite numbers");
+        values[i]=(float)value;
+    }
+    if(!MicroFxSceneSetGpuTextureParams(script->scene,handle,values,(int)length))
+        return JS_ThrowRangeError(ctx,"GPU texture parameter update failed");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetGpuTextureField(JSContext *ctx,JSValueConst thisValue,int argc,
+                                  JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0,width=0,height=0;size_t length=0;
+    if(argc!=4||JS_ToInt32(ctx,&handle,argv[0])||
+       JS_ToInt32(ctx,&width,argv[1])||JS_ToInt32(ctx,&height,argv[2]))
+        return JS_ThrowTypeError(ctx,"texture.field(width,height,rgbaBytes)");
+    uint8_t *bytes=JS_GetArrayBuffer(ctx,&length,argv[3]);
+    if(!bytes||!MicroFxSceneSetGpuTextureField(script->scene,handle,width,height,
+                                                bytes,length))
+        return JS_ThrowRangeError(ctx,
+            "GPU texture field must be an RGBA ArrayBuffer no larger than 64x64");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetGpuTextureStage(JSContext *ctx,JSValueConst thisValue,int argc,
+                                  JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0;if(argc!=2||JS_ToInt32(ctx,&handle,argv[0]))
+        return JS_ThrowTypeError(ctx,"texture.stage(background|overlay)");
+    const char *name=JS_ToCString(ctx,argv[1]);if(!name)return JS_EXCEPTION;
+    MicroFxGpuTextureStage stage;
+    if(strcmp(name,"background")==0)stage=MICROFX_GPU_TEXTURE_BACKGROUND;
+    else if(strcmp(name,"overlay")==0)stage=MICROFX_GPU_TEXTURE_OVERLAY;
+    else {JS_FreeCString(ctx,name);
+        return JS_ThrowRangeError(ctx,"texture stage must be background or overlay");}
+    JS_FreeCString(ctx,name);
+    if(!MicroFxSceneSetGpuTextureStage(script->scene,handle,stage))
+        return JS_ThrowRangeError(ctx,"GPU texture handle is invalid");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetGpuTextureBlend(JSContext *ctx,JSValueConst thisValue,int argc,
+                                  JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0;if(argc!=2||JS_ToInt32(ctx,&handle,argv[0])||
+       !MicroFxSceneSetGpuTextureBlend(script->scene,handle,JS_ToBool(ctx,argv[1])>0))
+        return JS_ThrowRangeError(ctx,"GPU texture handle is invalid");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetGpuTextureOpacity(JSContext *ctx,JSValueConst thisValue,int argc,
+                                    JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0;double opacity=0;
+    if(argc!=2||JS_ToInt32(ctx,&handle,argv[0])||
+       JS_ToFloat64(ctx,&opacity,argv[1])||!isfinite(opacity)||
+       !MicroFxSceneSetGpuTextureOpacity(script->scene,handle,(float)opacity))
+        return JS_ThrowRangeError(ctx,"GPU texture opacity must be from 0 to 1");
+    return JS_UNDEFINED;
+}
+
+static JSValue SetGpuTextureVisible(JSContext *ctx,JSValueConst thisValue,int argc,
+                                    JSValueConst *argv)
+{
+    (void)thisValue;MicroFxScript *script=JS_GetContextOpaque(ctx);
+    int32_t handle=0;if(argc!=2||JS_ToInt32(ctx,&handle,argv[0])||
+       !MicroFxSceneSetGpuTextureVisible(script->scene,handle,JS_ToBool(ctx,argv[1])>0))
+        return JS_ThrowRangeError(ctx,"GPU texture handle is invalid");
+    return JS_UNDEFINED;
 }
 
 static bool CacheNamespace(const char *value)
@@ -956,8 +1123,20 @@ MicroFxScript *MicroFxScriptCreate(MicroFxScene *scene, const char *path)
     JS_SetPropertyStr(script->context,fx,"_tileMapTile",JS_NewCFunction(script->context,SubmitTileMapTile,"_tileMapTile",7));
     JS_SetPropertyStr(script->context,fx,"_tileMapVisible",JS_NewCFunction(script->context,SetTileMapVisible,"_tileMapVisible",2));
     JS_SetPropertyStr(script->context,fx,"_tileMapReady",JS_NewCFunction(script->context,TileMapReady,"_tileMapReady",1));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureMap",JS_NewCFunction(script->context,AddGpuMapTexture,"_gpuTextureMap",1));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureAsset",JS_NewCFunction(script->context,AddGpuAssetTexture,"_gpuTextureAsset",1));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureSecondaryMap",JS_NewCFunction(script->context,SetGpuTextureSecondaryMap,"_gpuTextureSecondaryMap",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureSecondaryAsset",JS_NewCFunction(script->context,SetGpuTextureSecondaryAsset,"_gpuTextureSecondaryAsset",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureShader",JS_NewCFunction(script->context,SetGpuTextureShader,"_gpuTextureShader",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureParams",JS_NewCFunction(script->context,SetGpuTextureParams,"_gpuTextureParams",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureField",JS_NewCFunction(script->context,SetGpuTextureField,"_gpuTextureField",4));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureStage",JS_NewCFunction(script->context,SetGpuTextureStage,"_gpuTextureStage",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureBlend",JS_NewCFunction(script->context,SetGpuTextureBlend,"_gpuTextureBlend",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureOpacity",JS_NewCFunction(script->context,SetGpuTextureOpacity,"_gpuTextureOpacity",2));
+    JS_SetPropertyStr(script->context,fx,"_gpuTextureVisible",JS_NewCFunction(script->context,SetGpuTextureVisible,"_gpuTextureVisible",2));
     JS_SetPropertyStr(script->context,fx,"_cacheRead",JS_NewCFunction(script->context,CacheRead,"_cacheRead",3));
     JS_SetPropertyStr(script->context,fx,"_cacheWrite",JS_NewCFunction(script->context,CacheWrite,"_cacheWrite",3));
+    JS_SetPropertyStr(script->context,fx,"_hdf5Decode",JS_NewCFunction(script->context,MicroFxHdf5Decode,"_hdf5Decode",6));
     JS_SetPropertyStr(script->context,fx,"_rect",JS_NewCFunction(script->context,AddRect,"_rect",5));
     JS_SetPropertyStr(script->context,fx,"_gradientRect",JS_NewCFunction(script->context,AddGradientRect,"_gradientRect",6));
     JS_SetPropertyStr(script->context,fx,"_background",JS_NewCFunction(script->context,AddBackground,"_background",2));

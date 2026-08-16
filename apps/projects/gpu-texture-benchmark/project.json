@@ -1,0 +1,7 @@
+{
+  "title": "GPU Texture Benchmark",
+  "description": "Controlled full-HD cached texture and blending architecture benchmark",
+  "bundled": false,
+  "category": "debug",
+  "dataSource": "Esri World Imagery"
+}

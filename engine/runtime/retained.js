@@ -6,6 +6,7 @@
   const groupOwners = new WeakMap();
   const groups = new WeakSet();
   const tileMaps = new WeakSet();
+  const gpuTextures = new WeakSet();
   const tileMapOwners = new WeakMap();
   const activeTileMaps = [];
   const sceneOwners = new WeakMap();
@@ -16,6 +17,142 @@
     if (value && typeof value.handle === "number") return value.handle;
     throw new TypeError("expected a retained element or numeric handle");
   }
+
+  fx.geo = Object.freeze({
+    sunPosition(date, latitude, longitude) {
+      const instant = date instanceof Date ? date : new Date(date);
+      const epoch = instant.getTime();
+      const lat = Number(latitude);
+      const lon = Number(longitude);
+      if (!Number.isFinite(epoch) || !Number.isFinite(lat) ||
+          !Number.isFinite(lon) || lat < -90 || lat > 90 ||
+          lon < -180 || lon > 180) {
+        throw new RangeError("sunPosition requires a valid date, latitude, and longitude");
+      }
+      const radians = Math.PI / 180;
+      const start = Date.UTC(instant.getUTCFullYear(), 0, 0);
+      const day = Math.floor((epoch - start) / 86400000);
+      const minutes = instant.getUTCHours() * 60 + instant.getUTCMinutes() +
+        instant.getUTCSeconds() / 60 + instant.getUTCMilliseconds() / 60000;
+      const gamma = 2 * Math.PI / 365 *
+        (day - 1 + (minutes / 60 - 12) / 24);
+      const equation = 229.18 * (0.000075 + 0.001868 * Math.cos(gamma) -
+        0.032077 * Math.sin(gamma) - 0.014615 * Math.cos(2 * gamma) -
+        0.040849 * Math.sin(2 * gamma));
+      const declination = 0.006918 - 0.399912 * Math.cos(gamma) +
+        0.070257 * Math.sin(gamma) - 0.006758 * Math.cos(2 * gamma) +
+        0.000907 * Math.sin(2 * gamma) - 0.002697 * Math.cos(3 * gamma) +
+        0.00148 * Math.sin(3 * gamma);
+      let solarMinutes = (minutes + equation + lon * 4) % 1440;
+      if (solarMinutes < 0) solarMinutes += 1440;
+      const hourAngle = (solarMinutes / 4 - 180) * radians;
+      const latitudeRadians = lat * radians;
+      const sinElevation = Math.max(-1, Math.min(1,
+        Math.sin(latitudeRadians) * Math.sin(declination) +
+        Math.cos(latitudeRadians) * Math.cos(declination) *
+        Math.cos(hourAngle)));
+      const elevationRadians = Math.asin(sinElevation);
+      let azimuthRadians = Math.atan2(-Math.sin(hourAngle),
+        Math.tan(declination) * Math.cos(latitudeRadians) -
+        Math.sin(latitudeRadians) * Math.cos(hourAngle));
+      if (azimuthRadians < 0) azimuthRadians += Math.PI * 2;
+      return Object.freeze({
+        elevationRadians,
+        elevationDegrees: elevationRadians / radians,
+        sinElevation,
+        azimuthRadians,
+        azimuthDegrees: azimuthRadians / radians,
+        east: Math.sin(azimuthRadians),
+        north: Math.cos(azimuthRadians),
+        daylight: sinElevation > 0
+      });
+    }
+  });
+
+  fx.assets = Object.freeze({
+    load(options) {
+      const settings = options || {};
+      const required = settings.required === undefined ? [] : settings.required;
+      const lazy = settings.lazy === undefined ? [] : settings.lazy;
+      const settleFrames = Number(settings.settleFrames === undefined ? 1 :
+        settings.settleFrames);
+      if (!Array.isArray(required) || !Array.isArray(lazy)) {
+        throw new TypeError("assets.load requires required and lazy arrays");
+      }
+      if (!Number.isInteger(settleFrames) || settleFrames < 0 || settleFrames > 60) {
+        throw new RangeError("assets.load settleFrames must be an integer from 0 to 60");
+      }
+      const resources = required.concat(lazy);
+      resources.forEach(resource => {
+        if (!resource || typeof resource.isReady !== "function" ||
+            typeof resource.ready !== "function") {
+          throw new TypeError("assets.load entries require isReady() and ready()");
+        }
+      });
+      let loadingScene = null;
+      let loadingText = null;
+      let loadingLabel = "LOADING";
+      if (settings.loading) {
+        const loading = settings.loading === true ? {} : settings.loading;
+        if (!loading || typeof loading !== "object" || Array.isArray(loading)) {
+          throw new TypeError("assets.load loading must be true or an options object");
+        }
+        const width = Number.isFinite(Number(fx.width)) ? Number(fx.width) : 1920;
+        const height = Number.isFinite(Number(fx.height)) ? Number(fx.height) : 1080;
+        const x = Number(loading.x === undefined ? width * 0.5 - 155 : loading.x);
+        const y = Number(loading.y === undefined ? height * 0.5 - 25 : loading.y);
+        const size = Number(loading.size === undefined ? 24 : loading.size);
+        const color = loading.color === undefined ? 0x777777ff : loading.color;
+        if (![x, y, size].every(Number.isFinite) || size <= 0) {
+          throw new RangeError("assets.load loading position and size must be finite");
+        }
+        loadingLabel = String(loading.label === undefined ? "LOADING" : loading.label);
+        loadingScene = fx.scenes.add(fx.scene({
+          name: String(loading.name === undefined ? "asset-loading" : loading.name)
+        }));
+        loadingText = loadingScene.add(
+          fx.text(`${loadingLabel} 0 / ${required.length}`, x, y, size, color)
+            .antialias(Boolean(loading.antialias)));
+      }
+      let settled = 0;
+      const countReady = list => list.reduce((count, resource) =>
+        count + (resource.isReady() ? 1 : 0), 0);
+      const snapshot = () => {
+        const requiredReady = countReady(required);
+        const lazyReady = countReady(lazy);
+        const sourcesReady = requiredReady === required.length;
+        return Object.freeze({
+          requiredReady,
+          requiredTotal: required.length,
+          lazyReady,
+          lazyTotal: lazy.length,
+          sourcesReady,
+          ready: sourcesReady && settled >= settleFrames
+        });
+      };
+      return Object.freeze({
+        update(time) {
+          if (countReady(required) === required.length) {
+            if (settled < settleFrames) settled++;
+          } else settled = 0;
+          const state = snapshot();
+          if (loadingScene) {
+            if (state.ready) loadingScene.hide();
+            else {
+              const seconds = Number.isFinite(Number(time)) ? Number(time) : 0;
+              const dots = ".".repeat(Math.floor(seconds * 3) % 4);
+              loadingText.text(`${loadingLabel} ${state.requiredReady} / ` +
+                `${state.requiredTotal}${dots}`);
+              loadingScene.show();
+            }
+          }
+          return state;
+        },
+        status: snapshot,
+        ready() { return Promise.all(required.map(resource => resource.ready())); }
+      });
+    }
+  });
 
   function element(handle, dimension, initial) {
     const state = Object.assign({
@@ -723,6 +860,8 @@
       const radians = bounded * Math.PI / 180;
       return (1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) * 0.5;
     };
+    const inverseMercatorY = value =>
+      Math.atan(Math.sinh(Math.PI * (1 - 2 * value))) * 180 / Math.PI;
     const cacheBytes = value => {
       if (value instanceof ArrayBuffer ||
           (value && Object.prototype.toString.call(value) === "[object ArrayBuffer]")) {
@@ -748,6 +887,8 @@
       const source = settings.source || {};
       const template = String(source.url || "");
       const tileSize = Number(source.tileSize || 256);
+      const sourceMinZoom = Number(source.minZoom === undefined ? 0 : source.minZoom);
+      const sourceMaxZoom = Number(source.maxZoom === undefined ? 20 : source.maxZoom);
       const cacheSeconds = Number((settings.cacheDays === undefined ? 7 : settings.cacheDays) * 86400);
       const filter = settings.filter || {};
       const center = Array.isArray(settings.center) ? settings.center : [0, 0];
@@ -756,8 +897,10 @@
         throw new TypeError("tileMap source URL requires {z}, {x}, and {y}");
       }
       if (!Number.isFinite(tileSize) || tileSize <= 0 ||
+          !Number.isInteger(sourceMinZoom) || !Number.isInteger(sourceMaxZoom) ||
+          sourceMinZoom < 0 || sourceMaxZoom > 20 || sourceMinZoom > sourceMaxZoom ||
           !Number.isFinite(cacheSeconds) || cacheSeconds < 604800) {
-        throw new RangeError("tileMap requires positive tiles and at least seven cache days");
+        throw new RangeError("tileMap requires positive tiles, source zooms 0..20, and at least seven cache days");
       }
       const handle = fx._tileMapCreate(
         Number(filter.grayscale === undefined ? 1 : filter.grayscale),
@@ -778,7 +921,8 @@
             !Number.isFinite(state.zoom) || state.zoom < 0 || state.zoom > 20) {
           throw new RangeError("tileMap center and zoom must be finite and zoom must be 0..20");
         }
-        const level = Math.floor(state.zoom);
+        const level = Math.max(sourceMinZoom,
+          Math.min(sourceMaxZoom, Math.floor(state.zoom)));
         const scale = Math.pow(2, state.zoom - level);
         const count = Math.pow(2, level);
         const world = tileSize * count;
@@ -873,13 +1017,183 @@
               (mercatorY(Number(latitude)) - mercatorY(state.latitude)) * world * scale
           };
         },
+        unproject(x, y) {
+          const level = Math.floor(state.zoom);
+          const scale = Math.pow(2, state.zoom - level);
+          const world = tileSize * Math.pow(2, level);
+          return {
+            longitude: state.longitude +
+              (Number(x) - fx.width * 0.5) / (world * scale) * 360,
+            latitude: inverseMercatorY(mercatorY(state.latitude) +
+              (Number(y) - fx.height * 0.5) / (world * scale))
+          };
+        },
         visible(value) { state.visible = Boolean(value);fx._tileMapVisible(handle,state.visible);return object; },
         show() { return object.visible(true); },
         hide() { return object.visible(false); }
       };
       tileMaps.add(object);activeTileMaps.push(state);beginReload();return object;
     };
+
+    const EARTH_NIGHT_DATE = "2016-01-01";
+    const earthMap = function earthMap(options) {
+      const settings = options || {};
+      const center = Array.isArray(settings.center) ? settings.center : [0, 0];
+      const zoom = Number(settings.zoom === undefined ? 8 : settings.zoom);
+      const nightDate = String(settings.nightDate || EARTH_NIGHT_DATE);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(nightDate)) {
+        throw new TypeError("maps.earth nightDate must be YYYY-MM-DD");
+      }
+      const day = fx.tileMap({
+        source: settings.daySource || {
+          url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+          tileSize: 256,
+          maxZoom: 20,
+          attribution: "Imagery © Esri, Maxar, Earthstar Geographics"
+        },
+        center, zoom,
+        cacheDays: settings.dayCacheDays === undefined ? 30 : settings.dayCacheDays,
+        filter: settings.dayFilter || { grayscale: 0, contrast: 1, brightness: 1 }
+      });
+      const night = fx.tileMap({
+        source: settings.nightSource || {
+          url: "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/" +
+            "VIIRS_Night_Lights/" +
+            "default/" + nightDate + "/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png",
+          tileSize: 256,
+          maxZoom: 8,
+          attribution: "Night imagery © NASA Black Marble / VIIRS"
+        },
+        center, zoom,
+        cacheDays: settings.nightCacheDays === undefined ? 3650 : settings.nightCacheDays,
+        filter: settings.nightFilter || { grayscale: 0, contrast: 1, brightness: 1 }
+      });
+      const object = {
+        day, night, nightDate,
+        center(longitude, latitude) {
+          day.center(longitude, latitude);night.center(longitude, latitude);return object;
+        },
+        zoom(value) { day.zoom(value);night.zoom(value);return object; },
+        reload() { return Promise.all([day.reload(), night.reload()]); },
+        ready() { return Promise.all([day.ready(), night.ready()]); },
+        isReady() { return day.isReady() && night.isReady(); },
+        project(longitude, latitude) { return day.project(longitude, latitude); },
+        unproject(x, y) { return day.unproject(x, y); },
+        show() { day.show();night.show();return object; },
+        hide() { day.hide();night.hide();return object; }
+      };
+      return object;
+    };
+    fx.maps = Object.freeze({ earth: earthMap, EARTH_NIGHT_DATE });
   }
+
+  if (typeof fx._hdf5Decode === "function") {
+    const dataTypes = Object.freeze({
+      int8: Int8Array,
+      uint8: Uint8Array,
+      int16: Int16Array,
+      uint16: Uint16Array,
+      int32: Int32Array,
+      uint32: Uint32Array,
+      float32: Float32Array,
+      float64: Float64Array
+    });
+    fx.data.decode = function decodeData(value, options) {
+      const settings = options || {};
+      const format = String(settings.format || "").toLowerCase();
+      if (format !== "hdf5") {
+        throw new RangeError("data.decode currently supports format: 'hdf5'");
+      }
+      let bytes;
+      if (value instanceof ArrayBuffer ||
+          (value && Object.prototype.toString.call(value) === "[object ArrayBuffer]")) {
+        bytes = value;
+      } else if (ArrayBuffer.isView(value)) {
+        bytes = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+      } else {
+        throw new TypeError("data.decode input must be an ArrayBuffer or typed array");
+      }
+      const dataset = String(settings.dataset || "");
+      const decoded = fx._hdf5Decode(
+        bytes, dataset,
+        settings.start === undefined ? null : settings.start,
+        settings.count === undefined ? null : settings.count,
+        settings.stride === undefined ? null : settings.stride,
+        settings.attributes === undefined ? null : settings.attributes);
+      const Constructor = dataTypes[decoded.type];
+      if (!Constructor) throw new TypeError(`unsupported decoded data type: ${decoded.type}`);
+      decoded.data = new Constructor(decoded.buffer);
+      return decoded;
+    };
+  }
+
+  fx.texture = function texture(source) {
+    let handle;
+    if (tileMaps.has(source)) handle = fx._gpuTextureMap(source.handle);
+    else if (typeof source === "string") handle = fx._gpuTextureAsset(source);
+    else throw new TypeError("texture(source) expects a tile map or asset path");
+    const object = {
+      handle,
+      shader(fragmentPath) {
+        fx._gpuTextureShader(handle, String(fragmentPath));return object;
+      },
+      secondary(value) {
+        if (tileMaps.has(value)) fx._gpuTextureSecondaryMap(handle, value.handle);
+        else if (typeof value === "string")
+          fx._gpuTextureSecondaryAsset(handle, value);
+        else throw new TypeError("texture.secondary(source) expects a tile map or asset path");
+        return object;
+      },
+      params(values) {
+        if (!Array.isArray(values) || values.length > 32 ||
+            values.some(value => !Number.isFinite(Number(value)))) {
+          throw new TypeError("texture.params(values) accepts up to 32 finite numbers");
+        }
+        fx._gpuTextureParams(handle, values.map(Number));return object;
+      },
+      field(width, height, rgbaBytes) {
+        const columns = Number(width), rows = Number(height);
+        if (!Number.isInteger(columns) || !Number.isInteger(rows) ||
+            columns <= 0 || rows <= 0 || columns > 64 || rows > 64) {
+          throw new RangeError("texture.field dimensions must be integers from 1 to 64");
+        }
+        let bytes;
+        if (rgbaBytes instanceof Uint8Array) bytes = rgbaBytes;
+        else if (rgbaBytes instanceof ArrayBuffer) bytes = new Uint8Array(rgbaBytes);
+        else if (ArrayBuffer.isView(rgbaBytes)) {
+          bytes = new Uint8Array(rgbaBytes.buffer, rgbaBytes.byteOffset,
+                                 rgbaBytes.byteLength);
+        } else throw new TypeError("texture.field requires RGBA bytes");
+        if (bytes.byteLength !== columns * rows * 4) {
+          throw new RangeError("texture.field requires exactly width * height * 4 bytes");
+        }
+        const buffer = bytes.byteOffset === 0 &&
+          bytes.byteLength === bytes.buffer.byteLength ? bytes.buffer :
+          bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        fx._gpuTextureField(handle, columns, rows, buffer);return object;
+      },
+      stage(value) {
+        fx._gpuTextureStage(handle, String(value));return object;
+      },
+      blend(value) {
+        fx._gpuTextureBlend(handle, value === undefined ? true : Boolean(value));
+        return object;
+      },
+      opacity(value) {
+        const opacity = Number(value);
+        if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) {
+          throw new RangeError("texture.opacity(value) requires a number from 0 to 1");
+        }
+        fx._gpuTextureOpacity(handle, opacity);return object;
+      },
+      visible(value) {
+        fx._gpuTextureVisible(handle, Boolean(value));return object;
+      },
+      show() { return object.visible(true); },
+      hide() { return object.visible(false); }
+    };
+    gpuTextures.add(object);return object;
+  };
 
   fx.scene = function scene(options) {
     const members = [];

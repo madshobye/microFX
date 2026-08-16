@@ -58,7 +58,7 @@ done
 
 device="${DISK}s4"
 echo "===== DATA PARTITION 4 ====="
-for path in / /ssh /state /state/root-update-backups /recovery /apps /apps/current /apps/releases /apps/releases/factory; do
+for path in / /ssh /state /state/root-update-backups /recovery /apps /apps/current /apps/runtime; do
     echo "--- ls $path"
     "$E2FS/debugfs" -R "ls -l $path" "$device" 2>&1 || true
 done
@@ -74,7 +74,6 @@ show_file "$device" /state/boot-stable
 show_stat "$device" /config/wpa_supplicant.conf
 show_stat "$device" /apps/current
 show_stat "$device" /apps/current-runtime
-show_stat "$device" /apps/previous-runtime
 show_file "$device" /apps/projects/demo-scene/main.js
 
 echo "Read-only diagnostic complete; $DISK remains unmounted"

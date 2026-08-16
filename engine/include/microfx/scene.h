@@ -18,8 +18,11 @@
 #define MICROFX_MAX_TEXT_BYTES 128
 #define MICROFX_MAX_ASSET_PATH 256
 #define MICROFX_MAX_MESH_SHADERS 8
-#define MICROFX_MAX_TILE_MAPS 2
+#define MICROFX_MAX_TILE_MAPS 3
 #define MICROFX_MAX_TILE_MAP_TILES 64
+#define MICROFX_MAX_GPU_TEXTURES 8
+#define MICROFX_MAX_GPU_TEXTURE_PARAMS 32
+#define MICROFX_MAX_GPU_TEXTURE_FIELD_SIZE 64
 
 #define MICROFX_HANDLE_SDF  0x01000000
 #define MICROFX_HANDLE_MESH 0x02000000
@@ -27,6 +30,7 @@
 #define MICROFX_HANDLE_QUAD 0x04000000
 #define MICROFX_HANDLE_IMAGE 0x05000000
 #define MICROFX_HANDLE_OUTLINE 0x06000000
+#define MICROFX_HANDLE_GPU_TEXTURE 0x07000000
 #define MICROFX_HANDLE_KIND_MASK 0xff000000
 #define MICROFX_HANDLE_INDEX_MASK 0x00ffffff
 
@@ -157,6 +161,41 @@ typedef struct {
     MicroFxTileMapTile tiles[MICROFX_MAX_TILE_MAP_TILES];
 } MicroFxTileMap;
 
+typedef enum {
+    MICROFX_GPU_TEXTURE_MAP = 0,
+    MICROFX_GPU_TEXTURE_ASSET = 1
+} MicroFxGpuTextureSource;
+
+typedef enum {
+    MICROFX_GPU_TEXTURE_BACKGROUND = 0,
+    MICROFX_GPU_TEXTURE_OVERLAY = 1
+} MicroFxGpuTextureStage;
+
+typedef struct {
+    MicroFxGpuTextureSource source;
+    MicroFxGpuTextureStage stage;
+    int mapIndex;
+    bool secondary;
+    MicroFxGpuTextureSource secondarySource;
+    int secondaryMapIndex;
+    char assetPath[MICROFX_MAX_ASSET_PATH];
+    char secondaryAssetPath[MICROFX_MAX_ASSET_PATH];
+    char fragmentPath[MICROFX_MAX_ASSET_PATH];
+    float params[MICROFX_MAX_GPU_TEXTURE_PARAMS];
+    int paramCount;
+    uint8_t *fieldRgba;
+    size_t fieldSize;
+    int fieldWidth;
+    int fieldHeight;
+    int shaderVersion;
+    int secondaryVersion;
+    int paramVersion;
+    int fieldVersion;
+    bool visible;
+    bool blend;
+    float opacity;
+} MicroFxGpuTexture;
+
 typedef struct {
     float position[3];
     float target[3];
@@ -228,6 +267,8 @@ typedef struct {
     bool outlineDirty;
     MicroFxTileMap tileMap[MICROFX_MAX_TILE_MAPS];
     int tileMapCount;
+    MicroFxGpuTexture gpuTexture[MICROFX_MAX_GPU_TEXTURES];
+    int gpuTextureCount;
     MicroFxCamera camera;
     MicroFxRuntimeSettings runtime;
     float clearColor[3];
@@ -295,6 +336,23 @@ bool MicroFxSceneSubmitTileMapTile(MicroFxScene *scene, int handle,
                                    size_t encodedSize);
 bool MicroFxSceneSetTileMapVisible(MicroFxScene *scene, int handle,
                                    bool visible);
+int MicroFxSceneAddGpuMapTexture(MicroFxScene *scene, int mapIndex);
+int MicroFxSceneAddGpuAssetTexture(MicroFxScene *scene, const char *assetPath);
+bool MicroFxSceneSetGpuTextureSecondaryMap(MicroFxScene *scene, int handle,
+                                           int mapIndex);
+bool MicroFxSceneSetGpuTextureSecondaryAsset(MicroFxScene *scene, int handle,
+                                             const char *assetPath);
+bool MicroFxSceneSetGpuTextureShader(MicroFxScene *scene, int handle,
+                                     const char *fragmentPath);
+bool MicroFxSceneSetGpuTextureParams(MicroFxScene *scene, int handle,
+                                     const float *params, int count);
+bool MicroFxSceneSetGpuTextureField(MicroFxScene *scene, int handle, int width,
+                                    int height, const uint8_t *rgba, size_t size);
+bool MicroFxSceneSetGpuTextureStage(MicroFxScene *scene, int handle,
+                                    MicroFxGpuTextureStage stage);
+bool MicroFxSceneSetGpuTextureBlend(MicroFxScene *scene, int handle, bool blend);
+bool MicroFxSceneSetGpuTextureOpacity(MicroFxScene *scene, int handle, float opacity);
+bool MicroFxSceneSetGpuTextureVisible(MicroFxScene *scene, int handle, bool visible);
 bool MicroFxSceneSetText(MicroFxScene *scene, int handle, const char *text);
 bool MicroFxSceneSetTextFont(MicroFxScene *scene, int handle,
                              const char *assetPath);
