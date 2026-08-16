@@ -1,7 +1,7 @@
 fx.configure({
   targetFps: 60,
   pixelDensity: 1,
-  debugBar: 600,
+  debugBar: 2,
   debugBarStyle: "compact"
 });
 
