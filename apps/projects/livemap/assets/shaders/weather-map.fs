@@ -24,7 +24,20 @@ void main() {
     lowp float warmSignal = max(0.0,
         min(nightSource.r, nightSource.g) - nightSource.b * 0.45);
     lowp float lightSignal = smoothstep(0.025, 0.32, warmSignal);
-    lowp float light = lightSignal * lightSignal * paleSurface * 1.38;
+    lowp float roofHue = day.r - max(day.g, day.b);
+    lowp float redRoof = smoothstep(0.12, 0.38, roofHue) *
+        (1.0 - smoothstep(0.45, 0.75, day.g)) *
+        (1.0 - smoothstep(0.45, 0.75, day.b));
+    lowp vec2 edgeStep = vec2(1.0 / 1920.0, 1.0 / 1080.0);
+    lowp float dayLeft = texture2D(uTexture2, vUv + vec2(-edgeStep.x, 0.0)).r;
+    lowp float dayRight = texture2D(uTexture2, vUv + vec2(edgeStep.x, 0.0)).r;
+    lowp float dayDown = texture2D(uTexture2, vUv + vec2(0.0, -edgeStep.y)).r;
+    lowp float dayUp = texture2D(uTexture2, vUv + vec2(0.0, edgeStep.y)).r;
+    lowp float edgeSignal = abs(dayLeft - dayRight) + abs(dayDown - dayUp);
+    lowp float edge = smoothstep(0.018, 0.10, edgeSignal) * (0.2 + 0.8 * paleSurface);
+    lowp float light = lightSignal * lightSignal * paleSurface * 1.18 +
+        redRoof * lightSignal * 0.20 +
+        edge * lightSignal * 0.30;
     lowp vec3 darkBase = max((dark - vec3(0.035)) * 0.90, vec3(0.0));
     lowp float roadBrightness = dot(dark, vec3(0.299, 0.587, 0.114));
     lowp float litRoad = smoothstep(0.13, 0.42, roadBrightness) * lightSignal;
